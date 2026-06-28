@@ -7,25 +7,25 @@ import {
   nodeTypeColor,
   nodeTypeLabel,
   parseRoadmapGraph,
-  toReagraphEdges,
+  toReagraphLinks,
   toReagraphNodes,
 } from "./graph";
 
 describe("parseRoadmapGraph", () => {
   const graph = parseRoadmapGraph("/example", registry, links);
 
-  it("parses example fixture nodes and edges", () => {
+  it("parses example fixture nodes and links", () => {
     expect(graph.nodes).toHaveLength(6);
-    expect(graph.edges).toHaveLength(2);
+    expect(graph.links).toHaveLength(2);
   });
 
-  it("maps precedence edge direction from in to out", () => {
-    const edge = graph.edges.find(
+  it("maps precedence link direction from in to out", () => {
+    const link = graph.links.find(
       (item) => item.linkType === "precedes_FS_Mandatory",
     );
-    expect(edge).toBeDefined();
-    expect(edge?.source).toBe("billing-redesign--wp-invoicing");
-    expect(edge?.target).toBe("billing-redesign--wp-pdf-export");
+    expect(link).toBeDefined();
+    expect(link?.source).toBe("billing-redesign--wp-invoicing");
+    expect(link?.target).toBe("billing-redesign--wp-pdf-export");
   });
 
   it("maps node labels from qualified ids", () => {
@@ -41,16 +41,16 @@ describe("parseRoadmapGraph", () => {
     expect(nodeTypeColor("unknown")).toBe("#64748b");
   });
 
-  it("converts to ReaGraph node and edge shapes", () => {
+  it("converts to ReaGraph node and link shapes", () => {
     const reagraphNodes = toReagraphNodes(graph.nodes);
-    const reagraphEdges = toReagraphEdges(graph.edges);
+    const reagraphLinks = toReagraphLinks(graph.links);
 
     expect(reagraphNodes[0]).toMatchObject({
       id: expect.any(String),
       label: expect.any(String),
       fill: expect.any(String),
     });
-    expect(reagraphEdges[0]).toMatchObject({
+    expect(reagraphLinks[0]).toMatchObject({
       id: expect.any(String),
       source: expect.any(String),
       target: expect.any(String),

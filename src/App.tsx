@@ -1,26 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CreateEdgeDialog } from "./components/CreateEdgeDialog";
-import { CreateVertexDialog } from "./components/CreateVertexDialog";
+import { CreateLinkDialog } from "./components/CreateLinkDialog";
+import { CreateNodeDialog } from "./components/CreateNodeDialog";
 import { RoadmapGraph as RoadmapGraphView } from "./components/RoadmapGraph";
-import { VertexTypeLegend } from "./components/VertexTypeLegend";
+import { NodeTypeLegend } from "./components/NodeTypeLegend";
 import exampleRegistry from "./fixtures/example-roadmap/.fits/registry.json";
 import exampleLinks from "./fixtures/example-roadmap/links/links.json";
 import {
   findAddedNodeId,
   fromRoadmapGraphDto,
   parseRoadmapGraph,
-  toReagraphEdges,
+  toReagraphLinks,
   toReagraphNodes,
-  type GraphEdge,
+  type GraphLink,
   type GraphNode,
   type LinkTypeMeta,
   type RoadmapGraph,
   type RoadmapGraphDto,
-  type VertexKind,
+  type NodeKind,
 } from "./lib/graph";
-import { createEdge, createVertex } from "./lib/roadmap-api";
+import { createLink, createNode } from "./lib/roadmap-api";
 import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
@@ -30,13 +30,13 @@ function App() {
   const [editable, setEditable] = useState(exampleGraph.editable);
   const [linkTypes, setLinkTypes] = useState<LinkTypeMeta[]>(exampleGraph.linkTypes);
   const [nodes, setNodes] = useState<GraphNode[]>(exampleGraph.nodes);
-  const [edges, setEdges] = useState<GraphEdge[]>(exampleGraph.edges);
+  const [links, setLinks] = useState<GraphLink[]>(exampleGraph.links);
   const [error, setError] = useState<string | null>(null);
   const [sidecarVersion, setSidecarVersion] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [vertexDialogOpen, setVertexDialogOpen] = useState(false);
-  const [edgeDialogOpen, setEdgeDialogOpen] = useState(false);
+  const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(
     () => new Set(exampleGraph.nodes.map((node) => node.type)),
   );
@@ -52,7 +52,7 @@ function App() {
     setEditable(graph.editable);
     setLinkTypes(graph.linkTypes);
     setNodes(graph.nodes);
-    setEdges(graph.edges);
+    setLinks(graph.links);
     if (options.resetVisibleTypes) {
       setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
       setFocusNodeId(null);
@@ -91,9 +91,9 @@ function App() {
     }
   }, [applyGraph]);
 
-  const handleCreateVertex = useCallback(
+  const handleCreateNode = useCallback(
     async (input: {
-      vertexKind: VertexKind;
+      nodeKind: NodeKind;
       name: string;
       project?: string;
       description?: string;
@@ -103,16 +103,16 @@ function App() {
 
       try {
         const previousNodes = nodes;
-        const graph = await createVertex({
+        const graph = await createNode({
           roadmap_root: roadmapRoot,
-          vertex_kind: input.vertexKind,
+          node_kind: input.nodeKind,
           name: input.name,
           project: input.project,
           description: input.description,
         });
         const revealNodeId = findAddedNodeId(previousNodes, graph.nodes);
         applyGraph(graph, revealNodeId ? { revealNodeId } : undefined);
-        setVertexDialogOpen(false);
+        setNodeDialogOpen(false);
       } catch (caught) {
         setError(String(caught));
       } finally {
@@ -122,20 +122,20 @@ function App() {
     [applyGraph, nodes, roadmapRoot],
   );
 
-  const handleCreateEdge = useCallback(
+  const handleCreateLink = useCallback(
     async (input: { linkType: string; source: string; target: string }) => {
       setSaving(true);
       setError(null);
 
       try {
-        const graph = await createEdge({
+        const graph = await createLink({
           roadmap_root: roadmapRoot,
           link_type: input.linkType,
           source: input.source,
           target: input.target,
         });
         applyGraph(graph);
-        setEdgeDialogOpen(false);
+        setLinkDialogOpen(false);
       } catch (caught) {
         setError(String(caught));
       } finally {
@@ -190,16 +190,16 @@ function App() {
     [filteredNodes],
   );
 
-  const filteredEdges = useMemo(
+  const filteredLinks = useMemo(
     () =>
-      edges.filter(
-        (edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target),
+      links.filter(
+        (link) => visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target),
       ),
-    [edges, visibleNodeIds],
+    [links, visibleNodeIds],
   );
 
   const reagraphNodes = useMemo(() => toReagraphNodes(filteredNodes), [filteredNodes]);
-  const reagraphEdges = useMemo(() => toReagraphEdges(filteredEdges), [filteredEdges]);
+  const reagraphLinks = useMemo(() => toReagraphLinks(filteredLinks), [filteredLinks]);
 
   const handleToggleType = useCallback((type: string) => {
     setVisibleTypes((current) => {
@@ -226,27 +226,27 @@ function App() {
           ) : null}
           <button
             type="button"
-            onClick={() => setVertexDialogOpen(true)}
+            onClick={() => setNodeDialogOpen(true)}
             disabled={!editable || saving}
             title={
               editable
-                ? "Create a new vertex"
+                ? "Create a new node"
                 : "Open a roadmap folder on disk to edit the graph"
             }
           >
-            New vertex…
+            New node…
           </button>
           <button
             type="button"
-            onClick={() => setEdgeDialogOpen(true)}
+            onClick={() => setLinkDialogOpen(true)}
             disabled={!editable || saving || nodes.length < 2}
             title={
               editable
-                ? "Create a new edge"
+                ? "Create a new link"
                 : "Open a roadmap folder on disk to edit the graph"
             }
           >
-            New edge…
+            New link…
           </button>
           <button type="button" onClick={() => void handleOpenRoadmap()} disabled={opening}>
             {opening ? "Opening…" : "Open roadmap…"}
@@ -256,41 +256,41 @@ function App() {
       {error ? <div className="error-banner">{error}</div> : null}
       {!editable ? (
         <div className="info-banner">
-          The bundled example graph is read-only. Open a roadmap folder to create vertices and
-          edges.
+          The bundled example graph is read-only. Open a roadmap folder to create nodes and
+          links.
         </div>
       ) : null}
       <div className="graph-area">
         <RoadmapGraphView
           nodes={reagraphNodes}
-          edges={reagraphEdges}
+          links={reagraphLinks}
           focusNodeId={focusNodeId}
           emptyMessage={
             nodes.length === 0
               ? "Open a bellman roadmap folder to view its graph."
-              : "Select at least one vertex type to display."
+              : "Select at least one node type to display."
           }
         />
-        <VertexTypeLegend
+        <NodeTypeLegend
           types={nodeTypes}
           visibleTypes={visibleTypes}
           onToggleType={handleToggleType}
         />
       </div>
-      <CreateVertexDialog
-        open={vertexDialogOpen}
+      <CreateNodeDialog
+        open={nodeDialogOpen}
         nodes={nodes}
         saving={saving}
-        onClose={() => setVertexDialogOpen(false)}
-        onCreate={(input) => void handleCreateVertex(input)}
+        onClose={() => setNodeDialogOpen(false)}
+        onCreate={(input) => void handleCreateNode(input)}
       />
-      <CreateEdgeDialog
-        open={edgeDialogOpen}
+      <CreateLinkDialog
+        open={linkDialogOpen}
         nodes={nodes}
         linkTypes={linkTypes}
         saving={saving}
-        onClose={() => setEdgeDialogOpen(false)}
-        onCreate={(input) => void handleCreateEdge(input)}
+        onClose={() => setLinkDialogOpen(false)}
+        onCreate={(input) => void handleCreateLink(input)}
       />
     </main>
   );

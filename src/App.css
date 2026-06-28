@@ -129,7 +129,7 @@ body {
   color: #94a3b8;
 }
 
-.vertex-legend {
+.node-legend {
   position: absolute;
   left: 1rem;
   bottom: 1rem;
@@ -142,7 +142,7 @@ body {
   backdrop-filter: blur(4px);
 }
 
-.vertex-legend-title {
+.node-legend-title {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -151,13 +151,13 @@ body {
   color: #94a3b8;
 }
 
-.vertex-legend-list {
+.node-legend-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.vertex-legend-item {
+.node-legend-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -166,16 +166,16 @@ body {
   user-select: none;
 }
 
-.vertex-legend-item-hidden {
+.node-legend-item-hidden {
   opacity: 0.55;
 }
 
-.vertex-legend-item input {
+.node-legend-item input {
   margin: 0;
   accent-color: #3b82f6;
 }
 
-.vertex-legend-swatch {
+.node-legend-swatch {
   flex-shrink: 0;
   width: 0.75rem;
   height: 0.75rem;
@@ -183,7 +183,7 @@ body {
   border: 1px solid rgb(255 255 255 / 0.2);
 }
 
-.vertex-legend-label {
+.node-legend-label {
   font-size: 0.875rem;
 }
 

@@ -235,7 +235,7 @@ async fn run_bellman_for_request(app: &AppHandle, args: &[&str]) -> Result<Strin
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum VertexKind {
+pub enum NodeKind {
     Initiative,
     Project,
     Milestone,
@@ -244,15 +244,15 @@ pub enum VertexKind {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateVertexRequest {
+pub struct CreateNodeRequest {
     pub roadmap_root: String,
-    pub vertex_kind: VertexKind,
+    pub node_kind: NodeKind,
     pub name: String,
     pub project: Option<String>,
     pub description: Option<String>,
 }
 
-pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Result<(), String> {
+pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<(), String> {
     let root = PathBuf::from(&request.roadmap_root);
     if !registry_path(&root).is_file() {
         return Err(format!(
@@ -261,8 +261,8 @@ pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Res
         ));
     }
 
-    match request.vertex_kind {
-        VertexKind::Initiative => {
+    match request.node_kind {
+        NodeKind::Initiative => {
             run_bellman_for_request(
                 app,
                 &[
@@ -275,7 +275,7 @@ pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Res
             )
             .await?;
         }
-        VertexKind::Project => {
+        NodeKind::Project => {
             run_bellman_for_request(
                 app,
                 &[
@@ -288,7 +288,7 @@ pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Res
             )
             .await?;
         }
-        VertexKind::Milestone => {
+        NodeKind::Milestone => {
             run_bellman_for_request(
                 app,
                 &[
@@ -301,7 +301,7 @@ pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Res
             )
             .await?;
         }
-        VertexKind::Goal => {
+        NodeKind::Goal => {
             run_bellman_for_request(
                 app,
                 &[
@@ -314,7 +314,7 @@ pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Res
             )
             .await?;
         }
-        VertexKind::WorkPackage => {
+        NodeKind::WorkPackage => {
             let project = request
                 .project
                 .ok_or_else(|| "project is required for work packages".to_string())?;
@@ -331,14 +331,14 @@ pub async fn create_vertex(app: &AppHandle, request: CreateVertexRequest) -> Res
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateEdgeRequest {
+pub struct CreateLinkRequest {
     pub roadmap_root: String,
     pub link_type: String,
     pub source: String,
     pub target: String,
 }
 
-pub async fn create_edge(request: CreateEdgeRequest) -> Result<(), String> {
+pub async fn create_link(request: CreateLinkRequest) -> Result<(), String> {
     let root = PathBuf::from(&request.roadmap_root);
     if !registry_path(&root).is_file() {
         return Err(format!(

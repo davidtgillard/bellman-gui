@@ -30,7 +30,7 @@ export interface RoadmapGraph {
   root: string;
   editable: boolean;
   nodes: GraphNode[];
-  edges: GraphEdge[];
+  links: GraphLink[];
   linkTypes: LinkTypeMeta[];
 }
 
@@ -39,21 +39,21 @@ export interface GraphNode {
   type: string;
 }
 
-export interface GraphEdge {
+export interface GraphLink {
   id: string;
   linkType: string;
   source: string;
   target: string;
 }
 
-export type VertexKind =
+export type NodeKind =
   | "initiative"
   | "project"
   | "milestone"
   | "goal"
   | "work_package";
 
-export const VERTEX_KINDS: VertexKind[] = [
+export const NODE_KINDS: NodeKind[] = [
   "initiative",
   "project",
   "milestone",
@@ -61,15 +61,15 @@ export const VERTEX_KINDS: VertexKind[] = [
   "work_package",
 ];
 
-export interface CreateVertexRequest {
+export interface CreateNodeRequest {
   roadmap_root: string;
-  vertex_kind: VertexKind;
+  node_kind: NodeKind;
   name: string;
   project?: string;
   description?: string;
 }
 
-export interface CreateEdgeRequest {
+export interface CreateLinkRequest {
   roadmap_root: string;
   link_type: string;
   source: string;
@@ -80,7 +80,7 @@ export interface RoadmapGraphDto {
   root: string;
   editable: boolean;
   nodes: GraphNode[];
-  edges: Array<{
+  links: Array<{
     id: string;
     link_type: string;
     source: string;
@@ -92,18 +92,18 @@ export interface RoadmapGraphDto {
 /**
  * Converts a Tauri IPC roadmap graph payload into the in-app graph model.
  * @param dto - Serialized graph returned by the backend.
- * @returns Normalized roadmap graph with camelCase edge fields.
+ * @returns Normalized roadmap graph with camelCase link fields.
  */
 export function fromRoadmapGraphDto(dto: RoadmapGraphDto): RoadmapGraph {
   return {
     root: dto.root,
     editable: dto.editable,
     nodes: dto.nodes,
-    edges: dto.edges.map((edge) => ({
-      id: edge.id,
-      linkType: edge.link_type,
-      source: edge.source,
-      target: edge.target,
+    links: dto.links.map((link) => ({
+      id: link.id,
+      linkType: link.link_type,
+      source: link.source,
+      target: link.target,
     })),
     linkTypes: dto.link_types,
   };
@@ -170,7 +170,7 @@ export function nodeLabel(nodeId: string): string {
  * @param root - Roadmap root path or display name.
  * @param registry - Parsed `.fits/registry.json` contents.
  * @param links - Parsed `links/links.jsonc` contents.
- * @returns Graph containing node instances and directed edges.
+ * @returns Graph containing node instances and directed links.
  */
 export function parseRoadmapGraph(
   root: string,
@@ -184,7 +184,7 @@ export function parseRoadmapGraph(
       type: instance.type,
     }));
 
-  const edges = links.links.map((link) => ({
+  const graphLinks = links.links.map((link) => ({
     id: link.id,
     linkType: link.link_type,
     source: link.in,
@@ -195,7 +195,7 @@ export function parseRoadmapGraph(
     root,
     editable: false,
     nodes,
-    edges,
+    links: graphLinks,
     linkTypes: registry.link_types ?? [],
   };
 }
@@ -215,16 +215,16 @@ export function toReagraphNodes(nodes: GraphNode[]) {
 }
 
 /**
- * Maps graph edges to the shape expected by Reagraph.
- * @param edges - Roadmap graph edges.
+ * Maps graph links to the shape expected by Reagraph.
+ * @param links - Roadmap graph links.
  * @returns Reagraph edge objects preserving source, target, and link type.
  */
-export function toReagraphEdges(edges: GraphEdge[]) {
-  return edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.linkType,
+export function toReagraphLinks(links: GraphLink[]) {
+  return links.map((link) => ({
+    id: link.id,
+    source: link.source,
+    target: link.target,
+    label: link.linkType,
   }));
 }
 

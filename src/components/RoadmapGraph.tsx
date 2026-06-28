@@ -7,7 +7,7 @@ interface ReagraphNode {
   fill?: string;
 }
 
-interface ReagraphEdge {
+interface ReagraphLink {
   id: string;
   source: string;
   target: string;
@@ -16,7 +16,7 @@ interface ReagraphEdge {
 
 interface RoadmapGraphProps {
   nodes: ReagraphNode[];
-  edges: ReagraphEdge[];
+  links: ReagraphLink[];
   emptyMessage?: string;
   focusNodeId?: string | null;
 }
@@ -32,7 +32,7 @@ function focusGraphOnNode(
 
 export function RoadmapGraph({
   nodes,
-  edges,
+  links,
   emptyMessage = "Open a bellman roadmap folder to view its graph.",
   focusNodeId = null,
 }: RoadmapGraphProps) {
@@ -65,7 +65,7 @@ export function RoadmapGraph({
           <GraphCanvas
             ref={graphRef}
             nodes={nodes}
-            edges={edges}
+            edges={links}
             layoutType="forceDirected2d"
             labelType="all"
             animated

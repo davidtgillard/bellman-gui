@@ -65,12 +65,12 @@ cargo run --manifest-path src-tauri/Cargo.toml -- /path/to/roadmap
 ./src-tauri/target/debug/bellman-gui /path/to/roadmap
 ```
 3. Click **Open roadmap…** (toolbar), use **File → Open Roadmap…**, or press **Ctrl+O** / **Cmd+O** and select a bellman roadmap root directory.
-4. Pan, zoom, and click nodes to explore connections (parent/child and precedence edges).
+4. Pan, zoom, and click nodes to explore connections (parent/child and precedence links).
 
 Roadmap data is read from:
 
 - `.fits/registry.json` — node instances and types
-- `links/links.jsonc` — directed edges between nodes
+- `links/links.jsonc` — directed links between nodes
 
 Run `bellman init` and `bellman sync` in your roadmap repo before opening it here if the graph artifacts are missing.
 

@@ -6,7 +6,7 @@ mod roadmap_edit;
 use bellman_cmd::run_bellman;
 use cli::CliOptions;
 use graph::load_roadmap_graph;
-use roadmap_edit::{create_edge, create_vertex, CreateEdgeRequest, CreateVertexRequest};
+use roadmap_edit::{create_link, create_node, CreateLinkRequest, CreateNodeRequest};
 use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter};
@@ -42,21 +42,21 @@ async fn pick_and_load_roadmap(app: tauri::AppHandle) -> Result<Option<graph::Ro
 }
 
 #[tauri::command]
-async fn create_vertex_command(
+async fn create_node_command(
     app: tauri::AppHandle,
-    request: CreateVertexRequest,
+    request: CreateNodeRequest,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
-    create_vertex(&app, request).await?;
+    create_node(&app, request).await?;
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
 
 #[tauri::command]
-async fn create_edge_command(
-    request: CreateEdgeRequest,
+async fn create_link_command(
+    request: CreateLinkRequest,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
-    create_edge(request).await?;
+    create_link(request).await?;
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
 
@@ -103,8 +103,8 @@ pub fn run() {
             load_initial_roadmap,
             pick_and_load_roadmap,
             bellman_version,
-            create_vertex_command,
-            create_edge_command,
+            create_node_command,
+            create_link_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

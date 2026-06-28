@@ -45,7 +45,7 @@ pub struct GraphNodeDto {
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub struct GraphEdgeDto {
+pub struct GraphLinkDto {
     pub id: String,
     pub link_type: String,
     pub source: String,
@@ -64,7 +64,7 @@ pub struct RoadmapGraphDto {
     pub root: String,
     pub editable: bool,
     pub nodes: Vec<GraphNodeDto>,
-    pub edges: Vec<GraphEdgeDto>,
+    pub links: Vec<GraphLinkDto>,
     pub link_types: Vec<LinkTypeDto>,
 }
 
@@ -120,10 +120,10 @@ pub fn load_roadmap_graph(root: &Path) -> Result<RoadmapGraphDto, String> {
         })
         .collect();
 
-    let edges = links
+    let links = links
         .links
         .iter()
-        .map(|link| GraphEdgeDto {
+        .map(|link| GraphLinkDto {
             id: link.id.clone(),
             link_type: link.link_type.clone(),
             source: link.source.clone(),
@@ -145,7 +145,7 @@ pub fn load_roadmap_graph(root: &Path) -> Result<RoadmapGraphDto, String> {
         root: root.to_string_lossy().into_owned(),
         editable: true,
         nodes,
-        edges,
+        links,
         link_types,
     })
 }
@@ -163,7 +163,7 @@ mod tests {
     fn loads_example_fixture() {
         let graph = load_roadmap_graph(&fixture_root()).expect("fixture should load");
         assert_eq!(graph.nodes.len(), 6);
-        assert_eq!(graph.edges.len(), 2);
+        assert_eq!(graph.links.len(), 2);
         assert!(graph.editable);
         assert!(!graph.link_types.is_empty());
     }
