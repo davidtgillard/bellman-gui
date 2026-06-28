@@ -66,13 +66,34 @@ export function fromRoadmapGraphDto(dto: RoadmapGraphDto): RoadmapGraph {
   };
 }
 
-const NODE_COLORS: Record<string, string> = {
+export const NODE_TYPE_COLORS: Record<string, string> = {
   initiative: "#3b82f6",
   project: "#22c55e",
   work_package: "#94a3b8",
   milestone: "#f97316",
   goal: "#a855f7",
 };
+
+const DEFAULT_NODE_COLOR = "#64748b";
+
+/**
+ * Returns the display color for a node type.
+ * @param type - Registry node type identifier.
+ */
+export function nodeTypeColor(type: string): string {
+  return NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR;
+}
+
+/**
+ * Converts a registry node type id to a human-readable label.
+ * @param type - Registry node type identifier.
+ */
+export function nodeTypeLabel(type: string): string {
+  return type
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 const QUALIFIED_PREFIXES = [
   "initiative--",
@@ -137,7 +158,7 @@ export function toReagraphNodes(nodes: GraphNode[]) {
   return nodes.map((node) => ({
     id: node.id,
     label: nodeLabel(node.id),
-    fill: NODE_COLORS[node.type] ?? "#64748b",
+    fill: nodeTypeColor(node.type),
     data: { type: node.type },
   }));
 }

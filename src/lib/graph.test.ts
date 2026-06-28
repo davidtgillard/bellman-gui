@@ -3,6 +3,8 @@ import registry from "../fixtures/example-roadmap/.fits/registry.json";
 import links from "../fixtures/example-roadmap/links/links.json";
 import {
   nodeLabel,
+  nodeTypeColor,
+  nodeTypeLabel,
   parseRoadmapGraph,
   toReagraphEdges,
   toReagraphNodes,
@@ -30,6 +32,12 @@ describe("parseRoadmapGraph", () => {
       "explore-ml-ranking",
     );
     expect(nodeLabel("billing-redesign--wp-invoicing")).toBe("wp-invoicing");
+  });
+
+  it("maps node type labels and colors", () => {
+    expect(nodeTypeLabel("work_package")).toBe("Work Package");
+    expect(nodeTypeColor("initiative")).toBe("#3b82f6");
+    expect(nodeTypeColor("unknown")).toBe("#64748b");
   });
 
   it("converts to ReaGraph node and edge shapes", () => {

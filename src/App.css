@@ -91,9 +91,16 @@ body {
   z-index: 10;
 }
 
+.graph-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
 .graph-container,
 .graph-empty {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   min-height: 0;
 }
 
@@ -111,4 +118,62 @@ body {
   display: grid;
   place-items: center;
   color: #94a3b8;
+}
+
+.vertex-legend {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 5;
+  min-width: 11rem;
+  padding: 0.75rem;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  background: rgb(17 24 39 / 0.92);
+  backdrop-filter: blur(4px);
+}
+
+.vertex-legend-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.vertex-legend-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vertex-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.vertex-legend-item-hidden {
+  opacity: 0.55;
+}
+
+.vertex-legend-item input {
+  margin: 0;
+  accent-color: #3b82f6;
+}
+
+.vertex-legend-swatch {
+  flex-shrink: 0;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  border: 1px solid rgb(255 255 255 / 0.2);
+}
+
+.vertex-legend-label {
+  font-size: 0.875rem;
 }

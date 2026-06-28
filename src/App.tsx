@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RoadmapGraph } from "./components/RoadmapGraph";
+import { VertexTypeLegend } from "./components/VertexTypeLegend";
 import exampleRegistry from "./fixtures/example-roadmap/.fits/registry.json";
 import exampleLinks from "./fixtures/example-roadmap/links/links.json";
 import {
@@ -24,11 +25,15 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [sidecarVersion, setSidecarVersion] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(
+    () => new Set(exampleGraph.nodes.map((node) => node.type)),
+  );
 
   const applyGraph = useCallback((graph: ReturnType<typeof parseRoadmapGraph>) => {
     setRoadmapRoot(graph.root);
     setNodes(graph.nodes);
     setEdges(graph.edges);
+    setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
     setError(null);
   }, []);
 
@@ -68,8 +73,43 @@ function App() {
     };
   }, [handleOpenRoadmap]);
 
-  const reagraphNodes = useMemo(() => toReagraphNodes(nodes), [nodes]);
-  const reagraphEdges = useMemo(() => toReagraphEdges(edges), [edges]);
+  const nodeTypes = useMemo(
+    () => [...new Set(nodes.map((node) => node.type))].sort(),
+    [nodes],
+  );
+
+  const filteredNodes = useMemo(
+    () => nodes.filter((node) => visibleTypes.has(node.type)),
+    [nodes, visibleTypes],
+  );
+
+  const visibleNodeIds = useMemo(
+    () => new Set(filteredNodes.map((node) => node.id)),
+    [filteredNodes],
+  );
+
+  const filteredEdges = useMemo(
+    () =>
+      edges.filter(
+        (edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target),
+      ),
+    [edges, visibleNodeIds],
+  );
+
+  const reagraphNodes = useMemo(() => toReagraphNodes(filteredNodes), [filteredNodes]);
+  const reagraphEdges = useMemo(() => toReagraphEdges(filteredEdges), [filteredEdges]);
+
+  const handleToggleType = useCallback((type: string) => {
+    setVisibleTypes((current) => {
+      const next = new Set(current);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <main className="app-shell">
@@ -88,7 +128,22 @@ function App() {
         </div>
       </header>
       {error ? <div className="error-banner">{error}</div> : null}
-      <RoadmapGraph nodes={reagraphNodes} edges={reagraphEdges} />
+      <div className="graph-area">
+        <RoadmapGraph
+          nodes={reagraphNodes}
+          edges={reagraphEdges}
+          emptyMessage={
+            nodes.length === 0
+              ? "Open a bellman roadmap folder to view its graph."
+              : "Select at least one vertex type to display."
+          }
+        />
+        <VertexTypeLegend
+          types={nodeTypes}
+          visibleTypes={visibleTypes}
+          onToggleType={handleToggleType}
+        />
+      </div>
     </main>
   );
 }
