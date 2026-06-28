@@ -8,7 +8,10 @@ use bellman_cmd::run_bellman;
 use cli::CliOptions;
 use graph::load_roadmap_graph;
 use node_detail::load_node_detail_command;
-use roadmap_edit::{create_link, create_node, CreateLinkRequest, CreateNodeRequest};
+use roadmap_edit::{
+    create_link, create_node, remove_link, remove_node, CreateLinkRequest, CreateNodeRequest,
+    RemoveLinkRequest, RemoveNodeRequest,
+};
 use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter};
@@ -63,6 +66,25 @@ async fn create_link_command(
 }
 
 #[tauri::command]
+async fn remove_link_command(
+    request: RemoveLinkRequest,
+) -> Result<graph::RoadmapGraphDto, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    remove_link(request).await?;
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+async fn remove_node_command(
+    app: tauri::AppHandle,
+    request: RemoveNodeRequest,
+) -> Result<graph::RoadmapGraphDto, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    remove_node(&app, request).await?;
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
 async fn bellman_version(app: tauri::AppHandle) -> Result<String, String> {
     run_bellman(&app, &["version"]).await
 }
@@ -107,6 +129,8 @@ pub fn run() {
             bellman_version,
             create_node_command,
             create_link_command,
+            remove_link_command,
+            remove_node_command,
             load_node_detail_command,
         ])
         .run(tauri::generate_context!())

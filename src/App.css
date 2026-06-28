@@ -175,6 +175,14 @@ body {
   background: #334155;
 }
 
+.graph-context-menu-destructive {
+  color: #fca5a5;
+}
+
+.graph-context-menu-destructive:hover {
+  background: #7f1d1d;
+}
+
 .node-detail-sidebar {
   display: flex;
   flex-direction: column;

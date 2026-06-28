@@ -166,6 +166,37 @@ pub fn append_link(
     Ok(())
 }
 
+pub fn remove_link_record(root: &Path, link_id: &str) -> Result<(), String> {
+    let links_file = links_path(root).ok_or_else(|| {
+        format!(
+            "not a bellman roadmap: missing links/links.jsonc or links/links.json under {}",
+            root.display()
+        )
+    })?;
+
+    let raw = fs::read_to_string(&links_file)
+        .map_err(|error| format!("failed to read {}: {error}", links_file.display()))?;
+    let mut document: JsonValue = serde_json::from_str(&raw)
+        .map_err(|error| format!("invalid links JSON in {}: {error}", links_file.display()))?;
+    let links = document
+        .get_mut("links")
+        .and_then(JsonValue::as_array_mut)
+        .ok_or_else(|| format!("links file missing links array in {}", links_file.display()))?;
+
+    let before = links.len();
+    links.retain(|link| link.get("id").and_then(JsonValue::as_str) != Some(link_id));
+    if links.len() == before {
+        return Err(format!("link not found: {link_id}"));
+    }
+
+    let formatted = serde_json::to_string_pretty(&document)
+        .map_err(|error| format!("failed to serialize links: {error}"))?;
+    fs::write(&links_file, format!("{formatted}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", links_file.display()))?;
+
+    Ok(())
+}
+
 fn work_packages_path(root: &Path, project: &str) -> PathBuf {
     root.join("projects").join(project).join("work-packages.yaml")
 }
@@ -227,6 +258,186 @@ pub fn append_work_package(
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
 
     Ok(())
+}
+
+pub fn remove_work_package(root: &Path, project: &str, title: &str) -> Result<(), String> {
+    let registry = read_registry(root)?;
+    let project_id = format!("project--{project}");
+    find_node(&registry, &project_id)?;
+
+    let path = work_packages_path(root, project);
+    if !path.is_file() {
+        return Err(format!(
+            "project {project:?} has no work-packages.yaml at {}",
+            path.display()
+        ));
+    }
+
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| format!("work-packages file missing work_packages list in {}", path.display()))?;
+
+    let before = work_packages.len();
+    work_packages.retain(|entry| {
+        entry
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("title")))
+            .and_then(YamlValue::as_str)
+            .is_none_or(|existing| existing != title)
+    });
+    if work_packages.len() == before {
+        return Err(format!("work package {title:?} not found in project {project:?}"));
+    }
+
+    for entry in work_packages.iter_mut() {
+        let Some(mapping) = entry.as_mapping_mut() else {
+            continue;
+        };
+        let Some(deps) = mapping
+            .get_mut(YamlValue::from("dependencies"))
+            .and_then(YamlValue::as_sequence_mut)
+        else {
+            continue;
+        };
+        deps.retain(|dep| dep.as_str().is_none_or(|value| value != title));
+    }
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    Ok(())
+}
+
+fn write_registry_document(root: &Path, document: &JsonValue) -> Result<(), String> {
+    let path = registry_path(root);
+    let formatted = serde_json::to_string_pretty(document)
+        .map_err(|error| format!("failed to serialize registry: {error}"))?;
+    fs::write(&path, format!("{formatted}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn link_record_references_node(link: &JsonValue, node_id: &str) -> bool {
+    link.get("in").and_then(JsonValue::as_str) == Some(node_id)
+        || link.get("out").and_then(JsonValue::as_str) == Some(node_id)
+}
+
+fn remove_links_for_node(root: &Path, node_id: &str) -> Result<Vec<String>, String> {
+    let links_file = links_path(root).ok_or_else(|| {
+        format!(
+            "not a bellman roadmap: missing links/links.jsonc or links/links.json under {}",
+            root.display()
+        )
+    })?;
+
+    let raw = fs::read_to_string(&links_file)
+        .map_err(|error| format!("failed to read {}: {error}", links_file.display()))?;
+    let mut document: JsonValue = serde_json::from_str(&raw)
+        .map_err(|error| format!("invalid links JSON in {}: {error}", links_file.display()))?;
+    let links = document
+        .get_mut("links")
+        .and_then(JsonValue::as_array_mut)
+        .ok_or_else(|| format!("links file missing links array in {}", links_file.display()))?;
+
+    let mut removed_ids = Vec::new();
+    links.retain(|link| {
+        if link_record_references_node(link, node_id) {
+            if let Some(id) = link.get("id").and_then(JsonValue::as_str) {
+                removed_ids.push(id.to_string());
+            }
+            false
+        } else {
+            true
+        }
+    });
+
+    let formatted = serde_json::to_string_pretty(&document)
+        .map_err(|error| format!("failed to serialize links: {error}"))?;
+    fs::write(&links_file, format!("{formatted}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", links_file.display()))?;
+
+    Ok(removed_ids)
+}
+
+fn remove_registry_node_record(
+    root: &Path,
+    node_id: &str,
+    removed_link_ids: &[String],
+) -> Result<(), String> {
+    let path = registry_path(root);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: JsonValue = serde_json::from_str(&raw)
+        .map_err(|error| format!("invalid registry JSON: {error}"))?;
+    let instances = document
+        .get_mut("instances")
+        .and_then(JsonValue::as_array_mut)
+        .ok_or_else(|| format!("registry missing instances array in {}", path.display()))?;
+
+    let removed_link_ids: std::collections::HashSet<&str> =
+        removed_link_ids.iter().map(String::as_str).collect();
+    let before = instances.len();
+    instances.retain(|instance| {
+        let id = instance.get("id").and_then(JsonValue::as_str).unwrap_or("");
+        let kind = instance.get("kind").and_then(JsonValue::as_str).unwrap_or("");
+        match kind {
+            "node" => id != node_id,
+            "link" => !removed_link_ids.contains(id),
+            _ => true,
+        }
+    });
+
+    if instances.len() == before {
+        return Err(format!("registry node {node_id:?} not found"));
+    }
+
+    write_registry_document(root, &document)
+}
+
+fn is_missing_entity_error(error: &str) -> bool {
+    error.contains("no entity named") || error.contains("no entity at")
+}
+
+fn remove_registry_only_node(root: &Path, node_id: &str) -> Result<(), String> {
+    let removed_link_ids = remove_links_for_node(root, node_id)?;
+    remove_registry_node_record(root, node_id, &removed_link_ids)
+}
+
+fn bellman_entity_name(node_id: &str, node_type: &str) -> String {
+    let prefix = format!("{node_type}--");
+    if node_id.starts_with(&prefix) {
+        node_id[prefix.len()..].to_string()
+    } else {
+        node_id.to_string()
+    }
+}
+
+fn node_delete_target(node_id: &str, node_type: &str) -> Result<(String, Option<String>), String> {
+    match node_type {
+        "initiative" | "project" | "milestone" | "goal" => {
+            Ok((bellman_entity_name(node_id, node_type), None))
+        }
+        "work_package" => {
+            let Some(separator) = node_id.find("--") else {
+                return Err(format!("invalid work package id {node_id:?}"));
+            };
+            let project = node_id[..separator].to_string();
+            let title = node_id[separator + 2..].to_string();
+            if project.is_empty() || title.is_empty() {
+                return Err(format!("invalid work package id {node_id:?}"));
+            }
+            Ok((title, Some(project)))
+        }
+        other => Err(format!("cannot delete node type {other:?}")),
+    }
 }
 
 async fn run_bellman_for_request(app: &AppHandle, args: &[&str]) -> Result<String, String> {
@@ -350,10 +561,83 @@ pub async fn create_link(request: CreateLinkRequest) -> Result<(), String> {
     append_link(&root, &request.link_type, &request.source, &request.target)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RemoveLinkRequest {
+    pub roadmap_root: String,
+    pub link_id: String,
+}
+
+pub async fn remove_link(request: RemoveLinkRequest) -> Result<(), String> {
+    let root = PathBuf::from(&request.roadmap_root);
+    if !registry_path(&root).is_file() {
+        return Err(format!(
+            "roadmap root is not editable: {}",
+            request.roadmap_root
+        ));
+    }
+
+    remove_link_record(&root, &request.link_id)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RemoveNodeRequest {
+    pub roadmap_root: String,
+    pub node_id: String,
+    pub node_type: String,
+}
+
+pub async fn remove_node(app: &AppHandle, request: RemoveNodeRequest) -> Result<(), String> {
+    let root = PathBuf::from(&request.roadmap_root);
+    if !registry_path(&root).is_file() {
+        return Err(format!(
+            "roadmap root is not editable: {}",
+            request.roadmap_root
+        ));
+    }
+
+    let registry = read_registry(&root)?;
+    find_node(&registry, &request.node_id)?;
+
+    let (name, project) = node_delete_target(&request.node_id, &request.node_type)?;
+
+    match request.node_type.as_str() {
+        "work_package" => {
+            let project = project
+                .ok_or_else(|| "project is required for work packages".to_string())?;
+            remove_work_package(&root, &project, &name)?;
+            run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
+        }
+        "initiative" | "project" | "milestone" | "goal" => {
+            let delete_result = run_bellman_for_request(
+                app,
+                &["delete", "--path", &request.roadmap_root, &name],
+            )
+            .await;
+
+            match delete_result {
+                Ok(_) => {}
+                Err(error) if is_missing_entity_error(&error) => {
+                    remove_registry_only_node(&root, &request.node_id)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        other => return Err(format!("cannot delete node type {other:?}")),
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    fn fixture_lock() -> MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn fixture_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/fixtures/example-roadmap")
@@ -361,6 +645,7 @@ mod tests {
 
     #[test]
     fn appends_link_to_fixture_links_file() {
+        let _guard = fixture_lock();
         let root = fixture_root();
         let links_file = links_path(&root).expect("fixture links file");
         let backup = fs::read_to_string(&links_file).expect("read links");
@@ -380,5 +665,47 @@ mod tests {
             .unwrap_err()
             .contains("link already exists"));
         assert_eq!(restored, backup);
+    }
+
+    #[test]
+    fn removes_link_from_fixture_links_file() {
+        let _guard = fixture_lock();
+        let root = fixture_root();
+        let links_file = links_path(&root).expect("fixture links file");
+        let backup = fs::read_to_string(&links_file).expect("read links");
+        let link_id = "parent_of--billing-redesign--wp-invoicing--billing-redesign--wp-pdf-export";
+
+        let result = remove_link_record(&root, link_id);
+        let after_delete = fs::read_to_string(&links_file).expect("read links after delete");
+        fs::write(&links_file, &backup).expect("restore links");
+
+        assert!(result.is_ok());
+        assert!(!after_delete.contains(link_id));
+    }
+
+    #[test]
+    fn remove_link_errors_when_missing() {
+        let _guard = fixture_lock();
+        let root = fixture_root();
+        let result = remove_link_record(&root, "missing-link-id");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("link not found"));
+    }
+
+    #[test]
+    fn bellman_entity_name_strips_type_prefix_when_present() {
+        assert_eq!(
+            bellman_entity_name("project--billing-redesign", "project"),
+            "billing-redesign"
+        );
+    }
+
+    #[test]
+    fn bellman_entity_name_keeps_legacy_ids() {
+        assert_eq!(bellman_entity_name("usv-lars-p2", "project"), "usv-lars-p2");
+        assert_eq!(
+            bellman_entity_name("settings-manager", "initiative"),
+            "settings-manager"
+        );
     }
 }

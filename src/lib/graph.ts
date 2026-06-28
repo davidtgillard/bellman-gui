@@ -76,6 +76,17 @@ export interface CreateLinkRequest {
   target: string;
 }
 
+export interface RemoveLinkRequest {
+  roadmap_root: string;
+  link_id: string;
+}
+
+export interface RemoveNodeRequest {
+  roadmap_root: string;
+  node_id: string;
+  node_type: string;
+}
+
 export interface RoadmapGraphDto {
   root: string;
   editable: boolean;
@@ -382,4 +393,34 @@ export function findAddedNodeId(
   const beforeIds = new Set(before.map((node) => node.id));
   const added = after.filter((node) => !beforeIds.has(node.id));
   return added.length === 1 ? added[0].id : null;
+}
+
+/**
+ * Returns graph data with a node and its incident links removed.
+ * @param nodes - Current roadmap nodes.
+ * @param links - Current roadmap links.
+ * @param nodeId - Node identifier to remove.
+ * @returns Updated nodes and links without the removed node.
+ */
+export function graphWithoutNode(
+  nodes: GraphNode[],
+  links: GraphLink[],
+  nodeId: string,
+): { nodes: GraphNode[]; links: GraphLink[] } {
+  return {
+    nodes: nodes.filter((node) => node.id !== nodeId),
+    links: links.filter(
+      (link) => link.source !== nodeId && link.target !== nodeId,
+    ),
+  };
+}
+
+/**
+ * Returns graph links with one link removed.
+ * @param links - Current roadmap links.
+ * @param linkId - Link identifier to remove.
+ * @returns Updated links without the removed link.
+ */
+export function graphWithoutLink(links: GraphLink[], linkId: string): GraphLink[] {
+  return links.filter((link) => link.id !== linkId);
 }

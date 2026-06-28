@@ -67,9 +67,15 @@ pub async fn run_bellman(app: &AppHandle, args: &[&str]) -> Result<String, Strin
         Ok(output) => Ok(output),
         Err(sidecar_error) => match run_path_bellman(app, args).await {
             Ok(output) => Ok(output),
-            Err(path_error) => Err(format!(
-                "{sidecar_error}. PATH fallback also failed: {path_error}. {SIDECAR_HINT}"
-            )),
+            Err(path_error) => {
+                if path_error.starts_with("failed to run bellman from PATH:") {
+                    Err(format!(
+                        "{sidecar_error}. PATH fallback also failed: {path_error}. {SIDECAR_HINT}"
+                    ))
+                } else {
+                    Err(path_error)
+                }
+            }
         },
     }
 }

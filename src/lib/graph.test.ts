@@ -3,6 +3,8 @@ import registry from "../fixtures/example-roadmap/.fits/registry.json";
 import links from "../fixtures/example-roadmap/links/links.json";
 import {
   findAddedNodeId,
+  graphWithoutLink,
+  graphWithoutNode,
   innerGraphForProject,
   nodeLabel,
   nodeTypeColor,
@@ -68,6 +70,18 @@ describe("parseRoadmapGraph", () => {
       { id: "goal--new-item", type: "goal" },
     ]);
     expect(added).toBe("goal--new-item");
+  });
+
+  it("removes a node and incident links from graph data", () => {
+    const withoutNode = graphWithoutNode(
+      graph.nodes,
+      graph.links,
+      "billing-redesign--wp-invoicing",
+    );
+    expect(withoutNode.nodes).toHaveLength(5);
+    expect(withoutNode.links).toHaveLength(0);
+
+    expect(graphWithoutLink(graph.links, graph.links[0].id)).toHaveLength(1);
   });
 
   it("excludes work packages from the top-level graph", () => {

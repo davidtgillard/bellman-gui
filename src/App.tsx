@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GraphNodeContextMenu } from "./components/GraphNodeContextMenu";
+import { GraphContextMenu } from "./components/GraphContextMenu";
 import { GraphViewBreadcrumb } from "./components/GraphViewBreadcrumb";
 import { NodeDetailSidebar } from "./components/NodeDetailSidebar";
 import { CreateLinkDialog } from "./components/CreateLinkDialog";
@@ -14,6 +14,8 @@ import exampleLinks from "./fixtures/example-roadmap/links/links.json";
 import {
   findAddedNodeId,
   fromRoadmapGraphDto,
+  graphWithoutLink,
+  graphWithoutNode,
   innerGraphForProject,
   parseRoadmapGraph,
   topLevelGraphNodes,
@@ -27,7 +29,7 @@ import {
   type RoadmapGraphDto,
   type NodeKind,
 } from "./lib/graph";
-import { createLink, createNode } from "./lib/roadmap-api";
+import { createLink, createNode, removeLink, removeNode } from "./lib/roadmap-api";
 import { loadNodeDetail, type NodeDetail } from "./lib/node-detail";
 import "./App.css";
 
@@ -169,6 +171,74 @@ function App() {
       }
     },
     [applyGraph, roadmapRoot],
+  );
+
+  const handleRemoveNode = useCallback(
+    async (nodeId: string, nodeType: string) => {
+      const snapshot = { nodes, links };
+      const optimistic = graphWithoutNode(nodes, links, nodeId);
+      setNodes(optimistic.nodes);
+      setLinks(optimistic.links);
+      setSaving(true);
+      setError(null);
+
+      if (selectedNodeId === nodeId) {
+        setNodeDetailOpen(false);
+        setSelectedNodeId(null);
+        setNodeDetail(null);
+        setNodeDetailError(null);
+        setNodeDetailLoading(false);
+      }
+      if (innerGraphProjectId === nodeId) {
+        setInnerGraphProjectId(null);
+      }
+
+      try {
+        const graph = await removeNode({
+          roadmap_root: roadmapRoot,
+          node_id: nodeId,
+          node_type: nodeType,
+        });
+        applyGraph(graph);
+      } catch (caught) {
+        setNodes(snapshot.nodes);
+        setLinks(snapshot.links);
+        setError(String(caught));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [
+      applyGraph,
+      innerGraphProjectId,
+      links,
+      nodes,
+      roadmapRoot,
+      selectedNodeId,
+    ],
+  );
+
+  const handleRemoveLink = useCallback(
+    async (linkId: string) => {
+      const snapshot = links;
+      setLinks(graphWithoutLink(links, linkId));
+      setSaving(true);
+      setError(null);
+
+      try {
+        const graph = await removeLink({
+          roadmap_root: roadmapRoot,
+          link_id: linkId,
+        });
+        applyGraph(graph);
+      } catch (caught) {
+        setLinks(snapshot);
+        setError(String(caught));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [applyGraph, links, roadmapRoot],
   );
 
   useEffect(() => {
@@ -316,28 +386,59 @@ function App() {
     setNodeDetailLoading(false);
   }, []);
 
-  const renderNodeContextMenu = useCallback(
+  const renderContextMenu = useCallback(
     (event: {
-      data: { id: string; data?: { type?: string } };
+      data: {
+        id: string;
+        source?: string;
+        target?: string;
+        data?: { type?: string };
+        position?: unknown;
+      };
       onClose: () => void;
     }) => {
-      if (innerGraphProjectId) {
-        return null;
+      const isEdge =
+        typeof event.data.source === "string" &&
+        typeof event.data.target === "string" &&
+        !("position" in event.data);
+
+      if (isEdge) {
+        if (!editable) {
+          return null;
+        }
+
+        return (
+          <GraphContextMenu
+            editable={editable}
+            linkId={event.data.id}
+            onRemoveLink={(linkId) => void handleRemoveLink(linkId)}
+            onClose={event.onClose}
+          />
+        );
       }
 
       const nodeType =
         typeof event.data.data?.type === "string" ? event.data.data.type : "";
 
       return (
-        <GraphNodeContextMenu
+        <GraphContextMenu
+          editable={editable}
           nodeId={event.data.id}
           nodeType={nodeType}
+          showInnerGraph={!innerGraphProjectId && nodeType === "project"}
           onShowInnerGraph={handleShowInnerGraph}
+          onRemoveNode={(nodeId, type) => void handleRemoveNode(nodeId, type)}
           onClose={event.onClose}
         />
       );
     },
-    [handleShowInnerGraph, innerGraphProjectId],
+    [
+      editable,
+      handleRemoveLink,
+      handleRemoveNode,
+      handleShowInnerGraph,
+      innerGraphProjectId,
+    ],
   );
 
   const innerGraphProjectLabel = innerGraphProjectId
@@ -441,7 +542,7 @@ function App() {
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}
-            contextMenu={renderNodeContextMenu}
+            contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
           />
           <NodeTypeLegend

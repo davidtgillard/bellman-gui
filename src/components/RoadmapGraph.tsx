@@ -22,7 +22,13 @@ interface RoadmapGraphProps {
   selectedNodeId?: string | null;
   onNodeClick?: (nodeId: string) => void;
   contextMenu?: (event: {
-    data: { id: string; data?: { type?: string } };
+    data: {
+      id: string;
+      source?: string;
+      target?: string;
+      data?: { type?: string };
+      position?: unknown;
+    };
     onClose: () => void;
   }) => ReactNode;
 }
@@ -77,7 +83,7 @@ export function RoadmapGraph({
             edges={links}
             layoutType="forceDirected2d"
             labelType="all"
-            animated
+            animated={false}
             selections={selectedNodeId ? [selectedNodeId] : []}
             onNodeClick={(node) => onNodeClick?.(node.id)}
             contextMenu={contextMenu}
