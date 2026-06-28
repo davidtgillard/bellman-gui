@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint .",
+    "type-check": "tsc",
     "lint:throws-diff": "bash scripts/check-throws-in-diff.sh",
     "tauri": "tauri"
   },

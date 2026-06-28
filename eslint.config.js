@@ -5,6 +5,7 @@ import tseslint from "@typescript-eslint/eslint-plugin";
 import tsparser from "@typescript-eslint/parser";
 import jsdoc from "eslint-plugin-jsdoc";
 import globals from "globals";
+import requireSwitchSatisfiesNever from "./eslint-rules/require-switch-satisfies-never.mjs";
 
 export default [
   js.configs.recommended,
@@ -26,6 +27,11 @@ export default [
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
       jsdoc,
+      local: {
+        rules: {
+          "require-switch-satisfies-never": requireSwitchSatisfiesNever,
+        },
+      },
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
@@ -46,6 +52,7 @@ export default [
         },
       ],
       "jsdoc/valid-types": "error",
+      "local/require-switch-satisfies-never": "error",
     },
   },
   {
@@ -84,6 +91,16 @@ export default [
       globals: {
         ...globals.node,
       },
+    },
+  },
+  {
+    files: ["eslint-rules/**/*.mjs"],
+    rules: {
+      "jsdoc/require-jsdoc": "off",
+      "jsdoc/check-tag-names": "off",
+      "jsdoc/no-types": "off",
+      "jsdoc/require-param-description": "off",
+      "jsdoc/require-returns": "off",
     },
   },
   {

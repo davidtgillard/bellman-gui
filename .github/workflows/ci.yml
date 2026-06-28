@@ -20,6 +20,7 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      - run: npm run type-check
       - run: npm run lint:throws-diff
       - run: npm run test
 
