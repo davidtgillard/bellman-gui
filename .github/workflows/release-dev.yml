@@ -30,8 +30,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Fetch bellman sidecar
-        run: bash packaging/fetch-bellman-sidecar.sh
+      - name: Prepare bellman sidecar
+        run: bash packaging/prepare-sidecar.sh
 
       - run: npm run tauri build -- --no-bundle
 

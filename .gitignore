@@ -25,3 +25,5 @@ src-tauri/binaries/bellman-*
 *.njsproj
 *.sln
 *.sw?
+
+humans-only/**

@@ -1,1 +1,1 @@
-# Sidecar binaries are downloaded by packaging/fetch-bellman-sidecar.sh
+# Sidecar binaries are created by packaging/prepare-sidecar.sh

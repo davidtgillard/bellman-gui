@@ -39,6 +39,9 @@ jobs:
       - name: Install Linux dependencies
         run: bash packaging/install-linux-deps.sh
 
+      - name: Prepare bellman sidecar
+        run: bash packaging/prepare-sidecar.sh
+
       - run: cargo test
         working-directory: src-tauri
 
@@ -67,7 +70,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Fetch bellman sidecar
-        run: bash packaging/fetch-bellman-sidecar.sh
+      - name: Prepare bellman sidecar
+        run: bash packaging/prepare-sidecar.sh
 
       - run: npm run tauri build -- --no-bundle

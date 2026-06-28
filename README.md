@@ -39,7 +39,7 @@ npm run tauri build   # Production build
 To build with the bundled bellman CLI sidecar:
 
 ```bash
-bash packaging/fetch-bellman-sidecar.sh
+bash packaging/prepare-sidecar.sh
 npm run tauri build
 bash packaging/bundle-portable.sh
 ```
