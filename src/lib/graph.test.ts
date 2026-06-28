@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import registry from "../fixtures/example-roadmap/.fits/registry.json";
 import links from "../fixtures/example-roadmap/links/links.json";
 import {
+  findAddedNodeId,
   nodeLabel,
   nodeTypeColor,
   nodeTypeLabel,
@@ -55,5 +56,13 @@ describe("parseRoadmapGraph", () => {
       target: expect.any(String),
       label: expect.any(String),
     });
+  });
+
+  it("finds a single added node id", () => {
+    const added = findAddedNodeId(graph.nodes, [
+      ...graph.nodes,
+      { id: "goal--new-item", type: "goal" },
+    ]);
+    expect(added).toBe("goal--new-item");
   });
 });

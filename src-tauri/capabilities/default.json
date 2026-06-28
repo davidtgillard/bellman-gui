@@ -16,6 +16,11 @@
         {
           "name": "binaries/bellman",
           "sidecar": true
+        },
+        {
+          "name": "bellman-path",
+          "cmd": "bellman",
+          "args": true
         }
       ]
     }

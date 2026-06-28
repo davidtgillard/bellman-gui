@@ -6,6 +6,13 @@ export interface RegistryInstance {
 
 export interface RegistryDocument {
   instances: RegistryInstance[];
+  link_types?: LinkTypeMeta[];
+}
+
+export interface LinkTypeMeta {
+  link_type: string;
+  in_type: string;
+  out_type: string;
 }
 
 export interface LinkRecord {
@@ -21,8 +28,10 @@ export interface LinksDocument {
 
 export interface RoadmapGraph {
   root: string;
+  editable: boolean;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  linkTypes: LinkTypeMeta[];
 }
 
 export interface GraphNode {
@@ -37,8 +46,39 @@ export interface GraphEdge {
   target: string;
 }
 
+export type VertexKind =
+  | "initiative"
+  | "project"
+  | "milestone"
+  | "goal"
+  | "work_package";
+
+export const VERTEX_KINDS: VertexKind[] = [
+  "initiative",
+  "project",
+  "milestone",
+  "goal",
+  "work_package",
+];
+
+export interface CreateVertexRequest {
+  roadmap_root: string;
+  vertex_kind: VertexKind;
+  name: string;
+  project?: string;
+  description?: string;
+}
+
+export interface CreateEdgeRequest {
+  roadmap_root: string;
+  link_type: string;
+  source: string;
+  target: string;
+}
+
 export interface RoadmapGraphDto {
   root: string;
+  editable: boolean;
   nodes: GraphNode[];
   edges: Array<{
     id: string;
@@ -46,6 +86,7 @@ export interface RoadmapGraphDto {
     source: string;
     target: string;
   }>;
+  link_types: LinkTypeMeta[];
 }
 
 /**
@@ -56,6 +97,7 @@ export interface RoadmapGraphDto {
 export function fromRoadmapGraphDto(dto: RoadmapGraphDto): RoadmapGraph {
   return {
     root: dto.root,
+    editable: dto.editable,
     nodes: dto.nodes,
     edges: dto.edges.map((edge) => ({
       id: edge.id,
@@ -63,6 +105,7 @@ export function fromRoadmapGraphDto(dto: RoadmapGraphDto): RoadmapGraph {
       source: edge.source,
       target: edge.target,
     })),
+    linkTypes: dto.link_types,
   };
 }
 
@@ -79,6 +122,7 @@ const DEFAULT_NODE_COLOR = "#64748b";
 /**
  * Returns the display color for a node type.
  * @param type - Registry node type identifier.
+ * @returns Hex color string for the node type.
  */
 export function nodeTypeColor(type: string): string {
   return NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR;
@@ -87,6 +131,7 @@ export function nodeTypeColor(type: string): string {
 /**
  * Converts a registry node type id to a human-readable label.
  * @param type - Registry node type identifier.
+ * @returns Human-readable label for the node type.
  */
 export function nodeTypeLabel(type: string): string {
   return type
@@ -146,7 +191,13 @@ export function parseRoadmapGraph(
     target: link.out,
   }));
 
-  return { root, nodes, edges };
+  return {
+    root,
+    editable: false,
+    nodes,
+    edges,
+    linkTypes: registry.link_types ?? [],
+  };
 }
 
 /**
@@ -175,4 +226,99 @@ export function toReagraphEdges(edges: GraphEdge[]) {
     target: edge.target,
     label: edge.linkType,
   }));
+}
+
+/**
+ * Returns whether a node type matches a link endpoint type from the registry.
+ * @param nodeType - Concrete node type from the registry.
+ * @param endpointType - Link endpoint type from the registry.
+ * @returns Whether the node type can participate in that endpoint.
+ */
+export function nodeMatchesLinkEndpoint(
+  nodeType: string,
+  endpointType: string,
+): boolean {
+  if (nodeType === endpointType) {
+    return true;
+  }
+  return (
+    endpointType === "work_scope" &&
+    (nodeType === "initiative" || nodeType === "project")
+  );
+}
+
+/**
+ * Filters link types valid for an ordered pair of node types.
+ * @param linkTypes - Link type metadata from the registry.
+ * @param sourceType - Source node type.
+ * @param targetType - Target node type.
+ * @returns Link types compatible with the selected endpoints.
+ */
+export function compatibleLinkTypes(
+  linkTypes: LinkTypeMeta[],
+  sourceType: string,
+  targetType: string,
+): LinkTypeMeta[] {
+  return linkTypes.filter(
+    (linkType) =>
+      nodeMatchesLinkEndpoint(sourceType, linkType.in_type) &&
+      nodeMatchesLinkEndpoint(targetType, linkType.out_type),
+  );
+}
+
+/**
+ * Filters nodes that can serve as the source endpoint for a link type.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @param linkType - Selected link type metadata.
+ * @returns Nodes compatible with the link type's source endpoint.
+ */
+export function compatibleSourceNodes(
+  nodes: GraphNode[],
+  linkType: LinkTypeMeta,
+): GraphNode[] {
+  return nodes.filter((node) =>
+    nodeMatchesLinkEndpoint(node.type, linkType.in_type),
+  );
+}
+
+/**
+ * Filters nodes that can serve as the target endpoint for a link type.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @param linkType - Selected link type metadata.
+ * @returns Nodes compatible with the link type's target endpoint.
+ */
+export function compatibleTargetNodes(
+  nodes: GraphNode[],
+  linkType: LinkTypeMeta,
+): GraphNode[] {
+  return nodes.filter((node) =>
+    nodeMatchesLinkEndpoint(node.type, linkType.out_type),
+  );
+}
+
+/**
+ * Lists project names derived from project node ids.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @returns Sorted project names for work-package creation.
+ */
+export function projectNames(nodes: GraphNode[]): string[] {
+  return nodes
+    .filter((node) => node.type === "project")
+    .map((node) => nodeLabel(node.id))
+    .sort();
+}
+
+/**
+ * Returns the id of a node present after an update but not before.
+ * @param before - Nodes before the graph update.
+ * @param after - Nodes after the graph update.
+ * @returns The added node id when exactly one node was added.
+ */
+export function findAddedNodeId(
+  before: GraphNode[],
+  after: GraphNode[],
+): string | null {
+  const beforeIds = new Set(before.map((node) => node.id));
+  const added = after.filter((node) => !beforeIds.has(node.id));
+  return added.length === 1 ? added[0].id : null;
 }

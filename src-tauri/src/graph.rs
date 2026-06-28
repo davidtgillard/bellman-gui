@@ -4,7 +4,15 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 struct RegistryDocument {
+    link_types: Vec<RegistryLinkType>,
     instances: Vec<RegistryInstance>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RegistryLinkType {
+    link_type: String,
+    in_type: String,
+    out_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,11 +52,20 @@ pub struct GraphEdgeDto {
     pub target: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct LinkTypeDto {
+    pub link_type: String,
+    pub in_type: String,
+    pub out_type: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct RoadmapGraphDto {
     pub root: String,
+    pub editable: bool,
     pub nodes: Vec<GraphNodeDto>,
     pub edges: Vec<GraphEdgeDto>,
+    pub link_types: Vec<LinkTypeDto>,
 }
 
 fn registry_path(root: &Path) -> PathBuf {
@@ -95,29 +112,41 @@ pub fn load_roadmap_graph(root: &Path) -> Result<RoadmapGraphDto, String> {
 
     let nodes = registry
         .instances
-        .into_iter()
+        .iter()
         .filter(|instance| instance.kind == "node")
         .map(|instance| GraphNodeDto {
-            id: instance.id,
-            node_type: instance.type_name,
+            id: instance.id.clone(),
+            node_type: instance.type_name.clone(),
         })
         .collect();
 
     let edges = links
         .links
-        .into_iter()
+        .iter()
         .map(|link| GraphEdgeDto {
-            id: link.id,
-            link_type: link.link_type,
-            source: link.source,
-            target: link.out,
+            id: link.id.clone(),
+            link_type: link.link_type.clone(),
+            source: link.source.clone(),
+            target: link.out.clone(),
+        })
+        .collect();
+
+    let link_types = registry
+        .link_types
+        .iter()
+        .map(|link_type| LinkTypeDto {
+            link_type: link_type.link_type.clone(),
+            in_type: link_type.in_type.clone(),
+            out_type: link_type.out_type.clone(),
         })
         .collect();
 
     Ok(RoadmapGraphDto {
         root: root.to_string_lossy().into_owned(),
+        editable: true,
         nodes,
         edges,
+        link_types,
     })
 }
 
@@ -127,8 +156,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn fixture_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../src/fixtures/example-roadmap")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/fixtures/example-roadmap")
     }
 
     #[test]
@@ -136,5 +164,7 @@ mod tests {
         let graph = load_roadmap_graph(&fixture_root()).expect("fixture should load");
         assert_eq!(graph.nodes.len(), 6);
         assert_eq!(graph.edges.len(), 2);
+        assert!(graph.editable);
+        assert!(!graph.link_types.is_empty());
     }
 }

@@ -1,11 +1,16 @@
+mod bellman_cmd;
+mod cli;
 mod graph;
+mod roadmap_edit;
 
+use bellman_cmd::run_bellman;
+use cli::CliOptions;
 use graph::load_roadmap_graph;
+use roadmap_edit::{create_edge, create_vertex, CreateEdgeRequest, CreateVertexRequest};
 use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter};
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_shell::ShellExt;
 
 #[tauri::command]
 fn load_roadmap_graph_command(roadmap_root: String) -> Result<graph::RoadmapGraphDto, String> {
@@ -37,22 +42,35 @@ async fn pick_and_load_roadmap(app: tauri::AppHandle) -> Result<Option<graph::Ro
 }
 
 #[tauri::command]
+async fn create_vertex_command(
+    app: tauri::AppHandle,
+    request: CreateVertexRequest,
+) -> Result<graph::RoadmapGraphDto, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    create_vertex(&app, request).await?;
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+async fn create_edge_command(
+    request: CreateEdgeRequest,
+) -> Result<graph::RoadmapGraphDto, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    create_edge(request).await?;
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
 async fn bellman_version(app: tauri::AppHandle) -> Result<String, String> {
-    let output = app
-        .shell()
-        .sidecar("binaries/bellman")
-        .map_err(|error| format!("failed to resolve bellman sidecar: {error}"))?
-        .args(["version"])
-        .output()
-        .await
-        .map_err(|error| format!("failed to run bellman sidecar: {error}"))?;
+    run_bellman(&app, &["version"]).await
+}
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("bellman version failed: {stderr}"));
+#[tauri::command]
+fn load_initial_roadmap(cli: tauri::State<CliOptions>) -> Result<Option<graph::RoadmapGraphDto>, String> {
+    match cli.initial_roadmap_root.as_ref() {
+        Some(path) => load_roadmap_graph(path.as_path()).map(Some),
+        None => Ok(None),
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -61,6 +79,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(cli::cli_options_from_env())
         .setup(|app| {
             let open_roadmap = MenuItem::with_id(
                 app,
@@ -81,8 +100,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_roadmap_graph_command,
+            load_initial_roadmap,
             pick_and_load_roadmap,
-            bellman_version
+            bellman_version,
+            create_vertex_command,
+            create_edge_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
