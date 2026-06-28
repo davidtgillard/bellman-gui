@@ -113,6 +113,66 @@ body {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-view-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-bottom: 1px solid #334155;
+  background: #111827;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+}
+
+.graph-view-back {
+  border: none;
+  background: transparent;
+  color: #93c5fd;
+  padding: 0;
+  cursor: pointer;
+}
+
+.graph-view-back:hover {
+  color: #bfdbfe;
+  text-decoration: underline;
+}
+
+.graph-view-separator {
+  color: #64748b;
+}
+
+.graph-view-current {
+  color: #e2e8f0;
+}
+
+.graph-context-menu {
+  margin: 0;
+  padding: 0.25rem 0;
+  min-width: 12rem;
+  list-style: none;
+  border: 1px solid #475569;
+  border-radius: 0.5rem;
+  background: #1e293b;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.45);
+}
+
+.graph-context-menu button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0.5rem 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.graph-context-menu button:hover {
+  background: #334155;
 }
 
 .node-detail-sidebar {
@@ -311,7 +371,7 @@ body {
 .graph-container,
 .graph-empty {
   width: 100%;
-  height: 100%;
+  flex: 1;
   min-height: 0;
 }
 

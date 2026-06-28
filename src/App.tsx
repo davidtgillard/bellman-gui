@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GraphNodeContextMenu } from "./components/GraphNodeContextMenu";
+import { GraphViewBreadcrumb } from "./components/GraphViewBreadcrumb";
 import { NodeDetailSidebar } from "./components/NodeDetailSidebar";
 import { CreateLinkDialog } from "./components/CreateLinkDialog";
 import { CreateNodeDialog } from "./components/CreateNodeDialog";
@@ -12,7 +14,9 @@ import exampleLinks from "./fixtures/example-roadmap/links/links.json";
 import {
   findAddedNodeId,
   fromRoadmapGraphDto,
+  innerGraphForProject,
   parseRoadmapGraph,
+  topLevelGraphNodes,
   toReagraphLinks,
   toReagraphNodes,
   nodeLabel,
@@ -45,6 +49,7 @@ function App() {
     () => new Set(exampleGraph.nodes.map((node) => node.type)),
   );
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [innerGraphProjectId, setInnerGraphProjectId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [nodeDetailOpen, setNodeDetailOpen] = useState(false);
   const [nodeDetail, setNodeDetail] = useState<NodeDetail | null>(null);
@@ -66,6 +71,7 @@ function App() {
     if (options.resetVisibleTypes) {
       setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
       setFocusNodeId(null);
+      setInnerGraphProjectId(null);
       setSelectedNodeId(null);
       setNodeDetailOpen(false);
       setNodeDetail(null);
@@ -195,14 +201,26 @@ function App() {
     };
   }, [handleOpenRoadmap]);
 
-  const nodeTypes = useMemo(
-    () => [...new Set(nodes.map((node) => node.type))].sort(),
-    [nodes],
-  );
+  const nodeTypes = useMemo(() => {
+    const sourceNodes = innerGraphProjectId
+      ? innerGraphForProject(nodes, links, innerGraphProjectId).nodes
+      : topLevelGraphNodes(nodes);
+    return [...new Set(sourceNodes.map((node) => node.type))].sort();
+  }, [innerGraphProjectId, links, nodes]);
+
+  const displayGraph = useMemo(() => {
+    if (innerGraphProjectId) {
+      return innerGraphForProject(nodes, links, innerGraphProjectId);
+    }
+    return {
+      nodes: topLevelGraphNodes(nodes),
+      links,
+    };
+  }, [innerGraphProjectId, links, nodes]);
 
   const filteredNodes = useMemo(
-    () => nodes.filter((node) => visibleTypes.has(node.type)),
-    [nodes, visibleTypes],
+    () => displayGraph.nodes.filter((node) => visibleTypes.has(node.type)),
+    [displayGraph.nodes, visibleTypes],
   );
 
   const visibleNodeIds = useMemo(
@@ -212,10 +230,10 @@ function App() {
 
   const filteredLinks = useMemo(
     () =>
-      links.filter(
+      displayGraph.links.filter(
         (link) => visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target),
       ),
-    [links, visibleNodeIds],
+    [displayGraph.links, visibleNodeIds],
   );
 
   const reagraphNodes = useMemo(() => toReagraphNodes(filteredNodes), [filteredNodes]);
@@ -272,6 +290,67 @@ function App() {
     },
     [nodes, roadmapRoot],
   );
+
+  const handleShowInnerGraph = useCallback((projectId: string) => {
+    setInnerGraphProjectId(projectId);
+    setFocusNodeId(null);
+    setSelectedNodeId(null);
+    setNodeDetailOpen(false);
+    setNodeDetail(null);
+    setNodeDetailError(null);
+    setNodeDetailLoading(false);
+    setVisibleTypes((current) => {
+      const next = new Set(current);
+      next.add("work_package");
+      return next;
+    });
+  }, []);
+
+  const handleBackToTopLevel = useCallback(() => {
+    setInnerGraphProjectId(null);
+    setFocusNodeId(null);
+    setSelectedNodeId(null);
+    setNodeDetailOpen(false);
+    setNodeDetail(null);
+    setNodeDetailError(null);
+    setNodeDetailLoading(false);
+  }, []);
+
+  const renderNodeContextMenu = useCallback(
+    (event: {
+      data: { id: string; data?: { type?: string } };
+      onClose: () => void;
+    }) => {
+      if (innerGraphProjectId) {
+        return null;
+      }
+
+      const nodeType =
+        typeof event.data.data?.type === "string" ? event.data.data.type : "";
+
+      return (
+        <GraphNodeContextMenu
+          nodeId={event.data.id}
+          nodeType={nodeType}
+          onShowInnerGraph={handleShowInnerGraph}
+          onClose={event.onClose}
+        />
+      );
+    },
+    [handleShowInnerGraph, innerGraphProjectId],
+  );
+
+  const innerGraphProjectLabel = innerGraphProjectId
+    ? nodeLabel(innerGraphProjectId)
+    : null;
+
+  const graphEmptyMessage = innerGraphProjectId
+    ? innerGraphProjectLabel
+      ? `Project ${innerGraphProjectLabel} has no work packages to display.`
+      : "This project has no work packages to display."
+    : nodes.length === 0
+      ? "Open a bellman roadmap folder to view its graph."
+      : "Select at least one node type to display.";
 
   const handleDetailClose = useCallback(() => {
     setNodeDetailOpen(false);
@@ -350,17 +429,20 @@ function App() {
       ) : null}
       <div className="graph-area">
         <div className="graph-dock-panel">
+          {innerGraphProjectId && innerGraphProjectLabel ? (
+            <GraphViewBreadcrumb
+              projectLabel={innerGraphProjectLabel}
+              onBack={handleBackToTopLevel}
+            />
+          ) : null}
           <RoadmapGraphView
             nodes={reagraphNodes}
             links={reagraphLinks}
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}
-            emptyMessage={
-              nodes.length === 0
-                ? "Open a bellman roadmap folder to view its graph."
-                : "Select at least one node type to display."
-            }
+            contextMenu={renderNodeContextMenu}
+            emptyMessage={graphEmptyMessage}
           />
           <NodeTypeLegend
             types={nodeTypes}

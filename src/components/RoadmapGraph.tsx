@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, type RefObject } from "react";
+import { Suspense, useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { GraphCanvas, type GraphCanvasRef } from "reagraph";
 
 interface ReagraphNode {
@@ -21,6 +21,10 @@ interface RoadmapGraphProps {
   focusNodeId?: string | null;
   selectedNodeId?: string | null;
   onNodeClick?: (nodeId: string) => void;
+  contextMenu?: (event: {
+    data: { id: string; data?: { type?: string } };
+    onClose: () => void;
+  }) => ReactNode;
 }
 
 const FOCUS_DELAY_MS = 450;
@@ -39,6 +43,7 @@ export function RoadmapGraph({
   focusNodeId = null,
   selectedNodeId = null,
   onNodeClick,
+  contextMenu,
 }: RoadmapGraphProps) {
   const graphRef = useRef<GraphCanvasRef>(null);
 
@@ -75,6 +80,7 @@ export function RoadmapGraph({
             animated
             selections={selectedNodeId ? [selectedNodeId] : []}
             onNodeClick={(node) => onNodeClick?.(node.id)}
+            contextMenu={contextMenu}
           />
         </Suspense>
       </div>

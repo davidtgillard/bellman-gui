@@ -309,6 +309,67 @@ export function projectNames(nodes: GraphNode[]): string[] {
 }
 
 /**
+ * Returns the project scope name embedded in a work package id.
+ * @param workPackageId - Fully qualified work package identifier.
+ * @returns Project scope prefix before the first `--`, or null when absent.
+ */
+export function workPackageProjectName(workPackageId: string): string | null {
+  const separator = workPackageId.indexOf("--");
+  if (separator <= 0) {
+    return null;
+  }
+  return workPackageId.slice(0, separator);
+}
+
+/**
+ * Returns whether a work package belongs to the given project node.
+ * @param workPackageId - Work package node identifier.
+ * @param projectId - Project node identifier.
+ * @returns Whether the work package is scoped to the project.
+ */
+export function workPackageBelongsToProject(
+  workPackageId: string,
+  projectId: string,
+): boolean {
+  const projectName = nodeLabel(projectId);
+  return workPackageProjectName(workPackageId) === projectName;
+}
+
+/**
+ * Filters nodes visible in the top-level roadmap graph.
+ * Work packages are inner graph nodes and are excluded.
+ * @param nodes - All roadmap graph nodes.
+ * @returns Nodes that should appear in the top-level graph.
+ */
+export function topLevelGraphNodes(nodes: GraphNode[]): GraphNode[] {
+  return nodes.filter((node) => node.type !== "work_package");
+}
+
+/**
+ * Builds the inner work package graph for a project node.
+ * @param nodes - All roadmap graph nodes.
+ * @param links - All roadmap graph links.
+ * @param projectId - Project node identifier.
+ * @returns Work package nodes and links scoped to the project.
+ */
+export function innerGraphForProject(
+  nodes: GraphNode[],
+  links: GraphLink[],
+  projectId: string,
+): { nodes: GraphNode[]; links: GraphLink[] } {
+  const innerNodes = nodes.filter(
+    (node) =>
+      node.type === "work_package" &&
+      workPackageBelongsToProject(node.id, projectId),
+  );
+  const innerNodeIds = new Set(innerNodes.map((node) => node.id));
+  const innerLinks = links.filter(
+    (link) => innerNodeIds.has(link.source) && innerNodeIds.has(link.target),
+  );
+  return { nodes: innerNodes, links: innerLinks };
+}
+
+/**
  * Returns the id of a node present after an update but not before.
  * @param before - Nodes before the graph update.
  * @param after - Nodes after the graph update.
