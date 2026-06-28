@@ -37,6 +37,9 @@ body {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #334155;
   background: #111827;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
 }
 
 .toolbar-title h1 {
@@ -65,8 +68,13 @@ body {
   cursor: pointer;
 }
 
-.toolbar-actions button:hover {
+.toolbar-actions button:hover:not(:disabled) {
   background: #334155;
+}
+
+.toolbar-actions button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .sidecar-badge {
@@ -78,12 +86,25 @@ body {
   padding: 0.5rem 1rem;
   background: #7f1d1d;
   color: #fecaca;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
 }
 
 .graph-container,
 .graph-empty {
   flex: 1;
   min-height: 0;
+}
+
+.graph-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.graph-viewport {
+  position: absolute;
+  inset: 0;
 }
 
 .graph-empty {

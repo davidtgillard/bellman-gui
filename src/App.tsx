@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RoadmapGraph } from "./components/RoadmapGraph";
 import exampleRegistry from "./fixtures/example-roadmap/.fits/registry.json";
@@ -23,6 +23,7 @@ function App() {
   const [edges, setEdges] = useState<GraphEdge[]>(exampleGraph.edges);
   const [error, setError] = useState<string | null>(null);
   const [sidecarVersion, setSidecarVersion] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
 
   const applyGraph = useCallback((graph: ReturnType<typeof parseRoadmapGraph>) => {
     setRoadmapRoot(graph.root);
@@ -31,35 +32,44 @@ function App() {
     setError(null);
   }, []);
 
+  const handleOpenRoadmap = useCallback(async () => {
+    setOpening(true);
+    setError(null);
+
+    try {
+      const dto = await invoke<RoadmapGraphDto | null>("pick_and_load_roadmap");
+      if (dto) {
+        applyGraph(fromRoadmapGraphDto(dto));
+      }
+    } catch (caught) {
+      setError(String(caught));
+    } finally {
+      setOpening(false);
+    }
+  }, [applyGraph]);
+
   useEffect(() => {
     invoke<string>("bellman_version")
       .then((version) => setSidecarVersion(version))
       .catch(() => setSidecarVersion(null));
   }, []);
 
-  const reagraphNodes = useMemo(() => toReagraphNodes(nodes), [nodes]);
-  const reagraphEdges = useMemo(() => toReagraphEdges(edges), [edges]);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
 
-  async function handleOpenRoadmap() {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Open bellman roadmap",
+    void listen("open-roadmap", () => {
+      void handleOpenRoadmap();
+    }).then((dispose) => {
+      unlisten = dispose;
     });
 
-    if (!selected || Array.isArray(selected)) {
-      return;
-    }
+    return () => {
+      unlisten?.();
+    };
+  }, [handleOpenRoadmap]);
 
-    try {
-      const dto = await invoke<RoadmapGraphDto>("load_roadmap_graph_command", {
-        roadmapRoot: selected,
-      });
-      applyGraph(fromRoadmapGraphDto(dto));
-    } catch (caught) {
-      setError(String(caught));
-    }
-  }
+  const reagraphNodes = useMemo(() => toReagraphNodes(nodes), [nodes]);
+  const reagraphEdges = useMemo(() => toReagraphEdges(edges), [edges]);
 
   return (
     <main className="app-shell">
@@ -72,8 +82,8 @@ function App() {
           {sidecarVersion ? (
             <span className="sidecar-badge">bellman {sidecarVersion}</span>
           ) : null}
-          <button type="button" onClick={handleOpenRoadmap}>
-            Open roadmap…
+          <button type="button" onClick={() => void handleOpenRoadmap()} disabled={opening}>
+            {opening ? "Opening…" : "Open roadmap…"}
           </button>
         </div>
       </header>

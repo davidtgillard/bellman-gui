@@ -35,15 +35,17 @@ export function RoadmapGraph({
 
   return (
     <div className="graph-container">
-      <Suspense fallback={<div className="graph-empty">Loading graph…</div>}>
-        <GraphCanvas
-          nodes={nodes}
-          edges={edges}
-          layoutType="forceDirected2d"
-          labelType="all"
-          animated
-        />
-      </Suspense>
+      <div className="graph-viewport">
+        <Suspense fallback={<div className="graph-empty">Loading graph…</div>}>
+          <GraphCanvas
+            nodes={nodes}
+            edges={edges}
+            layoutType="forceDirected2d"
+            labelType="all"
+            animated
+          />
+        </Suspense>
+      </div>
     </div>
   );
 }

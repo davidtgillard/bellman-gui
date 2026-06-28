@@ -48,7 +48,7 @@ bash packaging/bundle-portable.sh
 
 1. Start the app (`npm run tauri dev` or the release binary).
 2. The example roadmap graph loads automatically.
-3. Click **Open roadmap…** and select a bellman roadmap root directory.
+3. Click **Open roadmap…** (toolbar), use **File → Open Roadmap…**, or press **Ctrl+O** / **Cmd+O** and select a bellman roadmap root directory.
 4. Pan, zoom, and click nodes to explore connections (parent/child and precedence edges).
 
 Roadmap data is read from:
