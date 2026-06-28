@@ -48,6 +48,11 @@ export interface RoadmapGraphDto {
   }>;
 }
 
+/**
+ * Converts a Tauri IPC roadmap graph payload into the in-app graph model.
+ * @param dto - Serialized graph returned by the backend.
+ * @returns Normalized roadmap graph with camelCase edge fields.
+ */
 export function fromRoadmapGraphDto(dto: RoadmapGraphDto): RoadmapGraph {
   return {
     root: dto.root,
@@ -76,6 +81,11 @@ const QUALIFIED_PREFIXES = [
   "goal--",
 ] as const;
 
+/**
+ * Derives a short display label from a bellman qualified node id.
+ * @param nodeId - Fully qualified node identifier from the registry.
+ * @returns Human-readable label with type prefix removed when present.
+ */
 export function nodeLabel(nodeId: string): string {
   for (const prefix of QUALIFIED_PREFIXES) {
     if (nodeId.startsWith(prefix)) {
@@ -89,6 +99,13 @@ export function nodeLabel(nodeId: string): string {
   return nodeId;
 }
 
+/**
+ * Builds a roadmap graph from bellman registry and link documents.
+ * @param root - Roadmap root path or display name.
+ * @param registry - Parsed `.fits/registry.json` contents.
+ * @param links - Parsed `links/links.jsonc` contents.
+ * @returns Graph containing node instances and directed edges.
+ */
 export function parseRoadmapGraph(
   root: string,
   registry: RegistryDocument,
@@ -111,6 +128,11 @@ export function parseRoadmapGraph(
   return { root, nodes, edges };
 }
 
+/**
+ * Maps graph nodes to the shape expected by Reagraph.
+ * @param nodes - Roadmap graph nodes.
+ * @returns Reagraph node objects with labels and fill colors by type.
+ */
 export function toReagraphNodes(nodes: GraphNode[]) {
   return nodes.map((node) => ({
     id: node.id,
@@ -120,6 +142,11 @@ export function toReagraphNodes(nodes: GraphNode[]) {
   }));
 }
 
+/**
+ * Maps graph edges to the shape expected by Reagraph.
+ * @param edges - Roadmap graph edges.
+ * @returns Reagraph edge objects preserving source, target, and link type.
+ */
 export function toReagraphEdges(edges: GraphEdge[]) {
   return edges.map((edge) => ({
     id: edge.id,
