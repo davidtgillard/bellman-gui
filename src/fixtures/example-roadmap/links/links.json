@@ -1,0 +1,21 @@
+{
+  "description": "Directed links between issued object ids. Edit by hand or via fits CLI; validate with fits validate.",
+  "version": 1,
+  "kind": "fits-links-v1",
+  "links": [
+    {
+      "id": "parent_of--billing-redesign--wp-invoicing--billing-redesign--wp-pdf-export",
+      "link_type": "parent_of",
+      "out": "billing-redesign--wp-pdf-export",
+      "in": "billing-redesign--wp-invoicing",
+      "labels": null
+    },
+    {
+      "id": "precedes_FS_Mandatory--billing-redesign--wp-invoicing--billing-redesign--wp-pdf-export",
+      "link_type": "precedes_FS_Mandatory",
+      "out": "billing-redesign--wp-pdf-export",
+      "in": "billing-redesign--wp-invoicing",
+      "labels": null
+    }
+  ]
+}
