@@ -19,6 +19,8 @@ interface RoadmapGraphProps {
   links: ReagraphLink[];
   emptyMessage?: string;
   focusNodeId?: string | null;
+  selectedNodeId?: string | null;
+  onNodeClick?: (nodeId: string) => void;
 }
 
 const FOCUS_DELAY_MS = 450;
@@ -35,6 +37,8 @@ export function RoadmapGraph({
   links,
   emptyMessage = "Open a bellman roadmap folder to view its graph.",
   focusNodeId = null,
+  selectedNodeId = null,
+  onNodeClick,
 }: RoadmapGraphProps) {
   const graphRef = useRef<GraphCanvasRef>(null);
 
@@ -69,6 +73,8 @@ export function RoadmapGraph({
             layoutType="forceDirected2d"
             labelType="all"
             animated
+            selections={selectedNodeId ? [selectedNodeId] : []}
+            onNodeClick={(node) => onNodeClick?.(node.id)}
           />
         </Suspense>
       </div>

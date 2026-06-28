@@ -1,0 +1,14 @@
+version: 1
+
+work_packages:
+  - title: wp-invoicing
+    description: |
+      Rebuild the invoicing UI and API so customers can review line items, apply credits, and download receipts.
+
+      Includes validation rules for tax jurisdictions and integration with the legacy ledger.
+    dependencies: []
+  - title: wp-pdf-export
+    description: |
+      Add branded PDF export for invoices and statements with configurable templates per account tier.
+    dependencies:
+      - wp-invoicing

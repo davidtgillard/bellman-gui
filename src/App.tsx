@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NodeDetailSidebar } from "./components/NodeDetailSidebar";
 import { CreateLinkDialog } from "./components/CreateLinkDialog";
 import { CreateNodeDialog } from "./components/CreateNodeDialog";
+import { NodeDetailPanel } from "./components/NodeDetailPanel";
 import { RoadmapGraph as RoadmapGraphView } from "./components/RoadmapGraph";
 import { NodeTypeLegend } from "./components/NodeTypeLegend";
 import exampleRegistry from "./fixtures/example-roadmap/.fits/registry.json";
@@ -13,6 +15,7 @@ import {
   parseRoadmapGraph,
   toReagraphLinks,
   toReagraphNodes,
+  nodeLabel,
   type GraphLink,
   type GraphNode,
   type LinkTypeMeta,
@@ -21,6 +24,7 @@ import {
   type NodeKind,
 } from "./lib/graph";
 import { createLink, createNode } from "./lib/roadmap-api";
+import { loadNodeDetail, type NodeDetail } from "./lib/node-detail";
 import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
@@ -41,6 +45,12 @@ function App() {
     () => new Set(exampleGraph.nodes.map((node) => node.type)),
   );
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [nodeDetailOpen, setNodeDetailOpen] = useState(false);
+  const [nodeDetail, setNodeDetail] = useState<NodeDetail | null>(null);
+  const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
+  const [nodeDetailError, setNodeDetailError] = useState<string | null>(null);
+  const nodeDetailRequestRef = useRef(0);
 
   interface ApplyGraphOptions {
     resetVisibleTypes?: boolean;
@@ -56,6 +66,11 @@ function App() {
     if (options.resetVisibleTypes) {
       setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
       setFocusNodeId(null);
+      setSelectedNodeId(null);
+      setNodeDetailOpen(false);
+      setNodeDetail(null);
+      setNodeDetailError(null);
+      setNodeDetailLoading(false);
     } else {
       setVisibleTypes((current) => {
         const available = new Set(graph.nodes.map((node) => node.type));
@@ -85,7 +100,12 @@ function App() {
         applyGraph(fromRoadmapGraphDto(dto), { resetVisibleTypes: true });
       }
     } catch (caught) {
-      setError(String(caught));
+      const message = String(caught);
+      setError(
+        message.includes("dialog") || message.includes("folder")
+          ? message
+          : `${message}. If the folder picker did not appear, check that a display server is available (common on WSL).`,
+      );
     } finally {
       setOpening(false);
     }
@@ -213,6 +233,74 @@ function App() {
     });
   }, []);
 
+  const handleNodeClick = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((item) => item.id === nodeId);
+      setSelectedNodeId(nodeId);
+      setNodeDetailOpen(true);
+      setNodeDetail(null);
+      setNodeDetailError(null);
+
+      if (!node) {
+        setNodeDetailLoading(false);
+        return;
+      }
+
+      setNodeDetailLoading(true);
+      const requestId = nodeDetailRequestRef.current + 1;
+      nodeDetailRequestRef.current = requestId;
+      void loadNodeDetail(roadmapRoot, nodeId, node.type)
+        .then((detail) => {
+          if (nodeDetailRequestRef.current !== requestId) {
+            return;
+          }
+          setNodeDetail(detail);
+          setNodeDetailError(null);
+        })
+        .catch((caught) => {
+          if (nodeDetailRequestRef.current !== requestId) {
+            return;
+          }
+          setNodeDetail(null);
+          setNodeDetailError(String(caught));
+        })
+        .finally(() => {
+          if (nodeDetailRequestRef.current === requestId) {
+            setNodeDetailLoading(false);
+          }
+        });
+    },
+    [nodes, roadmapRoot],
+  );
+
+  const handleDetailClose = useCallback(() => {
+    setNodeDetailOpen(false);
+    setSelectedNodeId(null);
+    setNodeDetail(null);
+    setNodeDetailError(null);
+    setNodeDetailLoading(false);
+  }, []);
+
+  const selectedNode = selectedNodeId
+    ? nodes.find((item) => item.id === selectedNodeId)
+    : undefined;
+  const missingNodeError =
+    nodeDetailOpen && selectedNodeId && !selectedNode
+      ? "Selected node is not available in the current graph."
+      : null;
+
+  const detailTitle = selectedNodeId ? nodeLabel(selectedNodeId) : "Node details";
+
+  useEffect(() => {
+    if (!nodeDetailOpen) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.dispatchEvent(new Event("resize"));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [nodeDetailOpen]);
+
   return (
     <main className="app-shell">
       <header className="toolbar">
@@ -261,21 +349,34 @@ function App() {
         </div>
       ) : null}
       <div className="graph-area">
-        <RoadmapGraphView
-          nodes={reagraphNodes}
-          links={reagraphLinks}
-          focusNodeId={focusNodeId}
-          emptyMessage={
-            nodes.length === 0
-              ? "Open a bellman roadmap folder to view its graph."
-              : "Select at least one node type to display."
-          }
-        />
-        <NodeTypeLegend
-          types={nodeTypes}
-          visibleTypes={visibleTypes}
-          onToggleType={handleToggleType}
-        />
+        <div className="graph-dock-panel">
+          <RoadmapGraphView
+            nodes={reagraphNodes}
+            links={reagraphLinks}
+            focusNodeId={focusNodeId}
+            selectedNodeId={selectedNodeId}
+            onNodeClick={handleNodeClick}
+            emptyMessage={
+              nodes.length === 0
+                ? "Open a bellman roadmap folder to view its graph."
+                : "Select at least one node type to display."
+            }
+          />
+          <NodeTypeLegend
+            types={nodeTypes}
+            visibleTypes={visibleTypes}
+            onToggleType={handleToggleType}
+          />
+        </div>
+        {nodeDetailOpen ? (
+          <NodeDetailSidebar title={detailTitle} onClose={handleDetailClose}>
+            <NodeDetailPanel
+              detail={nodeDetail}
+              loading={nodeDetailLoading}
+              error={missingNodeError ?? nodeDetailError}
+            />
+          </NodeDetailSidebar>
+        ) : null}
       </div>
       <CreateNodeDialog
         open={nodeDialogOpen}

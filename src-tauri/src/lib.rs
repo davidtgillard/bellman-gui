@@ -1,11 +1,13 @@
 mod bellman_cmd;
 mod cli;
 mod graph;
+mod node_detail;
 mod roadmap_edit;
 
 use bellman_cmd::run_bellman;
 use cli::CliOptions;
 use graph::load_roadmap_graph;
+use node_detail::load_node_detail_command;
 use roadmap_edit::{create_link, create_node, CreateLinkRequest, CreateNodeRequest};
 use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem, Submenu};
@@ -105,6 +107,7 @@ pub fn run() {
             bellman_version,
             create_node_command,
             create_link_command,
+            load_node_detail_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
