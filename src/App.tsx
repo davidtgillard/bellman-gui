@@ -693,11 +693,13 @@ function App() {
               innerGraphProjectId ? handleNodePositionChange : undefined
             }
           />
-          <NodeTypeLegend
-            types={nodeTypes}
-            visibleTypes={visibleTypes}
-            onToggleType={handleToggleType}
-          />
+          {!innerGraphProjectId ? (
+            <NodeTypeLegend
+              types={nodeTypes}
+              visibleTypes={visibleTypes}
+              onToggleType={handleToggleType}
+            />
+          ) : null}
         </div>
         {nodeDetailOpen ? (
           <NodeDetailSidebar title={detailTitle} onClose={handleDetailClose}>
