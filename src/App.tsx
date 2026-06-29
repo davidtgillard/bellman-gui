@@ -30,10 +30,27 @@ import {
   type NodeKind,
 } from "./lib/graph";
 import { createLink, createNode, removeLink, removeNode } from "./lib/roadmap-api";
+import {
+  EMPTY_WORK_PACKAGE_LAYOUT,
+  loadWorkPackageLayout,
+  projectLayoutKey,
+  projectNodePositions,
+  removeWorkPackageNodePosition,
+  saveWorkPackageNodePosition,
+  withNodePosition,
+  withoutNodePosition,
+  type NodePosition,
+  type WorkPackageLayout,
+} from "./lib/graph-layout";
 import { loadNodeDetail, type NodeDetail } from "./lib/node-detail";
 import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
+const LAYOUT_SAVE_DEBOUNCE_MS = 300;
+
+function roadmapLayoutPersistable(root: string, editable: boolean): boolean {
+  return editable && root !== "example";
+}
 
 function App() {
   const [roadmapRoot, setRoadmapRoot] = useState(exampleGraph.root);
@@ -58,6 +75,15 @@ function App() {
   const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
   const [nodeDetailError, setNodeDetailError] = useState<string | null>(null);
   const nodeDetailRequestRef = useRef(0);
+  const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
+    EMPTY_WORK_PACKAGE_LAYOUT,
+  );
+  const layoutSaveTimerRef = useRef<number | null>(null);
+  const pendingLayoutSaveRef = useRef<{
+    projectId: string;
+    nodeId: string;
+    position: NodePosition;
+  } | null>(null);
 
   interface ApplyGraphOptions {
     resetVisibleTypes?: boolean;
@@ -79,6 +105,7 @@ function App() {
       setNodeDetail(null);
       setNodeDetailError(null);
       setNodeDetailLoading(false);
+      setWorkPackageLayout(EMPTY_WORK_PACKAGE_LAYOUT);
     } else {
       setVisibleTypes((current) => {
         const available = new Set(graph.nodes.map((node) => node.type));
@@ -96,7 +123,66 @@ function App() {
       }
     }
     setError(null);
+
+    if (roadmapLayoutPersistable(graph.root, graph.editable)) {
+      void loadWorkPackageLayout(graph.root)
+        .then(setWorkPackageLayout)
+        .catch((caught) => setError(String(caught)));
+    }
   }, []);
+
+  const flushLayoutSave = useCallback(async () => {
+    const pending = pendingLayoutSaveRef.current;
+    pendingLayoutSaveRef.current = null;
+    if (!pending || !roadmapLayoutPersistable(roadmapRoot, editable)) {
+      return;
+    }
+
+    try {
+      const layout = await saveWorkPackageNodePosition({
+        roadmap_root: roadmapRoot,
+        project_id: projectLayoutKey(pending.projectId),
+        node_id: pending.nodeId,
+        x: pending.position.x,
+        y: pending.position.y,
+      });
+      setWorkPackageLayout(layout);
+    } catch (caught) {
+      setError(String(caught));
+    }
+  }, [editable, roadmapRoot]);
+
+  const queueLayoutSave = useCallback(
+    (projectId: string, nodeId: string, position: NodePosition) => {
+      if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
+        return;
+      }
+
+      pendingLayoutSaveRef.current = { projectId, nodeId, position };
+      if (layoutSaveTimerRef.current !== null) {
+        window.clearTimeout(layoutSaveTimerRef.current);
+      }
+      layoutSaveTimerRef.current = window.setTimeout(() => {
+        layoutSaveTimerRef.current = null;
+        void flushLayoutSave();
+      }, LAYOUT_SAVE_DEBOUNCE_MS);
+    },
+    [editable, flushLayoutSave, roadmapRoot],
+  );
+
+  const handleNodePositionChange = useCallback(
+    (nodeId: string, position: NodePosition) => {
+      if (!innerGraphProjectId) {
+        return;
+      }
+
+      setWorkPackageLayout((current) =>
+        withNodePosition(current, innerGraphProjectId, nodeId, position),
+      );
+      queueLayoutSave(innerGraphProjectId, nodeId, position);
+    },
+    [innerGraphProjectId, queueLayoutSave],
+  );
 
   const handleOpenRoadmap = useCallback(async () => {
     setOpening(true);
@@ -192,6 +278,22 @@ function App() {
       if (innerGraphProjectId === nodeId) {
         setInnerGraphProjectId(null);
       }
+      if (
+        nodeType === "work_package" &&
+        innerGraphProjectId &&
+        roadmapLayoutPersistable(roadmapRoot, editable)
+      ) {
+        setWorkPackageLayout((current) =>
+          withoutNodePosition(current, innerGraphProjectId, nodeId),
+        );
+        void removeWorkPackageNodePosition(
+          roadmapRoot,
+          projectLayoutKey(innerGraphProjectId),
+          nodeId,
+        )
+          .then(setWorkPackageLayout)
+          .catch((caught) => setError(String(caught)));
+      }
 
       try {
         const graph = await removeNode({
@@ -210,6 +312,7 @@ function App() {
     },
     [
       applyGraph,
+      editable,
       innerGraphProjectId,
       links,
       nodes,
@@ -217,6 +320,26 @@ function App() {
       selectedNodeId,
     ],
   );
+
+  useEffect(() => {
+    if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
+      return;
+    }
+
+    void loadWorkPackageLayout(roadmapRoot)
+      .then(setWorkPackageLayout)
+      .catch((caught) => setError(String(caught)));
+  }, [editable, roadmapRoot]);
+
+  useEffect(() => {
+    return () => {
+      if (layoutSaveTimerRef.current !== null) {
+        window.clearTimeout(layoutSaveTimerRef.current);
+        layoutSaveTimerRef.current = null;
+      }
+      void flushLayoutSave();
+    };
+  }, [flushLayoutSave]);
 
   const handleRemoveLink = useCallback(
     async (linkId: string) => {
@@ -308,6 +431,9 @@ function App() {
 
   const reagraphNodes = useMemo(() => toReagraphNodes(filteredNodes), [filteredNodes]);
   const reagraphLinks = useMemo(() => toReagraphLinks(filteredLinks), [filteredLinks]);
+  const innerGraphNodePositions = innerGraphProjectId
+    ? projectNodePositions(workPackageLayout, innerGraphProjectId)
+    : undefined;
 
   const handleToggleType = useCallback((type: string) => {
     setVisibleTypes((current) => {
@@ -377,6 +503,11 @@ function App() {
   }, []);
 
   const handleBackToTopLevel = useCallback(() => {
+    if (layoutSaveTimerRef.current !== null) {
+      window.clearTimeout(layoutSaveTimerRef.current);
+      layoutSaveTimerRef.current = null;
+    }
+    void flushLayoutSave();
     setInnerGraphProjectId(null);
     setFocusNodeId(null);
     setSelectedNodeId(null);
@@ -384,7 +515,7 @@ function App() {
     setNodeDetail(null);
     setNodeDetailError(null);
     setNodeDetailLoading(false);
-  }, []);
+  }, [flushLayoutSave]);
 
   const renderContextMenu = useCallback(
     (event: {
@@ -556,6 +687,11 @@ function App() {
             onNodeClick={handleNodeClick}
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
+            draggable={Boolean(innerGraphProjectId)}
+            nodePositions={innerGraphNodePositions}
+            onNodePositionChange={
+              innerGraphProjectId ? handleNodePositionChange : undefined
+            }
           />
           <NodeTypeLegend
             types={nodeTypes}
