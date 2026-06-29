@@ -83,12 +83,37 @@ body {
 }
 
 .error-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.5rem 1rem;
   background: #7f1d1d;
   color: #fecaca;
   flex-shrink: 0;
   position: relative;
   z-index: 10;
+}
+
+.error-banner-message {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-banner-dismiss {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: inherit;
+  padding: 0.125rem 0.375rem;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.error-banner-dismiss:hover {
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .info-banner {

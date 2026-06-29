@@ -521,7 +521,19 @@ function App() {
           </button>
         </div>
       </header>
-      {error ? <div className="error-banner">{error}</div> : null}
+      {error ? (
+        <div className="error-banner" role="alert">
+          <span className="error-banner-message">{error}</span>
+          <button
+            type="button"
+            className="error-banner-dismiss"
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       {!editable ? (
         <div className="info-banner">
           The bundled example graph is read-only. Open a roadmap folder to create nodes and
@@ -565,7 +577,10 @@ function App() {
         open={nodeDialogOpen}
         nodes={nodes}
         saving={saving}
-        onClose={() => setNodeDialogOpen(false)}
+        onClose={() => {
+          setNodeDialogOpen(false);
+          setError(null);
+        }}
         onCreate={(input) => void handleCreateNode(input)}
       />
       <CreateLinkDialog
@@ -573,7 +588,10 @@ function App() {
         nodes={nodes}
         linkTypes={linkTypes}
         saving={saving}
-        onClose={() => setLinkDialogOpen(false)}
+        onClose={() => {
+          setLinkDialogOpen(false);
+          setError(null);
+        }}
         onCreate={(input) => void handleCreateLink(input)}
       />
     </main>
