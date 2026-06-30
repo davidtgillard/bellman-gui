@@ -11,11 +11,10 @@ import {
   nodeTypeLabel,
   parseRoadmapGraph,
   topLevelGraphNodes,
-  toReagraphLinks,
-  toReagraphNodes,
   workPackageBelongsToProject,
   workPackageProjectName,
 } from "./graph";
+import { toCytoscapeElements } from "./cytoscape-graph";
 
 describe("parseRoadmapGraph", () => {
   const graph = parseRoadmapGraph("/example", registry, links);
@@ -47,20 +46,24 @@ describe("parseRoadmapGraph", () => {
     expect(nodeTypeColor("unknown")).toBe("#64748b");
   });
 
-  it("converts to ReaGraph node and link shapes", () => {
-    const reagraphNodes = toReagraphNodes(graph.nodes);
-    const reagraphLinks = toReagraphLinks(graph.links);
+  it("converts to Cytoscape element shapes", () => {
+    const elements = toCytoscapeElements(graph.nodes, graph.links);
 
-    expect(reagraphNodes[0]).toMatchObject({
-      id: expect.any(String),
-      label: expect.any(String),
-      fill: expect.any(String),
+    expect(elements.nodes[0]).toMatchObject({
+      data: {
+        id: expect.any(String),
+        label: expect.any(String),
+        type: expect.any(String),
+        color: expect.any(String),
+      },
     });
-    expect(reagraphLinks[0]).toMatchObject({
-      id: expect.any(String),
-      source: expect.any(String),
-      target: expect.any(String),
-      label: expect.any(String),
+    expect(elements.edges[0]).toMatchObject({
+      data: {
+        id: expect.any(String),
+        source: expect.any(String),
+        target: expect.any(String),
+        label: expect.any(String),
+      },
     });
   });
 

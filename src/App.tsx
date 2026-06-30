@@ -17,11 +17,10 @@ import {
   graphWithoutLink,
   graphWithoutNode,
   innerGraphForProject,
+  nodeLabel,
+  nodeTypeColor,
   parseRoadmapGraph,
   topLevelGraphNodes,
-  toReagraphLinks,
-  toReagraphNodes,
-  nodeLabel,
   type GraphLink,
   type GraphNode,
   type LinkTypeMeta,
@@ -429,8 +428,27 @@ function App() {
     [displayGraph.links, visibleNodeIds],
   );
 
-  const reagraphNodes = useMemo(() => toReagraphNodes(filteredNodes), [filteredNodes]);
-  const reagraphLinks = useMemo(() => toReagraphLinks(filteredLinks), [filteredLinks]);
+  const graphViewNodes = useMemo(
+    () =>
+      filteredNodes.map((node) => ({
+        id: node.id,
+        label: nodeLabel(node.id),
+        fill: nodeTypeColor(node.type),
+        data: { type: node.type },
+      })),
+    [filteredNodes],
+  );
+
+  const graphViewLinks = useMemo(
+    () =>
+      filteredLinks.map((link) => ({
+        id: link.id,
+        source: link.source,
+        target: link.target,
+        label: link.linkType,
+      })),
+    [filteredLinks],
+  );
   const innerGraphNodePositions = innerGraphProjectId
     ? projectNodePositions(workPackageLayout, innerGraphProjectId)
     : undefined;
@@ -680,8 +698,8 @@ function App() {
             />
           ) : null}
           <RoadmapGraphView
-            nodes={reagraphNodes}
-            links={reagraphLinks}
+            nodes={graphViewNodes}
+            links={graphViewLinks}
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}

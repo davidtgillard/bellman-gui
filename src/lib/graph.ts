@@ -212,34 +212,6 @@ export function parseRoadmapGraph(
 }
 
 /**
- * Maps graph nodes to the shape expected by Reagraph.
- * @param nodes - Roadmap graph nodes.
- * @returns Reagraph node objects with labels and fill colors by type.
- */
-export function toReagraphNodes(nodes: GraphNode[]) {
-  return nodes.map((node) => ({
-    id: node.id,
-    label: nodeLabel(node.id),
-    fill: nodeTypeColor(node.type),
-    data: { type: node.type },
-  }));
-}
-
-/**
- * Maps graph links to the shape expected by Reagraph.
- * @param links - Roadmap graph links.
- * @returns Reagraph edge objects preserving source, target, and link type.
- */
-export function toReagraphLinks(links: GraphLink[]) {
-  return links.map((link) => ({
-    id: link.id,
-    source: link.source,
-    target: link.target,
-    label: link.linkType,
-  }));
-}
-
-/**
  * Returns whether a node type matches a link endpoint type from the registry.
  * @param nodeType - Concrete node type from the registry.
  * @param endpointType - Link endpoint type from the registry.

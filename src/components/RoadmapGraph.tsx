@@ -1,51 +1,55 @@
+import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
+import fcose from "cytoscape-fcose";
 import {
-  Suspense,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
-  type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
+import { CYTOSCAPE_STYLESHEET } from "../lib/cytoscape-theme";
 import {
-  GraphCanvas,
-  type GraphCanvasRef,
-  type LayoutOverrides,
-  type NodePositionArgs,
-} from "reagraph";
+  runLayoutWhenContainerReady,
+  usesPresetLayout,
+} from "../lib/cytoscape-layout";
 import { defaultNodePosition, type NodePosition } from "../lib/graph-layout";
 
-interface ReagraphNode {
+cytoscape.use(fcose);
+
+interface GraphViewNode {
   id: string;
   label?: string;
   fill?: string;
+  data?: { type?: string };
 }
 
-interface ReagraphLink {
+interface GraphViewLink {
   id: string;
   source: string;
   target: string;
   label?: string;
 }
 
+export interface GraphContextMenuEvent {
+  data: {
+    id: string;
+    source?: string;
+    target?: string;
+    data?: { type?: string };
+    position?: unknown;
+  };
+  onClose: () => void;
+}
+
 interface RoadmapGraphProps {
-  nodes: ReagraphNode[];
-  links: ReagraphLink[];
+  nodes: GraphViewNode[];
+  links: GraphViewLink[];
   emptyMessage?: string;
   focusNodeId?: string | null;
   selectedNodeId?: string | null;
   onNodeClick?: (nodeId: string) => void;
-  contextMenu?: (event: {
-    data: {
-      id: string;
-      source?: string;
-      target?: string;
-      data?: { type?: string };
-      position?: unknown;
-    };
-    onClose: () => void;
-  }) => ReactNode;
+  contextMenu?: (event: GraphContextMenuEvent) => ReactNode;
   draggable?: boolean;
   nodePositions?: Record<string, NodePosition>;
   onNodePositionChange?: (nodeId: string, position: NodePosition) => void;
@@ -53,11 +57,56 @@ interface RoadmapGraphProps {
 
 const FOCUS_DELAY_MS = 450;
 
-function focusGraphOnNode(
-  graphRef: RefObject<GraphCanvasRef | null>,
-  nodeId: string,
-): void {
-  graphRef.current?.fitNodesInView([nodeId], { animated: true });
+function toElementDefinitions(
+  nodes: GraphViewNode[],
+  links: GraphViewLink[],
+  nodePositions: Record<string, NodePosition> | undefined,
+  usePreset: boolean,
+): ElementDefinition[] {
+  const nodeIds = nodes.map((node) => node.id);
+  const elements: ElementDefinition[] = nodes.map((node) => {
+    const saved = nodePositions?.[node.id];
+    const position = saved ?? (usePreset ? defaultNodePosition(node.id, nodeIds) : undefined);
+
+    return {
+      data: {
+        id: node.id,
+        label: node.label ?? node.id,
+        type: node.data?.type ?? "",
+        color: node.fill ?? "#64748b",
+      },
+      ...(position ? { position: { x: position.x, y: position.y } } : {}),
+    };
+  });
+
+  for (const link of links) {
+    elements.push({
+      data: {
+        id: link.id,
+        source: link.source,
+        target: link.target,
+        label: link.label ?? "",
+      },
+    });
+  }
+
+  return elements;
+}
+
+function focusGraphOnNode(cy: Core, nodeId: string): void {
+  const node = cy.getElementById(nodeId);
+  if (node.nonempty()) {
+    cy.animate({
+      fit: { eles: node, padding: 60 },
+      duration: 300,
+    });
+  }
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  event: GraphContextMenuEvent;
 }
 
 export function RoadmapGraph({
@@ -72,68 +121,209 @@ export function RoadmapGraph({
   nodePositions,
   onNodePositionChange,
 }: RoadmapGraphProps) {
-  const graphRef = useRef<GraphCanvasRef>(null);
-  const nodeIds = useMemo(() => nodes.map((node) => node.id), [nodes]);
-  const nodePositionsRef = useRef(nodePositions);
-  const positionsAppliedRef = useRef(false);
-  const [layoutSeed, setLayoutSeed] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<Core | null>(null);
+  const layoutCleanupRef = useRef<(() => void) | null>(null);
+  const onNodeClickRef = useRef(onNodeClick);
+  const onNodePositionChangeRef = useRef(onNodePositionChange);
+  const contextMenuRef = useRef(contextMenu);
+  const [cyReady, setCyReady] = useState(false);
+  const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
+    null,
+  );
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenuState(null);
+  }, []);
 
   useEffect(() => {
-    nodePositionsRef.current = nodePositions;
-  }, [nodePositions]);
+    onNodeClickRef.current = onNodeClick;
+  }, [onNodeClick]);
 
   useEffect(() => {
-    if (!draggable) {
-      positionsAppliedRef.current = false;
+    onNodePositionChangeRef.current = onNodePositionChange;
+  }, [onNodePositionChange]);
+
+  useEffect(() => {
+    contextMenuRef.current = contextMenu;
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenuState) {
       return;
     }
 
-    if (Object.keys(nodePositions ?? {}).length === 0) {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(".graph-context-menu, .graph-context-menu-portal")
+      ) {
+        return;
+      }
+      closeContextMenu();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [closeContextMenu, contextMenuState]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
       return;
     }
 
-    if (positionsAppliedRef.current) {
-      return;
-    }
+    const cy = cytoscape({
+      container,
+      style: CYTOSCAPE_STYLESHEET,
+      wheelSensitivity: 0.2,
+      boxSelectionEnabled: false,
+      minZoom: 0.2,
+      maxZoom: 3,
+    });
 
-    positionsAppliedRef.current = true;
-    setLayoutSeed((current) => current + 1);
-  }, [draggable, nodePositions]);
+    cyRef.current = cy;
+    setCyReady(true);
 
-  const layoutOverrides = useMemo(
-    () =>
-      ({
-        getNodePosition: (id: string, { drags }: NodePositionArgs) => {
-          const dragPosition = drags?.[id]?.position;
-          if (dragPosition) {
-            return dragPosition;
-          }
+    cy.on("tap", "node", (event) => {
+      closeContextMenu();
+      const node = event.target;
+      cy.nodes().unselect();
+      node.select();
+      onNodeClickRef.current?.(node.id());
+    });
 
-          const saved = nodePositionsRef.current?.[id];
-          if (saved) {
-            return { x: saved.x, y: saved.y, z: 0 };
-          }
+    cy.on("tap", "edge", () => {
+      closeContextMenu();
+      cy.nodes().unselect();
+    });
 
-          const fallback = defaultNodePosition(id, nodeIds);
-          return { x: fallback.x, y: fallback.y, z: 0 };
+    cy.on("tap", (event) => {
+      if (event.target === cy) {
+        closeContextMenu();
+        cy.nodes().unselect();
+      }
+    });
+
+    cy.on("cxttap", "node", (event) => {
+      const node = event.target;
+      const originalEvent = event.originalEvent as MouseEvent;
+      const renderContextMenu = contextMenuRef.current;
+      if (!renderContextMenu) {
+        return;
+      }
+
+      const menuEvent: GraphContextMenuEvent = {
+        data: {
+          id: node.id(),
+          data: { type: String(node.data("type") ?? "") },
+          position: node.position(),
         },
-      }) as LayoutOverrides,
-    [nodeIds],
-  );
+        onClose: closeContextMenu,
+      };
 
-  const canvasKey = draggable
-    ? `custom:${nodeIds.join(",")}:${layoutSeed}`
-    : "force";
-
-  const handleNodeDragged = useCallback(
-    (node: { id: string; position: { x: number; y: number } }) => {
-      onNodePositionChange?.(node.id, {
-        x: node.position.x,
-        y: node.position.y,
+      setContextMenuState({
+        x: originalEvent.clientX,
+        y: originalEvent.clientY,
+        event: menuEvent,
       });
-    },
-    [onNodePositionChange],
-  );
+    });
+
+    cy.on("cxttap", "edge", (event) => {
+      const edge = event.target;
+      const originalEvent = event.originalEvent as MouseEvent;
+      const renderContextMenu = contextMenuRef.current;
+      if (!renderContextMenu) {
+        return;
+      }
+
+      const menuEvent: GraphContextMenuEvent = {
+        data: {
+          id: edge.id(),
+          source: edge.source().id(),
+          target: edge.target().id(),
+        },
+        onClose: closeContextMenu,
+      };
+
+      setContextMenuState({
+        x: originalEvent.clientX,
+        y: originalEvent.clientY,
+        event: menuEvent,
+      });
+    });
+
+    cy.on("dragfree", "node", (event) => {
+      const node = event.target;
+      const pos = node.position();
+      onNodePositionChangeRef.current?.(node.id(), { x: pos.x, y: pos.y });
+    });
+
+    const resizeObserver = new ResizeObserver(() => {
+      cy.resize();
+    });
+    resizeObserver.observe(container);
+
+    return () => {
+      layoutCleanupRef.current?.();
+      layoutCleanupRef.current = null;
+      resizeObserver.disconnect();
+      setCyReady(false);
+      cy.destroy();
+      cyRef.current = null;
+    };
+  }, [closeContextMenu]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    const container = containerRef.current;
+    if (!cyReady || !cy || !container || nodes.length === 0) {
+      return;
+    }
+
+    layoutCleanupRef.current?.();
+    layoutCleanupRef.current = null;
+
+    const usePreset = usesPresetLayout(draggable, nodePositions);
+
+    cy.batch(() => {
+      cy.elements().remove();
+      cy.add(toElementDefinitions(nodes, links, nodePositions, usePreset));
+    });
+
+    if (draggable) {
+      cy.nodes().grabify();
+    } else {
+      cy.nodes().ungrabify();
+    }
+
+    layoutCleanupRef.current = runLayoutWhenContainerReady(
+      cy,
+      container,
+      draggable,
+      nodePositions,
+      links.length,
+    );
+
+    return () => {
+      layoutCleanupRef.current?.();
+      layoutCleanupRef.current = null;
+    };
+  }, [cyReady, draggable, links, nodePositions, nodes]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !selectedNodeId) {
+      return;
+    }
+
+    const node = cy.getElementById(selectedNodeId);
+    if (node.nonempty()) {
+      cy.nodes().unselect();
+      node.select();
+    }
+  }, [selectedNodeId]);
 
   useEffect(() => {
     if (!focusNodeId || !nodes.some((node) => node.id === focusNodeId)) {
@@ -141,7 +331,10 @@ export function RoadmapGraph({
     }
 
     const timer = window.setTimeout(() => {
-      focusGraphOnNode(graphRef, focusNodeId);
+      const cy = cyRef.current;
+      if (cy) {
+        focusGraphOnNode(cy, focusNodeId);
+      }
     }, FOCUS_DELAY_MS);
 
     return () => window.clearTimeout(timer);
@@ -157,25 +350,23 @@ export function RoadmapGraph({
 
   return (
     <div className="graph-container">
-      <div className="graph-viewport">
-        <Suspense fallback={<div className="graph-empty">Loading graph…</div>}>
-          <GraphCanvas
-            key={canvasKey}
-            ref={graphRef}
-            nodes={nodes}
-            edges={links}
-            layoutType={draggable ? "custom" : "forceDirected2d"}
-            layoutOverrides={draggable ? layoutOverrides : undefined}
-            labelType="all"
-            animated={false}
-            draggable={draggable}
-            selections={selectedNodeId ? [selectedNodeId] : []}
-            onNodeClick={(node) => onNodeClick?.(node.id)}
-            onNodeDragged={draggable ? handleNodeDragged : undefined}
-            contextMenu={contextMenu}
-          />
-        </Suspense>
-      </div>
+      <div className="graph-viewport" ref={containerRef} />
+      {contextMenuState && contextMenu
+        ? createPortal(
+            <div
+              className="graph-context-menu-portal"
+              style={{
+                position: "fixed",
+                left: contextMenuState.x,
+                top: contextMenuState.y,
+                zIndex: 1000,
+              }}
+            >
+              {contextMenu(contextMenuState.event)}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

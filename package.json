@@ -22,8 +22,9 @@
     "@tauri-apps/plugin-shell": "^2.3.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "cytoscape": "^3.33.1",
+    "cytoscape-fcose": "^2.2.0",
     "react-markdown": "^10.1.0",
-    "reagraph": "^4.27.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
