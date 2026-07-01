@@ -1,7 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
-  compatibleSourceNodes,
-  compatibleTargetNodes,
+  compatibleLinkTypes,
   nodeLabel,
   type GraphNode,
   type LinkTypeMeta,
@@ -12,6 +11,7 @@ interface CreateLinkDialogProps {
   nodes: GraphNode[];
   linkTypes: LinkTypeMeta[];
   saving: boolean;
+  initialNodeId?: string | null;
   onClose: () => void;
   onCreate: (input: {
     linkType: string;
@@ -26,11 +26,48 @@ function sortNodes(nodes: GraphNode[]): GraphNode[] {
   );
 }
 
+function compatibleStartNodes(
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+  finishNode: GraphNode | undefined,
+): GraphNode[] {
+  if (!finishNode) {
+    return sortNodes(nodes);
+  }
+
+  return sortNodes(
+    nodes.filter(
+      (node) =>
+        node.id !== finishNode.id &&
+        compatibleLinkTypes(linkTypes, node.type, finishNode.type).length > 0,
+    ),
+  );
+}
+
+function compatibleFinishNodes(
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+  startNode: GraphNode | undefined,
+): GraphNode[] {
+  if (!startNode) {
+    return sortNodes(nodes);
+  }
+
+  return sortNodes(
+    nodes.filter(
+      (node) =>
+        node.id !== startNode.id &&
+        compatibleLinkTypes(linkTypes, startNode.type, node.type).length > 0,
+    ),
+  );
+}
+
 export function CreateLinkDialog({
   open,
   nodes,
   linkTypes,
   saving,
+  initialNodeId = null,
   onClose,
   onCreate,
 }: CreateLinkDialogProps) {
@@ -38,33 +75,56 @@ export function CreateLinkDialog({
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
 
-  const sortedLinkTypes = useMemo(
-    () =>
-      [...linkTypes].sort((left, right) =>
-        left.link_type.localeCompare(right.link_type),
-      ),
-    [linkTypes],
-  );
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
 
-  const selectedLinkType = sortedLinkTypes.find(
-    (item) => item.link_type === linkType,
-  );
+    setLinkType("");
+    setSource(initialNodeId ?? "");
+    setTarget("");
+  }, [initialNodeId, open]);
 
-  const sourceNodes = useMemo(
-    () =>
-      selectedLinkType
-        ? sortNodes(compatibleSourceNodes(nodes, selectedLinkType))
-        : [],
-    [nodes, selectedLinkType],
-  );
+  const startNode = nodes.find((node) => node.id === source);
+  const finishNode = nodes.find((node) => node.id === target);
 
-  const targetNodes = useMemo(
-    () =>
-      selectedLinkType
-        ? sortNodes(compatibleTargetNodes(nodes, selectedLinkType))
-        : [],
-    [nodes, selectedLinkType],
-  );
+  const startNodes = useMemo(() => {
+    const compatible = compatibleStartNodes(nodes, linkTypes, finishNode);
+    if (source && !compatible.some((node) => node.id === source)) {
+      const selected = nodes.find((node) => node.id === source);
+      return selected ? sortNodes([...compatible, selected]) : compatible;
+    }
+    return compatible;
+  }, [finishNode, linkTypes, nodes, source]);
+
+  const finishNodes = useMemo(() => {
+    const compatible = compatibleFinishNodes(nodes, linkTypes, startNode);
+    if (target && !compatible.some((node) => node.id === target)) {
+      const selected = nodes.find((node) => node.id === target);
+      return selected ? sortNodes([...compatible, selected]) : compatible;
+    }
+    return compatible;
+  }, [linkTypes, nodes, startNode, target]);
+
+  const compatibleTypes = useMemo(() => {
+    if (!startNode || !finishNode) {
+      return [];
+    }
+
+    return [...compatibleLinkTypes(linkTypes, startNode.type, finishNode.type)].sort(
+      (left, right) => left.link_type.localeCompare(right.link_type),
+    );
+  }, [finishNode, linkTypes, startNode]);
+
+  useEffect(() => {
+    if (!linkType) {
+      return;
+    }
+
+    if (!compatibleTypes.some((item) => item.link_type === linkType)) {
+      setLinkType("");
+    }
+  }, [compatibleTypes, linkType]);
 
   if (!open) {
     return null;
@@ -76,6 +136,11 @@ export function CreateLinkDialog({
       return;
     }
     onCreate({ linkType, source, target });
+  };
+
+  const handleSwapEndpoints = () => {
+    setSource(target);
+    setTarget(source);
   };
 
   return (
@@ -95,72 +160,79 @@ export function CreateLinkDialog({
             </button>
           </header>
 
+          <div className="link-endpoints">
+            <label className="edit-field link-endpoint-field">
+              <span>Start node</span>
+              <select
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                required
+                disabled={startNodes.length === 0}
+              >
+                <option value="" disabled>
+                  {startNodes.length === 0
+                    ? "No compatible start nodes"
+                    : "Select start node…"}
+                </option>
+                {startNodes.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {nodeLabel(node.id)} ({node.type})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              className="link-endpoint-swap"
+              onClick={handleSwapEndpoints}
+              disabled={!source && !target}
+              aria-label="Swap start and finish nodes"
+              title="Swap start and finish nodes"
+            >
+              ⇄
+            </button>
+
+            <label className="edit-field link-endpoint-field">
+              <span>Finish node</span>
+              <select
+                value={target}
+                onChange={(event) => setTarget(event.target.value)}
+                required
+                disabled={finishNodes.length === 0}
+              >
+                <option value="" disabled>
+                  {finishNodes.length === 0
+                    ? "No compatible finish nodes"
+                    : "Select finish node…"}
+                </option>
+                {finishNodes.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {nodeLabel(node.id)} ({node.type})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <label className="edit-field">
             <span>Link type</span>
             <select
               value={linkType}
-              onChange={(event) => {
-                setLinkType(event.target.value);
-                setSource("");
-                setTarget("");
-              }}
+              onChange={(event) => setLinkType(event.target.value)}
               required
-              disabled={sortedLinkTypes.length === 0}
+              disabled={!startNode || !finishNode || compatibleTypes.length === 0}
             >
               <option value="" disabled>
-                {sortedLinkTypes.length === 0
-                  ? "No link types available"
-                  : "Select link type…"}
+                {!startNode || !finishNode
+                  ? "Select start and finish nodes first"
+                  : compatibleTypes.length === 0
+                    ? "No compatible link types"
+                    : "Select link type…"}
               </option>
-              {sortedLinkTypes.map((item) => (
+              {compatibleTypes.map((item) => (
                 <option key={item.link_type} value={item.link_type}>
                   {item.link_type}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="edit-field">
-            <span>Source</span>
-            <select
-              value={source}
-              onChange={(event) => setSource(event.target.value)}
-              required
-              disabled={!selectedLinkType || sourceNodes.length === 0}
-            >
-              <option value="" disabled>
-                {!selectedLinkType
-                  ? "Select link type first"
-                  : sourceNodes.length === 0
-                    ? "No compatible source nodes"
-                    : "Select source node…"}
-              </option>
-              {sourceNodes.map((node) => (
-                <option key={node.id} value={node.id}>
-                  {nodeLabel(node.id)} ({node.type})
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="edit-field">
-            <span>Target</span>
-            <select
-              value={target}
-              onChange={(event) => setTarget(event.target.value)}
-              required
-              disabled={!selectedLinkType || targetNodes.length === 0}
-            >
-              <option value="" disabled>
-                {!selectedLinkType
-                  ? "Select link type first"
-                  : targetNodes.length === 0
-                    ? "No compatible target nodes"
-                    : "Select target node…"}
-              </option>
-              {targetNodes.map((node) => (
-                <option key={node.id} value={node.id}>
-                  {nodeLabel(node.id)} ({node.type})
                 </option>
               ))}
             </select>

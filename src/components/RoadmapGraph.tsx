@@ -41,6 +41,9 @@ export interface GraphContextMenuEvent {
     target?: string;
     data?: { type?: string };
     position?: unknown;
+    background?: boolean;
+    graphPosition?: NodePosition;
+    nodePositions?: Record<string, NodePosition>;
   };
   onClose: () => void;
 }
@@ -83,13 +86,22 @@ function sortGraphViewNodes(nodes: GraphViewNode[]): GraphViewNode[] {
   return sorted;
 }
 
+function snapshotNodePositions(cy: Core): Record<string, NodePosition> {
+  const positions: Record<string, NodePosition> = {};
+  cy.nodes().forEach((node) => {
+    const position = node.position();
+    positions[node.id()] = { x: position.x, y: position.y };
+  });
+  return positions;
+}
+
 function toElementDefinitions(
   nodes: GraphViewNode[],
   links: GraphViewLink[],
   nodePositions: Record<string, NodePosition> | undefined,
-  usePreset: boolean,
 ): ElementDefinition[] {
   const nodeIds = nodes.map((node) => node.id);
+  const usePreset = usesPresetLayout(nodePositions);
   const elements: ElementDefinition[] = sortGraphViewNodes(nodes).map((node) => {
     const saved = nodePositions?.[node.id];
     const position = saved ?? (usePreset ? defaultNodePosition(node.id, nodeIds) : undefined);
@@ -286,6 +298,37 @@ export function RoadmapGraph({
       });
     });
 
+    cy.on("cxttap", (event) => {
+      if (event.target !== cy) {
+        return;
+      }
+
+      const originalEvent = event.originalEvent as MouseEvent;
+      const renderContextMenu = contextMenuRef.current;
+      if (!renderContextMenu) {
+        return;
+      }
+
+      const menuEvent: GraphContextMenuEvent = {
+        data: {
+          id: "",
+          background: true,
+          graphPosition: {
+            x: event.position?.x ?? 0,
+            y: event.position?.y ?? 0,
+          },
+          nodePositions: snapshotNodePositions(cy),
+        },
+        onClose: closeContextMenu,
+      };
+
+      setContextMenuState({
+        x: originalEvent.clientX,
+        y: originalEvent.clientY,
+        event: menuEvent,
+      });
+    });
+
     cy.on("dragfree", "node", (event) => {
       const node = event.target;
       const pos = node.position();
@@ -324,11 +367,9 @@ export function RoadmapGraph({
       return;
     }
 
-    const usePreset = usesPresetLayout(draggable, nodePositions);
-
     cy.batch(() => {
       cy.elements().remove();
-      cy.add(toElementDefinitions(nodes, links, nodePositions, usePreset));
+      cy.add(toElementDefinitions(nodes, links, nodePositions));
     });
 
     if (draggable) {
@@ -340,7 +381,6 @@ export function RoadmapGraph({
     layoutCleanupRef.current = runLayoutWhenContainerReady(
       cy,
       container,
-      draggable,
       nodePositions,
       links.length,
       nodes.some((node) => Boolean(node.parent || node.data?.isCompound)),

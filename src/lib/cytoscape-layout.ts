@@ -46,15 +46,13 @@ export function hasSavedLayout(
 
 /**
  * Returns whether the graph should use preset positions instead of auto layout.
- * @param draggable - Whether nodes can be dragged in the current view.
  * @param nodePositions - Saved node positions keyed by node id.
  * @returns Whether preset layout should be used.
  */
 export function usesPresetLayout(
-  draggable: boolean,
   nodePositions: Record<string, NodePosition> | undefined,
 ): boolean {
-  return draggable && hasSavedLayout(nodePositions);
+  return hasSavedLayout(nodePositions);
 }
 
 const COMPOUND_FCOSE_LAYOUT = {
@@ -192,12 +190,11 @@ export function scatterEdgelessNodes(cy: Core, seed: number): void {
  */
 export function applyAutoLayout(
   cy: Core,
-  draggable: boolean,
   nodePositions: Record<string, NodePosition> | undefined,
   linkCount: number,
   hasCompoundNodes = false,
 ): void {
-  if (usesPresetLayout(draggable, nodePositions)) {
+  if (usesPresetLayout(nodePositions)) {
     cy.layout(PRESET_LAYOUT).run();
     return;
   }
@@ -229,7 +226,6 @@ export function applyAutoLayout(
 export function runLayoutWhenContainerReady(
   cy: Core,
   container: HTMLElement,
-  draggable: boolean,
   nodePositions: Record<string, NodePosition> | undefined,
   linkCount: number,
   hasCompoundNodes = false,
@@ -251,7 +247,7 @@ export function runLayoutWhenContainerReady(
       return false;
     }
 
-    applyAutoLayout(cy, draggable, nodePositions, linkCount, hasCompoundNodes);
+    applyAutoLayout(cy, nodePositions, linkCount, hasCompoundNodes);
     laidOut = true;
     resizeObserver?.disconnect();
     resizeObserver = undefined;

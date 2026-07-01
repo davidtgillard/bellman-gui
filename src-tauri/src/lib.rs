@@ -9,8 +9,9 @@ use bellman_cmd::run_bellman;
 use cli::CliOptions;
 use graph::load_roadmap_graph;
 use graph_layout::{
-    load_work_package_layout, remove_work_package_node_position,
-    save_work_package_node_position, SaveWorkPackageNodePositionRequest, WorkPackageLayoutDto,
+    load_work_package_layout, remove_top_level_node_position, remove_work_package_node_position,
+    save_graph_layout, save_work_package_node_position, SaveWorkPackageNodePositionRequest,
+    WorkPackageLayoutDto,
 };
 use node_detail::load_node_detail_command;
 use roadmap_edit::{
@@ -126,6 +127,22 @@ fn remove_work_package_node_position_command(
 }
 
 #[tauri::command]
+fn save_graph_layout_command(
+    roadmap_root: String,
+    layout: WorkPackageLayoutDto,
+) -> Result<WorkPackageLayoutDto, String> {
+    save_graph_layout(PathBuf::from(roadmap_root).as_path(), layout)
+}
+
+#[tauri::command]
+fn remove_top_level_node_position_command(
+    roadmap_root: String,
+    node_id: String,
+) -> Result<WorkPackageLayoutDto, String> {
+    remove_top_level_node_position(PathBuf::from(roadmap_root).as_path(), &node_id)
+}
+
+#[tauri::command]
 fn load_initial_roadmap(cli: tauri::State<CliOptions>) -> Result<Option<graph::RoadmapGraphDto>, String> {
     match cli.initial_roadmap_root.as_ref() {
         Some(path) => load_roadmap_graph(path.as_path()).map(Some),
@@ -171,6 +188,8 @@ pub fn run() {
             load_work_package_layout_command,
             save_work_package_node_position_command,
             remove_work_package_node_position_command,
+            save_graph_layout_command,
+            remove_top_level_node_position_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

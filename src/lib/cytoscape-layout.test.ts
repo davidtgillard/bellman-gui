@@ -6,10 +6,10 @@ import {
 } from "./cytoscape-layout";
 
 describe("cytoscape-layout", () => {
-  it("detects preset layout mode for saved draggable layouts", () => {
-    expect(usesPresetLayout(true, { a: { x: 1, y: 2 } })).toBe(true);
-    expect(usesPresetLayout(false, { a: { x: 1, y: 2 } })).toBe(false);
-    expect(usesPresetLayout(true, {})).toBe(false);
+  it("detects preset layout mode for saved layouts", () => {
+    expect(usesPresetLayout({ a: { x: 1, y: 2 } })).toBe(true);
+    expect(usesPresetLayout({})).toBe(false);
+    expect(usesPresetLayout(undefined)).toBe(false);
   });
 
   it("uses cose for edgeless graphs and fcose when links exist", () => {

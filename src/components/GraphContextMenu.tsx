@@ -5,10 +5,13 @@ interface GraphContextMenuProps {
   nodeId?: string;
   nodeType?: string;
   linkId?: string;
+  background?: boolean;
   showInnerGraph?: boolean;
   showWorkPackageInnerGraph?: boolean;
   onShowInnerGraph?: (projectId: string) => void;
   onShowWorkPackageInnerGraph?: (workPackageId: string) => void;
+  onCreateNode?: () => void;
+  onCreateLink?: (nodeId: string) => void;
   onRemoveNode?: (nodeId: string, nodeType: string) => void;
   onRemoveLink?: (linkId: string) => void;
   onClose: () => void;
@@ -19,15 +22,43 @@ export function GraphContextMenu({
   nodeId,
   nodeType = "",
   linkId,
+  background = false,
   showInnerGraph = false,
   showWorkPackageInnerGraph = false,
   onShowInnerGraph,
   onShowWorkPackageInnerGraph,
+  onCreateNode,
+  onCreateLink,
   onRemoveNode,
   onRemoveLink,
   onClose,
 }: GraphContextMenuProps) {
   const items: Array<{ label: string; onClick: () => void; destructive?: boolean }> = [];
+
+  if (editable && background && onCreateNode) {
+    items.push({
+      label: "New node…",
+      onClick: () => {
+        onCreateNode();
+        onClose();
+      },
+    });
+  }
+
+  if (
+    editable &&
+    nodeId &&
+    onCreateLink &&
+    !isOverflowNodeId(nodeId)
+  ) {
+    items.push({
+      label: "New link…",
+      onClick: () => {
+        onCreateLink(nodeId);
+        onClose();
+      },
+    });
+  }
 
   if (showInnerGraph && nodeId && onShowInnerGraph) {
     items.push({

@@ -17,6 +17,8 @@ pub struct WorkPackageLayoutDto {
     pub version: u32,
     pub kind: String,
     #[serde(default)]
+    pub top_level: BTreeMap<String, NodePositionDto>,
+    #[serde(default)]
     pub projects: BTreeMap<String, BTreeMap<String, NodePositionDto>>,
 }
 
@@ -25,6 +27,7 @@ impl Default for WorkPackageLayoutDto {
         Self {
             version: 1,
             kind: LAYOUT_KIND.to_string(),
+            top_level: BTreeMap::new(),
             projects: BTreeMap::new(),
         }
     }
@@ -142,7 +145,7 @@ pub fn remove_work_package_node_position(
         }
     }
 
-    if layout.projects.is_empty() && !path.is_file() {
+    if layout.top_level.is_empty() && layout.projects.is_empty() && !path.is_file() {
         return Ok(layout);
     }
 
@@ -155,7 +158,7 @@ pub fn remove_work_package_node_position(
         })?;
     }
 
-    if layout.projects.is_empty() {
+    if layout.top_level.is_empty() && layout.projects.is_empty() {
         if path.is_file() {
             fs::remove_file(&path)
                 .map_err(|error| format!("failed to remove {}: {error}", path.display()))?;
@@ -169,6 +172,59 @@ pub fn remove_work_package_node_position(
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
 
     Ok(layout)
+}
+
+pub fn save_graph_layout(
+    root: &Path,
+    layout: WorkPackageLayoutDto,
+) -> Result<WorkPackageLayoutDto, String> {
+    if layout.kind != LAYOUT_KIND {
+        return Err(format!(
+            "invalid graph layout: expected kind {LAYOUT_KIND}, got {}",
+            layout.kind
+        ));
+    }
+
+    let path = layout_path(root);
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create layout directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    if layout.top_level.is_empty() && layout.projects.is_empty() {
+        if path.is_file() {
+            fs::remove_file(&path)
+                .map_err(|error| format!("failed to remove {}: {error}", path.display()))?;
+        }
+        return Ok(WorkPackageLayoutDto::default());
+    }
+
+    let formatted = serde_json::to_string_pretty(&layout)
+        .map_err(|error| format!("failed to serialize work package layout: {error}"))?;
+    fs::write(&path, format!("{formatted}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    Ok(layout)
+}
+
+pub fn remove_top_level_node_position(
+    root: &Path,
+    node_id: &str,
+) -> Result<WorkPackageLayoutDto, String> {
+    let path = layout_path(root);
+    let mut layout = load_work_package_layout(root)?;
+    layout.top_level.remove(node_id);
+
+    if layout.top_level.is_empty() && layout.projects.is_empty() && !path.is_file() {
+        return Ok(layout);
+    }
+
+    save_graph_layout(root, layout)
 }
 
 #[cfg(test)]
@@ -215,6 +271,7 @@ mod tests {
         let legacy = WorkPackageLayoutDto {
             version: 1,
             kind: LAYOUT_KIND.to_string(),
+            top_level: BTreeMap::new(),
             projects: BTreeMap::from([(
                 "project--billing-redesign".to_string(),
                 BTreeMap::from([(
@@ -275,6 +332,58 @@ mod tests {
         .expect("remove");
 
         assert!(layout.projects.is_empty());
+        assert!(!layout_path(dir.path()).is_file());
+    }
+
+    #[test]
+    fn saves_and_loads_top_level_node_position() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join(".fits")).expect("fits dir");
+
+        let saved = save_graph_layout(
+            dir.path(),
+            WorkPackageLayoutDto {
+                version: 1,
+                kind: LAYOUT_KIND.to_string(),
+                top_level: BTreeMap::from([(
+                    "initiative--alpha".to_string(),
+                    NodePositionDto { x: 42.0, y: -17.0 },
+                )]),
+                projects: BTreeMap::new(),
+            },
+        )
+        .expect("save");
+
+        assert_eq!(
+            saved.top_level["initiative--alpha"],
+            NodePositionDto { x: 42.0, y: -17.0 }
+        );
+
+        let loaded = load_work_package_layout(dir.path()).expect("load");
+        assert_eq!(loaded, saved);
+    }
+
+    #[test]
+    fn removes_top_level_node_position() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join(".fits")).expect("fits dir");
+
+        save_graph_layout(
+            dir.path(),
+            WorkPackageLayoutDto {
+                version: 1,
+                kind: LAYOUT_KIND.to_string(),
+                top_level: BTreeMap::from([(
+                    "initiative--alpha".to_string(),
+                    NodePositionDto { x: 1.0, y: 2.0 },
+                )]),
+                projects: BTreeMap::new(),
+            },
+        )
+        .expect("save");
+
+        let layout = remove_top_level_node_position(dir.path(), "initiative--alpha").expect("remove");
+        assert!(layout.top_level.is_empty());
         assert!(!layout_path(dir.path()).is_file());
     }
 }

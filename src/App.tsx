@@ -30,14 +30,19 @@ import {
 } from "./lib/graph";
 import { createLink, createNode, removeLink, removeNode } from "./lib/roadmap-api";
 import {
+  applyNodePlacement,
   EMPTY_WORK_PACKAGE_LAYOUT,
   loadWorkPackageLayout,
   projectLayoutKey,
   projectNodePositions,
+  removeTopLevelNodePosition,
   removeWorkPackageNodePosition,
+  saveGraphLayout,
   saveWorkPackageNodePosition,
+  topLevelNodePositions,
   withNodePosition,
   withoutNodePosition,
+  withoutTopLevelNodePosition,
   type NodePosition,
   type WorkPackageLayout,
 } from "./lib/graph-layout";
@@ -78,6 +83,13 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkDialogInitialNodeId, setLinkDialogInitialNodeId] = useState<string | null>(
+    null,
+  );
+  const [pendingNodePlacement, setPendingNodePlacement] = useState<{
+    preferred: NodePosition;
+    existingPositions: Record<string, NodePosition>;
+  } | null>(null);
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(
     () => new Set(exampleGraph.nodes.map((node) => node.type)),
   );
@@ -103,6 +115,7 @@ function App() {
   interface ApplyGraphOptions {
     resetVisibleTypes?: boolean;
     revealNodeId?: string;
+    layout?: WorkPackageLayout;
   }
 
   const applyGraph = useCallback((graph: RoadmapGraph, options: ApplyGraphOptions = {}) => {
@@ -139,7 +152,9 @@ function App() {
     }
     setError(null);
 
-    if (roadmapLayoutPersistable(graph.root, graph.editable)) {
+    if (options.layout) {
+      setWorkPackageLayout(options.layout);
+    } else if (roadmapLayoutPersistable(graph.root, graph.editable)) {
       void loadWorkPackageLayout(graph.root)
         .then(setWorkPackageLayout)
         .catch((caught) => setError(String(caught)));
@@ -231,6 +246,13 @@ function App() {
       setSaving(true);
       setError(null);
 
+      const placement = pendingNodePlacement;
+      const projectId = currentProjectId(graphViewStack);
+      const inProjectGraph = isWorkPackageGraphView(graphViewStack);
+      const placementScope = inProjectGraph && projectId
+        ? ({ kind: "project" as const, projectId })
+        : ({ kind: "top_level" as const });
+
       try {
         const previousNodes = nodes;
         const graph = await createNode({
@@ -241,7 +263,28 @@ function App() {
           description: input.description,
         });
         const revealNodeId = findAddedNodeId(previousNodes, graph.nodes);
-        applyGraph(graph, revealNodeId ? { revealNodeId } : undefined);
+        let savedLayout: WorkPackageLayout | undefined;
+
+        if (
+          revealNodeId &&
+          placement &&
+          roadmapLayoutPersistable(roadmapRoot, graph.editable)
+        ) {
+          const { layout: nextLayout } = applyNodePlacement(
+            workPackageLayout,
+            placementScope,
+            revealNodeId,
+            placement.preferred,
+            placement.existingPositions,
+          );
+          savedLayout = await saveGraphLayout(roadmapRoot, nextLayout);
+        }
+
+        applyGraph(graph, {
+          ...(revealNodeId ? { revealNodeId } : {}),
+          ...(savedLayout ? { layout: savedLayout } : {}),
+        });
+        setPendingNodePlacement(null);
         setNodeDialogOpen(false);
       } catch (caught) {
         setError(String(caught));
@@ -249,7 +292,14 @@ function App() {
         setSaving(false);
       }
     },
-    [applyGraph, nodes, roadmapRoot],
+    [
+      applyGraph,
+      graphViewStack,
+      nodes,
+      pendingNodePlacement,
+      roadmapRoot,
+      workPackageLayout,
+    ],
   );
 
   const handleCreateLink = useCallback(
@@ -266,6 +316,7 @@ function App() {
         });
         applyGraph(graph);
         setLinkDialogOpen(false);
+        setLinkDialogInitialNodeId(null);
       } catch (caught) {
         setError(String(caught));
       } finally {
@@ -310,6 +361,15 @@ function App() {
         )
           .then(setWorkPackageLayout)
           .catch((caught) => setError(String(caught)));
+      } else if (
+        !projectId &&
+        roadmapLayoutPersistable(roadmapRoot, editable) &&
+        nodeId in workPackageLayout.topLevel
+      ) {
+        setWorkPackageLayout((current) => withoutTopLevelNodePosition(current, nodeId));
+        void removeTopLevelNodePosition(roadmapRoot, nodeId)
+          .then(setWorkPackageLayout)
+          .catch((caught) => setError(String(caught)));
       }
 
       try {
@@ -335,6 +395,7 @@ function App() {
       nodes,
       roadmapRoot,
       selectedNodeId,
+      workPackageLayout,
     ],
   );
 
@@ -523,7 +584,7 @@ function App() {
   );
   const innerGraphNodePositions = activeProjectId
     ? projectNodePositions(workPackageLayout, activeProjectId)
-    : undefined;
+    : topLevelNodePositions(workPackageLayout);
 
   const handleToggleType = useCallback((type: string) => {
     setVisibleTypes((current) => {
@@ -652,13 +713,46 @@ function App() {
         target?: string;
         data?: { type?: string };
         position?: unknown;
+        background?: boolean;
+        graphPosition?: NodePosition;
+        nodePositions?: Record<string, NodePosition>;
       };
       onClose: () => void;
     }) => {
+      const isBackground = event.data.background === true;
+
       const isEdge =
+        !isBackground &&
         typeof event.data.source === "string" &&
         typeof event.data.target === "string" &&
         !("position" in event.data);
+
+      if (isBackground) {
+        if (!editable) {
+          return null;
+        }
+
+        return (
+          <GraphContextMenu
+            editable={editable}
+            background
+            onCreateNode={() => {
+              const graphPosition = event.data.graphPosition;
+              const nodePositions = event.data.nodePositions;
+              if (graphPosition && nodePositions) {
+                setPendingNodePlacement({
+                  preferred: graphPosition,
+                  existingPositions: nodePositions,
+                });
+              } else {
+                setPendingNodePlacement(null);
+              }
+              setNodeDialogOpen(true);
+            }}
+            onClose={event.onClose}
+          />
+        );
+      }
 
       if (isEdge) {
         if (!editable) {
@@ -694,6 +788,10 @@ function App() {
             compoundView !== null &&
             workPackageHasChildren(nodeId, compoundView.childrenByParent)
           }
+          onCreateLink={(startNodeId) => {
+            setLinkDialogInitialNodeId(startNodeId);
+            setLinkDialogOpen(true);
+          }}
           onShowInnerGraph={handleShowInnerGraph}
           onShowWorkPackageInnerGraph={handleShowWorkPackageInnerGraph}
           onRemoveNode={(removeNodeId, type) => void handleRemoveNode(removeNodeId, type)}
@@ -765,30 +863,6 @@ function App() {
           {sidecarVersion ? (
             <span className="sidecar-badge">bellman {sidecarVersion}</span>
           ) : null}
-          <button
-            type="button"
-            onClick={() => setNodeDialogOpen(true)}
-            disabled={!editable || saving}
-            title={
-              editable
-                ? "Create a new node"
-                : "Open a roadmap folder on disk to edit the graph"
-            }
-          >
-            New node…
-          </button>
-          <button
-            type="button"
-            onClick={() => setLinkDialogOpen(true)}
-            disabled={!editable || saving || nodes.length < 2}
-            title={
-              editable
-                ? "Create a new link"
-                : "Open a roadmap folder on disk to edit the graph"
-            }
-          >
-            New link…
-          </button>
           <button type="button" onClick={() => void handleOpenRoadmap()} disabled={opening}>
             {opening ? "Opening…" : "Open roadmap…"}
           </button>
@@ -809,8 +883,8 @@ function App() {
       ) : null}
       {!editable ? (
         <div className="info-banner">
-          The bundled example graph is read-only. Open a roadmap folder to create nodes and
-          links.
+          The bundled example graph is read-only. Open a roadmap folder, then right-click the
+          graph to create nodes and right-click a node to create links.
         </div>
       ) : null}
       <div className="graph-area">
@@ -856,6 +930,7 @@ function App() {
         saving={saving}
         onClose={() => {
           setNodeDialogOpen(false);
+          setPendingNodePlacement(null);
           setError(null);
         }}
         onCreate={(input) => void handleCreateNode(input)}
@@ -865,8 +940,10 @@ function App() {
         nodes={nodes}
         linkTypes={linkTypes}
         saving={saving}
+        initialNodeId={linkDialogInitialNodeId}
         onClose={() => {
           setLinkDialogOpen(false);
+          setLinkDialogInitialNodeId(null);
           setError(null);
         }}
         onCreate={(input) => void handleCreateLink(input)}
