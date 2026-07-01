@@ -103,8 +103,11 @@ function App() {
     preferred: NodePosition;
     existingPositions: Record<string, NodePosition>;
   } | null>(null);
-  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(
-    () => new Set(exampleGraph.nodes.map((node) => node.type)),
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(() =>
+    resolveVisibleTypes(
+      exampleGraph.nodes.map((node) => node.type),
+      loadLegendVisibility(exampleGraph.root),
+    ),
   );
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [graphViewStack, setGraphViewStack] =
@@ -694,17 +697,14 @@ function App() {
     [filteredNodes],
   );
 
-  const filteredLinks = useMemo(
-    () =>
-      displayGraph.links.filter(
-        (link) => visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target),
-      ),
-    [displayGraph.links, visibleNodeIds],
+  const displayNodeIds = useMemo(
+    () => new Set(displayGraph.nodes.map((node) => node.id)),
+    [displayGraph.nodes],
   );
 
   const graphViewNodes = useMemo(
     () =>
-      filteredNodes.map((node) => {
+      displayGraph.nodes.map((node) => {
         if (compoundView) {
           const compoundNode = node as CompoundWorkPackageViewNode;
           const label =
@@ -739,18 +739,22 @@ function App() {
           data: { type: node.type },
         };
       }),
-    [compoundView, filteredNodes],
+    [compoundView, displayGraph.nodes],
   );
 
   const graphViewLinks = useMemo(
     () =>
-      filteredLinks.map((link) => ({
-        id: link.id,
-        source: link.source,
-        target: link.target,
-        label: link.linkType,
-      })),
-    [filteredLinks],
+      displayGraph.links
+        .filter(
+          (link) => displayNodeIds.has(link.source) && displayNodeIds.has(link.target),
+        )
+        .map((link) => ({
+          id: link.id,
+          source: link.source,
+          target: link.target,
+          label: link.linkType,
+        })),
+    [displayGraph.links, displayNodeIds],
   );
   const layoutReady =
     !roadmapLayoutPersistable(roadmapRoot, editable) || layoutHydrated;
@@ -1068,6 +1072,7 @@ function App() {
           <RoadmapGraphView
             nodes={graphViewNodes}
             links={graphViewLinks}
+            visibleNodeIds={visibleNodeIds}
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}

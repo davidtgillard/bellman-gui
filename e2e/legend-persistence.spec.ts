@@ -1,4 +1,13 @@
-import { expect, reloadApp, setupPage, test, type Scenario } from "./support/fixtures";
+import {
+  dragGraphBackground,
+  expect,
+  getGraphPan,
+  reloadApp,
+  setupPage,
+  test,
+  waitForGraph,
+  type Scenario,
+} from "./support/fixtures";
 
 const PROJECT = { id: "project--billing", type: "project" };
 const GOAL = { id: "goal--reduce-churn", type: "goal" };
@@ -37,5 +46,19 @@ test.describe("legend visibility persistence", () => {
     await expect(legend.getByRole("checkbox", { name: "Goal" })).not.toBeChecked();
     await expect(legend.getByRole("checkbox", { name: "Project" })).toBeChecked();
     await expect(legend.getByRole("checkbox", { name: "Milestone" })).toBeChecked();
+  });
+
+  test("toggling legend visibility does not change the viewport pan", async ({ page }) => {
+    await setupPage(page, multiTypeScenario());
+    await waitForGraph(page);
+    await dragGraphBackground(page);
+
+    const panBefore = await getGraphPan(page);
+    const legend = page.getByRole("complementary", { name: "Node types" });
+    await legend.getByRole("checkbox", { name: "Goal" }).uncheck();
+
+    const panAfter = await getGraphPan(page);
+    expect(panAfter.x).toBeCloseTo(panBefore.x, 0);
+    expect(panAfter.y).toBeCloseTo(panBefore.y, 0);
   });
 });

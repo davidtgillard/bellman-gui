@@ -61,6 +61,7 @@ export interface GraphContextMenuEvent {
 interface RoadmapGraphProps {
   nodes: GraphViewNode[];
   links: GraphViewLink[];
+  visibleNodeIds?: ReadonlySet<string>;
   emptyMessage?: string;
   focusNodeId?: string | null;
   selectedNodeId?: string | null;
@@ -123,11 +124,11 @@ function toElementDefinitions(
   links: GraphViewLink[],
   nodePositions: Record<string, NodePosition> | undefined,
 ): ElementDefinition[] {
-  const nodeIds = nodes.map((node) => node.id);
+  const nodeIds = new Set(nodes.map((node) => node.id));
   const usePreset = usesPresetLayout(nodePositions);
   const elements: ElementDefinition[] = sortGraphViewNodes(uniqueGraphViewNodes(nodes)).map((node) => {
     const saved = nodePositions?.[node.id];
-    const position = saved ?? (usePreset ? defaultNodePosition(node.id, nodeIds) : undefined);
+    const position = saved ?? (usePreset ? defaultNodePosition(node.id, [...nodeIds]) : undefined);
     const baseLabel = graphNodeDisplayLabel(node.label ?? node.id);
     const label = node.subLabel
       ? `${baseLabel}\n${graphNodeDisplayLabel(node.subLabel)}`
@@ -148,6 +149,9 @@ function toElementDefinitions(
   });
 
   for (const link of links) {
+    if (!nodeIds.has(link.source) || !nodeIds.has(link.target)) {
+      continue;
+    }
     elements.push({
       data: {
         id: link.id,
@@ -159,6 +163,24 @@ function toElementDefinitions(
   }
 
   return elements;
+}
+
+function syncGraphVisibility(cy: Core, visibleNodeIds: ReadonlySet<string> | undefined): void {
+  if (!visibleNodeIds) {
+    cy.elements().style("display", "element");
+    return;
+  }
+
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      node.style("display", visibleNodeIds.has(node.id()) ? "element" : "none");
+    });
+    cy.edges().forEach((edge) => {
+      const visible =
+        visibleNodeIds.has(edge.source().id()) && visibleNodeIds.has(edge.target().id());
+      edge.style("display", visible ? "element" : "none");
+    });
+  });
 }
 
 function focusGraphOnNode(cy: Core, nodeId: string): void {
@@ -220,6 +242,7 @@ interface ContextMenuState {
 export function RoadmapGraph({
   nodes,
   links,
+  visibleNodeIds,
   emptyMessage = "Open a bellman roadmap folder to view its graph.",
   focusNodeId = null,
   selectedNodeId = null,
@@ -237,6 +260,7 @@ export function RoadmapGraph({
   const dragConstraintCleanupRef = useRef<(() => void) | null>(null);
   const graphStructureKeyRef = useRef("");
   const layoutCompletedRef = useRef(false);
+  const visibleNodeIdsRef = useRef(visibleNodeIds);
   const onNodeClickRef = useRef(onNodeClick);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
@@ -258,6 +282,18 @@ export function RoadmapGraph({
   const closeContextMenu = useCallback(() => {
     setContextMenuState(null);
   }, []);
+
+  const applyGraphVisibility = useCallback((cy: Core, preserveViewport: boolean) => {
+    const viewport = preserveViewport ? { pan: cy.pan(), zoom: cy.zoom() } : null;
+    syncGraphVisibility(cy, visibleNodeIdsRef.current);
+    if (viewport) {
+      cy.viewport(viewport);
+    }
+  }, []);
+
+  useEffect(() => {
+    visibleNodeIdsRef.current = visibleNodeIds;
+  }, [visibleNodeIds]);
 
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
@@ -583,6 +619,8 @@ export function RoadmapGraph({
       dragConstraintCleanupRef.current?.();
       dragConstraintCleanupRef.current = null;
       resizeObserver.disconnect();
+      graphStructureKeyRef.current = "";
+      layoutCompletedRef.current = false;
       setCyReady(false);
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
@@ -647,6 +685,9 @@ export function RoadmapGraph({
       (positions) => onAutoLayoutCompleteRef.current?.(positions),
       () => {
         layoutCompletedRef.current = true;
+        if (cyRef.current) {
+          applyGraphVisibility(cyRef.current, true);
+        }
       },
     );
 
@@ -654,7 +695,16 @@ export function RoadmapGraph({
       layoutCleanupRef.current?.();
       layoutCleanupRef.current = null;
     };
-  }, [cyReady, draggable, layoutReady, links, nodePositions, nodes]);
+  }, [applyGraphVisibility, cyReady, draggable, layoutReady, links, nodePositions, nodes]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy || !layoutCompletedRef.current) {
+      return;
+    }
+
+    applyGraphVisibility(cy, true);
+  }, [applyGraphVisibility, cyReady, visibleNodeIds]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -670,7 +720,11 @@ export function RoadmapGraph({
   }, [selectedNodeId]);
 
   useEffect(() => {
-    if (!focusNodeId || !nodes.some((node) => node.id === focusNodeId)) {
+    if (
+      !focusNodeId ||
+      !nodes.some((node) => node.id === focusNodeId) ||
+      (visibleNodeIds && !visibleNodeIds.has(focusNodeId))
+    ) {
       return;
     }
 
@@ -682,12 +736,17 @@ export function RoadmapGraph({
     }, FOCUS_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [focusNodeId, nodes]);
+  }, [focusNodeId, nodes, visibleNodeIds]);
+
+  const allTypesHidden =
+    nodes.length > 0 &&
+    visibleNodeIds !== undefined &&
+    !nodes.some((node) => visibleNodeIds.has(node.id));
 
   return (
     <div className="graph-container">
       <div className="graph-viewport" ref={containerRef} />
-      {nodes.length === 0 ? (
+      {nodes.length === 0 || allTypesHidden ? (
         <div className="graph-empty graph-empty-overlay" aria-live="polite">
           <p>{emptyMessage}</p>
         </div>
