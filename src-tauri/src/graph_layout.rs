@@ -242,7 +242,7 @@ mod tests {
         )
         .expect("save");
 
-        assert!(saved.projects.get("project--billing-redesign").is_none());
+        assert!(!saved.projects.contains_key("project--billing-redesign"));
         assert_eq!(
             saved.projects["billing-redesign"]["billing-redesign--wp-invoicing"],
             NodePositionDto { x: 1.0, y: 2.0 }
