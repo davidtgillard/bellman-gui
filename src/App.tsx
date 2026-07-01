@@ -84,8 +84,6 @@ function App() {
   const [nodes, setNodes] = useState<GraphNode[]>(exampleGraph.nodes);
   const [links, setLinks] = useState<GraphLink[]>(exampleGraph.links);
   const [error, setError] = useState<string | null>(null);
-  const [sidecarVersion, setSidecarVersion] = useState<string | null>(null);
-  const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -257,7 +255,6 @@ function App() {
   );
 
   const handleOpenRoadmap = useCallback(async () => {
-    setOpening(true);
     setError(null);
 
     try {
@@ -272,8 +269,6 @@ function App() {
           ? message
           : `${message}. If the folder picker did not appear, check that a display server is available (common on WSL).`,
       );
-    } finally {
-      setOpening(false);
     }
   }, [applyGraph]);
 
@@ -490,12 +485,6 @@ function App() {
     },
     [applyGraph, links, roadmapRoot],
   );
-
-  useEffect(() => {
-    invoke<string>("bellman_version")
-      .then((version) => setSidecarVersion(version))
-      .catch(() => setSidecarVersion(null));
-  }, []);
 
   useEffect(() => {
     invoke<RoadmapGraphDto | null>("load_initial_roadmap")
@@ -913,20 +902,6 @@ function App() {
 
   return (
     <main className="app-shell">
-      <header className="toolbar">
-        <div className="toolbar-title">
-          <h1>Bellman GUI</h1>
-          <p className="toolbar-subtitle">{roadmapRoot}</p>
-        </div>
-        <div className="toolbar-actions">
-          {sidecarVersion ? (
-            <span className="sidecar-badge">bellman {sidecarVersion}</span>
-          ) : null}
-          <button type="button" onClick={() => void handleOpenRoadmap()} disabled={opening}>
-            {opening ? "Opening…" : "Open roadmap…"}
-          </button>
-        </div>
-      </header>
       {error ? (
         <div className="error-banner" role="alert">
           <span className="error-banner-message">{error}</span>
