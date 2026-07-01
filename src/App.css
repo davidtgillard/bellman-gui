@@ -571,10 +571,16 @@ body {
 .edit-field textarea {
   border: 1px solid #475569;
   border-radius: 0.5rem;
-  background: #0f172a;
-  color: inherit;
+  background: #ffffff;
+  color: #334155;
   padding: 0.5rem 0.625rem;
   font: inherit;
+}
+
+.edit-field input::placeholder,
+.edit-field textarea::placeholder {
+  color: #475569;
+  opacity: 1;
 }
 
 .field-hint {
