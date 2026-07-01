@@ -280,6 +280,44 @@ export function compatibleTargetNodes(
 }
 
 /**
+ * Returns whether a node can be the start of a link to some other node.
+ * @param node - Candidate start node.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @param linkTypes - Link type metadata from the registry.
+ * @returns Whether any compatible finish node exists.
+ */
+export function canBeLinkStart(
+  node: GraphNode,
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+): boolean {
+  return nodes.some(
+    (other) =>
+      other.id !== node.id &&
+      compatibleLinkTypes(linkTypes, node.type, other.type).length > 0,
+  );
+}
+
+/**
+ * Returns whether a node can be the finish of a link from some other node.
+ * @param node - Candidate finish node.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @param linkTypes - Link type metadata from the registry.
+ * @returns Whether any compatible start node exists.
+ */
+export function canBeLinkFinish(
+  node: GraphNode,
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+): boolean {
+  return nodes.some(
+    (other) =>
+      other.id !== node.id &&
+      compatibleLinkTypes(linkTypes, other.type, node.type).length > 0,
+  );
+}
+
+/**
  * Lists project names derived from project node ids.
  * @param nodes - Graph nodes from the current roadmap.
  * @returns Sorted project names for work-package creation.

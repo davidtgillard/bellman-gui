@@ -625,6 +625,15 @@ body {
   min-width: 0;
 }
 
+.link-endpoint-fixed {
+  border: 1px solid #475569;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  color: #334155;
+  padding: 0.5rem 0.625rem;
+  font: inherit;
+}
+
 .link-endpoint-swap {
   align-self: end;
   margin-bottom: 0.125rem;

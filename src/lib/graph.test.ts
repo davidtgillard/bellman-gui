@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import registry from "../fixtures/example-roadmap/.fits/registry.json";
 import links from "../fixtures/example-roadmap/links/links.json";
 import {
+  canBeLinkFinish,
+  canBeLinkStart,
   findAddedNodeId,
   graphWithoutLink,
   graphWithoutNode,
@@ -22,6 +24,25 @@ describe("parseRoadmapGraph", () => {
   it("parses example fixture nodes and links", () => {
     expect(graph.nodes).toHaveLength(6);
     expect(graph.links).toHaveLength(2);
+  });
+
+  it("detects which endpoints a node type can use when creating links", () => {
+    const workPackage = graph.nodes.find(
+      (node) => node.id === "billing-redesign--wp-invoicing",
+    );
+    const goal = graph.nodes.find((node) => node.type === "goal");
+    const milestone = graph.nodes.find((node) => node.type === "milestone");
+
+    expect(workPackage).toBeDefined();
+    expect(goal).toBeDefined();
+    expect(milestone).toBeDefined();
+
+    expect(canBeLinkStart(workPackage!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canBeLinkFinish(workPackage!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canBeLinkStart(goal!, graph.nodes, graph.linkTypes)).toBe(false);
+    expect(canBeLinkFinish(goal!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canBeLinkStart(milestone!, graph.nodes, graph.linkTypes)).toBe(false);
+    expect(canBeLinkFinish(milestone!, graph.nodes, graph.linkTypes)).toBe(true);
   });
 
   it("maps precedence link direction from in to out", () => {

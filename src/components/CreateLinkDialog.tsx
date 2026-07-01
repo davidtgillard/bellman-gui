@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
+  canBeLinkFinish,
+  canBeLinkStart,
   compatibleLinkTypes,
   nodeLabel,
   type GraphNode,
@@ -81,30 +83,97 @@ export function CreateLinkDialog({
     }
 
     setLinkType("");
-    setSource(initialNodeId ?? "");
+
+    if (!initialNodeId) {
+      setSource("");
+      setTarget("");
+      return;
+    }
+
+    const pinnedNode = nodes.find((node) => node.id === initialNodeId);
+    if (!pinnedNode) {
+      setSource("");
+      setTarget("");
+      return;
+    }
+
+    const asStart = canBeLinkStart(pinnedNode, nodes, linkTypes);
+    const asFinish = canBeLinkFinish(pinnedNode, nodes, linkTypes);
+
+    if (!asStart && asFinish) {
+      setSource("");
+      setTarget(initialNodeId);
+      return;
+    }
+
+    setSource(initialNodeId);
     setTarget("");
-  }, [initialNodeId, open]);
+  }, [initialNodeId, linkTypes, nodes, open]);
 
   const startNode = nodes.find((node) => node.id === source);
   const finishNode = nodes.find((node) => node.id === target);
 
+  const pinnedNode =
+    initialNodeId !== null
+      ? nodes.find((node) => node.id === initialNodeId)
+      : undefined;
+  const pinnedCanBeStart = pinnedNode
+    ? canBeLinkStart(pinnedNode, nodes, linkTypes)
+    : false;
+  const pinnedCanBeFinish = pinnedNode
+    ? canBeLinkFinish(pinnedNode, nodes, linkTypes)
+    : false;
+
+  const pinnedStart = initialNodeId !== null && source === initialNodeId;
+  const pinnedFinish = initialNodeId !== null && target === initialNodeId;
+
+  const swapDisabled =
+    (!source && !target) ||
+    (initialNodeId !== null && (!pinnedCanBeStart || !pinnedCanBeFinish));
+
+  const swapTitle = (() => {
+    if (!source && !target) {
+      return "Swap start and finish nodes";
+    }
+    if (initialNodeId !== null && !pinnedCanBeStart && pinnedCanBeFinish) {
+      return "This node type cannot be the start of a link";
+    }
+    if (initialNodeId !== null && pinnedCanBeStart && !pinnedCanBeFinish) {
+      return "This node type cannot be the finish of a link";
+    }
+    if (initialNodeId !== null && !pinnedCanBeStart && !pinnedCanBeFinish) {
+      return "This node type cannot be linked to any other node";
+    }
+    return "Swap start and finish nodes";
+  })();
+
   const startNodes = useMemo(() => {
+    if (pinnedStart) {
+      const pinned = nodes.find((node) => node.id === initialNodeId);
+      return pinned ? [pinned] : [];
+    }
+
     const compatible = compatibleStartNodes(nodes, linkTypes, finishNode);
     if (source && !compatible.some((node) => node.id === source)) {
       const selected = nodes.find((node) => node.id === source);
       return selected ? sortNodes([...compatible, selected]) : compatible;
     }
     return compatible;
-  }, [finishNode, linkTypes, nodes, source]);
+  }, [finishNode, initialNodeId, linkTypes, nodes, pinnedStart, source]);
 
   const finishNodes = useMemo(() => {
+    if (pinnedFinish) {
+      const pinned = nodes.find((node) => node.id === initialNodeId);
+      return pinned ? [pinned] : [];
+    }
+
     const compatible = compatibleFinishNodes(nodes, linkTypes, startNode);
     if (target && !compatible.some((node) => node.id === target)) {
       const selected = nodes.find((node) => node.id === target);
       return selected ? sortNodes([...compatible, selected]) : compatible;
     }
     return compatible;
-  }, [linkTypes, nodes, startNode, target]);
+  }, [initialNodeId, linkTypes, nodes, pinnedFinish, startNode, target]);
 
   const compatibleTypes = useMemo(() => {
     if (!startNode || !finishNode) {
@@ -143,6 +212,9 @@ export function CreateLinkDialog({
     setTarget(source);
   };
 
+  const renderEndpointValue = (node: GraphNode) =>
+    `${nodeLabel(node.id)} (${node.type})`;
+
   return (
     <div className="dialog-backdrop" role="presentation" onClick={onClose}>
       <dialog
@@ -163,55 +235,63 @@ export function CreateLinkDialog({
           <div className="link-endpoints">
             <label className="edit-field link-endpoint-field">
               <span>Start node</span>
-              <select
-                value={source}
-                onChange={(event) => setSource(event.target.value)}
-                required
-                disabled={startNodes.length === 0}
-              >
-                <option value="" disabled>
-                  {startNodes.length === 0
-                    ? "No compatible start nodes"
-                    : "Select start node…"}
-                </option>
-                {startNodes.map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {nodeLabel(node.id)} ({node.type})
+              {pinnedStart && startNode ? (
+                <div className="link-endpoint-fixed">{renderEndpointValue(startNode)}</div>
+              ) : (
+                <select
+                  value={source}
+                  onChange={(event) => setSource(event.target.value)}
+                  required
+                  disabled={startNodes.length === 0}
+                >
+                  <option value="" disabled>
+                    {startNodes.length === 0
+                      ? "No compatible start nodes"
+                      : "Select start node…"}
                   </option>
-                ))}
-              </select>
+                  {startNodes.map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {renderEndpointValue(node)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
 
             <button
               type="button"
               className="link-endpoint-swap"
               onClick={handleSwapEndpoints}
-              disabled={!source && !target}
-              aria-label="Swap start and finish nodes"
-              title="Swap start and finish nodes"
+              disabled={swapDisabled}
+              aria-label={swapTitle}
+              title={swapTitle}
             >
               ⇄
             </button>
 
             <label className="edit-field link-endpoint-field">
               <span>Finish node</span>
-              <select
-                value={target}
-                onChange={(event) => setTarget(event.target.value)}
-                required
-                disabled={finishNodes.length === 0}
-              >
-                <option value="" disabled>
-                  {finishNodes.length === 0
-                    ? "No compatible finish nodes"
-                    : "Select finish node…"}
-                </option>
-                {finishNodes.map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {nodeLabel(node.id)} ({node.type})
+              {pinnedFinish && finishNode ? (
+                <div className="link-endpoint-fixed">{renderEndpointValue(finishNode)}</div>
+              ) : (
+                <select
+                  value={target}
+                  onChange={(event) => setTarget(event.target.value)}
+                  required
+                  disabled={finishNodes.length === 0}
+                >
+                  <option value="" disabled>
+                    {finishNodes.length === 0
+                      ? "No compatible finish nodes"
+                      : "Select finish node…"}
                   </option>
-                ))}
-              </select>
+                  {finishNodes.map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {renderEndpointValue(node)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
           </div>
 
