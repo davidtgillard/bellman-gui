@@ -21,7 +21,10 @@ interface GraphViewNode {
   id: string;
   label?: string;
   fill?: string;
-  data?: { type?: string };
+  parent?: string;
+  subLabel?: string;
+  classes?: string;
+  data?: { type?: string; isCompound?: boolean; isOverflow?: boolean };
 }
 
 interface GraphViewLink {
@@ -57,6 +60,29 @@ interface RoadmapGraphProps {
 
 const FOCUS_DELAY_MS = 450;
 
+function sortGraphViewNodes(nodes: GraphViewNode[]): GraphViewNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const sorted: GraphViewNode[] = [];
+  const placed = new Set<string>();
+
+  const place = (node: GraphViewNode) => {
+    if (placed.has(node.id)) {
+      return;
+    }
+    if (node.parent && byId.has(node.parent) && !placed.has(node.parent)) {
+      place(byId.get(node.parent)!);
+    }
+    placed.add(node.id);
+    sorted.push(node);
+  };
+
+  for (const node of nodes) {
+    place(node);
+  }
+
+  return sorted;
+}
+
 function toElementDefinitions(
   nodes: GraphViewNode[],
   links: GraphViewLink[],
@@ -64,17 +90,23 @@ function toElementDefinitions(
   usePreset: boolean,
 ): ElementDefinition[] {
   const nodeIds = nodes.map((node) => node.id);
-  const elements: ElementDefinition[] = nodes.map((node) => {
+  const elements: ElementDefinition[] = sortGraphViewNodes(nodes).map((node) => {
     const saved = nodePositions?.[node.id];
     const position = saved ?? (usePreset ? defaultNodePosition(node.id, nodeIds) : undefined);
+    const label = node.subLabel
+      ? `${node.label ?? node.id}\n${node.subLabel}`
+      : (node.label ?? node.id);
 
     return {
       data: {
         id: node.id,
-        label: node.label ?? node.id,
+        label,
+        subLabel: node.subLabel,
         type: node.data?.type ?? "",
         color: node.fill ?? "#64748b",
+        ...(node.parent ? { parent: node.parent } : {}),
       },
+      classes: node.classes,
       ...(position ? { position: { x: position.x, y: position.y } } : {}),
     };
   });
@@ -304,6 +336,7 @@ export function RoadmapGraph({
       draggable,
       nodePositions,
       links.length,
+      nodes.some((node) => Boolean(node.parent || node.data?.isCompound)),
     );
 
     return () => {

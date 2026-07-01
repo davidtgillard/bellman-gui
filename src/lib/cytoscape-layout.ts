@@ -57,12 +57,25 @@ export function usesPresetLayout(
   return draggable && hasSavedLayout(nodePositions);
 }
 
+const COMPOUND_FCOSE_LAYOUT = {
+  ...FCOSE_LAYOUT,
+  tile: true,
+  packComponents: false,
+} as const;
+
 /**
  * Selects a force layout appropriate for the current graph density.
  * @param linkCount - Number of visible links in the graph.
+ * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @returns Cytoscape layout options for the graph.
  */
-export function autoLayoutOptions(linkCount: number): LayoutOptions {
+export function autoLayoutOptions(
+  linkCount: number,
+  hasCompoundNodes = false,
+): LayoutOptions {
+  if (hasCompoundNodes) {
+    return COMPOUND_FCOSE_LAYOUT;
+  }
   if (linkCount === 0) {
     return COSE_LAYOUT;
   }
@@ -175,12 +188,14 @@ export function scatterEdgelessNodes(cy: Core, seed: number): void {
  * @param draggable - Whether nodes can be dragged in the current view.
  * @param nodePositions - Saved node positions keyed by node id.
  * @param linkCount - Number of visible links in the graph.
+ * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  */
 export function applyAutoLayout(
   cy: Core,
   draggable: boolean,
   nodePositions: Record<string, NodePosition> | undefined,
   linkCount: number,
+  hasCompoundNodes = false,
 ): void {
   if (usesPresetLayout(draggable, nodePositions)) {
     cy.layout(PRESET_LAYOUT).run();
@@ -192,13 +207,13 @@ export function applyAutoLayout(
     cy.edges().map((edge) => edge.id()),
   );
 
-  if (linkCount === 0) {
+  if (linkCount === 0 && !hasCompoundNodes) {
     scatterEdgelessNodes(cy, seed);
     return;
   }
 
   seedRandomNodePositions(cy, seed);
-  cy.layout(autoLayoutOptions(linkCount)).run();
+  cy.layout(autoLayoutOptions(linkCount, hasCompoundNodes)).run();
 }
 
 /**
@@ -208,6 +223,7 @@ export function applyAutoLayout(
  * @param draggable - Whether nodes can be dragged in the current view.
  * @param nodePositions - Saved node positions keyed by node id.
  * @param linkCount - Number of visible links in the graph.
+ * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @returns Cleanup function that cancels pending layout attempts.
  */
 export function runLayoutWhenContainerReady(
@@ -216,6 +232,7 @@ export function runLayoutWhenContainerReady(
   draggable: boolean,
   nodePositions: Record<string, NodePosition> | undefined,
   linkCount: number,
+  hasCompoundNodes = false,
 ): () => void {
   let cancelled = false;
   let laidOut = false;
@@ -234,7 +251,7 @@ export function runLayoutWhenContainerReady(
       return false;
     }
 
-    applyAutoLayout(cy, draggable, nodePositions, linkCount);
+    applyAutoLayout(cy, draggable, nodePositions, linkCount, hasCompoundNodes);
     laidOut = true;
     resizeObserver?.disconnect();
     resizeObserver = undefined;

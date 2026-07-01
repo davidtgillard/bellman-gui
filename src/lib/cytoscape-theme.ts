@@ -19,6 +19,47 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
+    selector: "node[subLabel]",
+    style: {
+      "text-wrap": "wrap",
+      "text-max-width": "120px",
+    },
+  },
+  {
+    selector: ":parent",
+    style: {
+      label: "data(label)",
+      "text-valign": "top",
+      "text-halign": "center",
+      "text-margin-y": -8,
+      shape: "round-rectangle",
+      "background-opacity": 0,
+      "background-color": "#64748b",
+      "border-width": 2,
+      "border-color": "#64748b",
+      "border-opacity": 0.6,
+      padding: "24px",
+      "min-width": "80px",
+      "min-height": "80px",
+    },
+  },
+  {
+    selector: "node.overflow",
+    style: {
+      shape: "round-rectangle",
+      "background-opacity": 0.08,
+      "background-color": "#94a3b8",
+      "border-width": 1,
+      "border-style": "dashed",
+      "border-color": "#94a3b8",
+      width: 48,
+      height: 28,
+      "font-size": 10,
+      "text-valign": "center",
+      "text-margin-y": 0,
+    },
+  },
+  {
     selector: "node:selected",
     style: {
       "border-width": 3,

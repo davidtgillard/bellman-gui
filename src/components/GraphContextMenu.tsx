@@ -1,10 +1,14 @@
+import { isOverflowNodeId } from "../lib/work-package-view";
+
 interface GraphContextMenuProps {
   editable: boolean;
   nodeId?: string;
   nodeType?: string;
   linkId?: string;
   showInnerGraph?: boolean;
+  showWorkPackageInnerGraph?: boolean;
   onShowInnerGraph?: (projectId: string) => void;
+  onShowWorkPackageInnerGraph?: (workPackageId: string) => void;
   onRemoveNode?: (nodeId: string, nodeType: string) => void;
   onRemoveLink?: (linkId: string) => void;
   onClose: () => void;
@@ -16,7 +20,9 @@ export function GraphContextMenu({
   nodeType = "",
   linkId,
   showInnerGraph = false,
+  showWorkPackageInnerGraph = false,
   onShowInnerGraph,
+  onShowWorkPackageInnerGraph,
   onRemoveNode,
   onRemoveLink,
   onClose,
@@ -33,7 +39,17 @@ export function GraphContextMenu({
     });
   }
 
-  if (editable && nodeId && nodeType && onRemoveNode) {
+  if (showWorkPackageInnerGraph && nodeId && onShowWorkPackageInnerGraph) {
+    items.push({
+      label: "Show inner graph",
+      onClick: () => {
+        onShowWorkPackageInnerGraph(nodeId);
+        onClose();
+      },
+    });
+  }
+
+  if (editable && nodeId && nodeType && onRemoveNode && !isOverflowNodeId(nodeId)) {
     items.push({
       label: "Remove node",
       destructive: true,

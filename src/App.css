@@ -170,6 +170,19 @@ body {
   color: #64748b;
 }
 
+.graph-view-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #94a3b8;
+}
+
+.graph-view-trail-segment:not(:last-child)::after {
+  content: "/";
+  margin-left: 0.35rem;
+  color: #64748b;
+}
+
 .graph-view-current {
   color: #e2e8f0;
 }

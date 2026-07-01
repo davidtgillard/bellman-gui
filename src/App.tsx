@@ -41,10 +41,25 @@ import {
   type NodePosition,
   type WorkPackageLayout,
 } from "./lib/graph-layout";
+import {
+  buildCompoundWorkPackageView,
+  compoundNodeLabel,
+  currentProjectId,
+  currentWorkPackageFocus,
+  graphViewBreadcrumbLabels,
+  isOverflowNodeId,
+  isWorkPackageGraphView,
+  overflowNodeLabel,
+  overflowParentId,
+  type CompoundWorkPackageViewNode,
+  type GraphViewFrame,
+  workPackageHasChildren,
+} from "./lib/work-package-view";
 import { loadNodeDetail, type NodeDetail } from "./lib/node-detail";
 import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
+const INITIAL_GRAPH_VIEW_STACK: GraphViewFrame[] = [{ kind: "top" }];
 const LAYOUT_SAVE_DEBOUNCE_MS = 300;
 
 function roadmapLayoutPersistable(root: string, editable: boolean): boolean {
@@ -67,7 +82,8 @@ function App() {
     () => new Set(exampleGraph.nodes.map((node) => node.type)),
   );
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
-  const [innerGraphProjectId, setInnerGraphProjectId] = useState<string | null>(null);
+  const [graphViewStack, setGraphViewStack] =
+    useState<GraphViewFrame[]>(INITIAL_GRAPH_VIEW_STACK);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [nodeDetailOpen, setNodeDetailOpen] = useState(false);
   const [nodeDetail, setNodeDetail] = useState<NodeDetail | null>(null);
@@ -98,7 +114,7 @@ function App() {
     if (options.resetVisibleTypes) {
       setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
       setFocusNodeId(null);
-      setInnerGraphProjectId(null);
+      setGraphViewStack(INITIAL_GRAPH_VIEW_STACK);
       setSelectedNodeId(null);
       setNodeDetailOpen(false);
       setNodeDetail(null);
@@ -171,16 +187,17 @@ function App() {
 
   const handleNodePositionChange = useCallback(
     (nodeId: string, position: NodePosition) => {
-      if (!innerGraphProjectId) {
+      const projectId = currentProjectId(graphViewStack);
+      if (!projectId) {
         return;
       }
 
       setWorkPackageLayout((current) =>
-        withNodePosition(current, innerGraphProjectId, nodeId, position),
+        withNodePosition(current, projectId, nodeId, position),
       );
-      queueLayoutSave(innerGraphProjectId, nodeId, position);
+      queueLayoutSave(projectId, nodeId, position);
     },
-    [innerGraphProjectId, queueLayoutSave],
+    [graphViewStack, queueLayoutSave],
   );
 
   const handleOpenRoadmap = useCallback(async () => {
@@ -260,6 +277,7 @@ function App() {
 
   const handleRemoveNode = useCallback(
     async (nodeId: string, nodeType: string) => {
+      const projectId = currentProjectId(graphViewStack);
       const snapshot = { nodes, links };
       const optimistic = graphWithoutNode(nodes, links, nodeId);
       setNodes(optimistic.nodes);
@@ -274,20 +292,20 @@ function App() {
         setNodeDetailError(null);
         setNodeDetailLoading(false);
       }
-      if (innerGraphProjectId === nodeId) {
-        setInnerGraphProjectId(null);
+      if (projectId === nodeId) {
+        setGraphViewStack(INITIAL_GRAPH_VIEW_STACK);
       }
       if (
         nodeType === "work_package" &&
-        innerGraphProjectId &&
+        projectId &&
         roadmapLayoutPersistable(roadmapRoot, editable)
       ) {
         setWorkPackageLayout((current) =>
-          withoutNodePosition(current, innerGraphProjectId, nodeId),
+          withoutNodePosition(current, projectId, nodeId),
         );
         void removeWorkPackageNodePosition(
           roadmapRoot,
-          projectLayoutKey(innerGraphProjectId),
+          projectLayoutKey(projectId),
           nodeId,
         )
           .then(setWorkPackageLayout)
@@ -312,7 +330,7 @@ function App() {
     [
       applyGraph,
       editable,
-      innerGraphProjectId,
+      graphViewStack,
       links,
       nodes,
       roadmapRoot,
@@ -393,22 +411,47 @@ function App() {
     };
   }, [handleOpenRoadmap]);
 
+  const activeProjectId = useMemo(
+    () => currentProjectId(graphViewStack),
+    [graphViewStack],
+  );
+  const activeWorkPackageFocus = useMemo(
+    () => currentWorkPackageFocus(graphViewStack),
+    [graphViewStack],
+  );
+  const inWorkPackageGraph = isWorkPackageGraphView(graphViewStack);
+
+  const compoundView = useMemo(() => {
+    if (!activeProjectId) {
+      return null;
+    }
+    return buildCompoundWorkPackageView({
+      nodes,
+      links,
+      projectId: activeProjectId,
+      focusParentId: activeWorkPackageFocus,
+    });
+  }, [activeProjectId, activeWorkPackageFocus, links, nodes]);
+
   const nodeTypes = useMemo(() => {
-    const sourceNodes = innerGraphProjectId
-      ? innerGraphForProject(nodes, links, innerGraphProjectId).nodes
+    const sourceNodes = activeProjectId
+      ? innerGraphForProject(nodes, links, activeProjectId).nodes
       : topLevelGraphNodes(nodes);
     return [...new Set(sourceNodes.map((node) => node.type))].sort();
-  }, [innerGraphProjectId, links, nodes]);
+  }, [activeProjectId, links, nodes]);
 
   const displayGraph = useMemo(() => {
-    if (innerGraphProjectId) {
-      return innerGraphForProject(nodes, links, innerGraphProjectId);
+    if (compoundView) {
+      return {
+        nodes: compoundView.displayNodes,
+        links: compoundView.displayLinks,
+      };
     }
     return {
       nodes: topLevelGraphNodes(nodes),
       links,
     };
-  }, [innerGraphProjectId, links, nodes]);
+  }, [compoundView, links, nodes]);
 
   const filteredNodes = useMemo(
     () => displayGraph.nodes.filter((node) => visibleTypes.has(node.type)),
@@ -430,13 +473,42 @@ function App() {
 
   const graphViewNodes = useMemo(
     () =>
-      filteredNodes.map((node) => ({
-        id: node.id,
-        label: nodeLabel(node.id),
-        fill: nodeTypeColor(node.type),
-        data: { type: node.type },
-      })),
-    [filteredNodes],
+      filteredNodes.map((node) => {
+        if (compoundView) {
+          const compoundNode = node as CompoundWorkPackageViewNode;
+          const label =
+            compoundNode.isOverflow && compoundNode.parent
+              ? overflowNodeLabel(
+                  compoundNode.parent,
+                  compoundView.overflowByParent.get(compoundNode.parent) ??
+                    compoundNode.overflowCount ??
+                    0,
+                )
+              : compoundNodeLabel(compoundNode);
+
+          return {
+            id: compoundNode.id,
+            label,
+            subLabel: compoundNode.subLabel,
+            fill: nodeTypeColor(compoundNode.type),
+            parent: compoundNode.parent,
+            classes: compoundNode.isOverflow ? "overflow" : undefined,
+            data: {
+              type: compoundNode.type,
+              isCompound: compoundNode.isCompound,
+              isOverflow: compoundNode.isOverflow,
+            },
+          };
+        }
+
+        return {
+          id: node.id,
+          label: nodeLabel(node.id),
+          fill: nodeTypeColor(node.type),
+          data: { type: node.type },
+        };
+      }),
+    [compoundView, filteredNodes],
   );
 
   const graphViewLinks = useMemo(
@@ -449,8 +521,8 @@ function App() {
       })),
     [filteredLinks],
   );
-  const innerGraphNodePositions = innerGraphProjectId
-    ? projectNodePositions(workPackageLayout, innerGraphProjectId)
+  const innerGraphNodePositions = activeProjectId
+    ? projectNodePositions(workPackageLayout, activeProjectId)
     : undefined;
 
   const handleToggleType = useCallback((type: string) => {
@@ -465,8 +537,33 @@ function App() {
     });
   }, []);
 
+  const clearGraphSelection = useCallback(() => {
+    setFocusNodeId(null);
+    setSelectedNodeId(null);
+    setNodeDetailOpen(false);
+    setNodeDetail(null);
+    setNodeDetailError(null);
+    setNodeDetailLoading(false);
+  }, []);
+
   const handleNodeClick = useCallback(
     (nodeId: string) => {
+      const overflowParent = overflowParentId(nodeId);
+      if (overflowParent) {
+        setGraphViewStack((current) => {
+          const projectId = currentProjectId(current);
+          if (!projectId) {
+            return current;
+          }
+          return [
+            ...current,
+            { kind: "work_package", projectId, workPackageId: overflowParent },
+          ];
+        });
+        clearGraphSelection();
+        return;
+      }
+
       const node = nodes.find((item) => item.id === nodeId);
       setSelectedNodeId(nodeId);
       setNodeDetailOpen(true);
@@ -502,38 +599,50 @@ function App() {
           }
         });
     },
-    [nodes, roadmapRoot],
+    [clearGraphSelection, nodes, roadmapRoot],
   );
 
-  const handleShowInnerGraph = useCallback((projectId: string) => {
-    setInnerGraphProjectId(projectId);
-    setFocusNodeId(null);
-    setSelectedNodeId(null);
-    setNodeDetailOpen(false);
-    setNodeDetail(null);
-    setNodeDetailError(null);
-    setNodeDetailLoading(false);
-    setVisibleTypes((current) => {
-      const next = new Set(current);
-      next.add("work_package");
-      return next;
-    });
-  }, []);
+  const handleShowInnerGraph = useCallback(
+    (projectId: string) => {
+      setGraphViewStack([{ kind: "top" }, { kind: "project", projectId }]);
+      clearGraphSelection();
+      setVisibleTypes((current) => {
+        const next = new Set(current);
+        next.add("work_package");
+        return next;
+      });
+    },
+    [clearGraphSelection],
+  );
 
-  const handleBackToTopLevel = useCallback(() => {
+  const handleShowWorkPackageInnerGraph = useCallback(
+    (workPackageId: string) => {
+      setGraphViewStack((current) => {
+        const projectId = currentProjectId(current);
+        if (!projectId) {
+          return current;
+        }
+        if (currentWorkPackageFocus(current) === workPackageId) {
+          return current;
+        }
+        return [...current, { kind: "work_package", projectId, workPackageId }];
+      });
+      clearGraphSelection();
+    },
+    [clearGraphSelection],
+  );
+
+  const handleBackGraphView = useCallback(() => {
     if (layoutSaveTimerRef.current !== null) {
       window.clearTimeout(layoutSaveTimerRef.current);
       layoutSaveTimerRef.current = null;
     }
     void flushLayoutSave();
-    setInnerGraphProjectId(null);
-    setFocusNodeId(null);
-    setSelectedNodeId(null);
-    setNodeDetailOpen(false);
-    setNodeDetail(null);
-    setNodeDetailError(null);
-    setNodeDetailLoading(false);
-  }, [flushLayoutSave]);
+    setGraphViewStack((current) =>
+      current.length <= 1 ? INITIAL_GRAPH_VIEW_STACK : current.slice(0, -1),
+    );
+    clearGraphSelection();
+  }, [clearGraphSelection, flushLayoutSave]);
 
   const renderContextMenu = useCallback(
     (event: {
@@ -569,34 +678,49 @@ function App() {
       const nodeType =
         typeof event.data.data?.type === "string" ? event.data.data.type : "";
 
+      const nodeId = event.data.id;
+
       return (
         <GraphContextMenu
           editable={editable}
-          nodeId={event.data.id}
+          nodeId={nodeId}
           nodeType={nodeType}
-          showInnerGraph={!innerGraphProjectId && nodeType === "project"}
+          showInnerGraph={!inWorkPackageGraph && nodeType === "project"}
+          showWorkPackageInnerGraph={
+            inWorkPackageGraph &&
+            nodeType === "work_package" &&
+            !isOverflowNodeId(nodeId) &&
+            activeWorkPackageFocus !== nodeId &&
+            compoundView !== null &&
+            workPackageHasChildren(nodeId, compoundView.childrenByParent)
+          }
           onShowInnerGraph={handleShowInnerGraph}
-          onRemoveNode={(nodeId, type) => void handleRemoveNode(nodeId, type)}
+          onShowWorkPackageInnerGraph={handleShowWorkPackageInnerGraph}
+          onRemoveNode={(removeNodeId, type) => void handleRemoveNode(removeNodeId, type)}
           onClose={event.onClose}
         />
       );
     },
     [
+      activeWorkPackageFocus,
+      compoundView,
       editable,
       handleRemoveLink,
       handleRemoveNode,
       handleShowInnerGraph,
-      innerGraphProjectId,
+      handleShowWorkPackageInnerGraph,
+      inWorkPackageGraph,
     ],
   );
 
-  const innerGraphProjectLabel = innerGraphProjectId
-    ? nodeLabel(innerGraphProjectId)
-    : null;
+  const breadcrumbLabels = useMemo(
+    () => graphViewBreadcrumbLabels(graphViewStack),
+    [graphViewStack],
+  );
 
-  const graphEmptyMessage = innerGraphProjectId
-    ? innerGraphProjectLabel
-      ? `Project ${innerGraphProjectLabel} has no work packages to display.`
+  const graphEmptyMessage = inWorkPackageGraph
+    ? activeProjectId
+      ? `Project ${nodeLabel(activeProjectId)} has no work packages to display.`
       : "This project has no work packages to display."
     : nodes.length === 0
       ? "Open a bellman roadmap folder to view its graph."
@@ -691,11 +815,8 @@ function App() {
       ) : null}
       <div className="graph-area">
         <div className="graph-dock-panel">
-          {innerGraphProjectId && innerGraphProjectLabel ? (
-            <GraphViewBreadcrumb
-              projectLabel={innerGraphProjectLabel}
-              onBack={handleBackToTopLevel}
-            />
+          {inWorkPackageGraph ? (
+            <GraphViewBreadcrumb labels={breadcrumbLabels} onBack={handleBackGraphView} />
           ) : null}
           <RoadmapGraphView
             nodes={graphViewNodes}
@@ -705,13 +826,13 @@ function App() {
             onNodeClick={handleNodeClick}
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
-            draggable={Boolean(innerGraphProjectId)}
+            draggable={inWorkPackageGraph}
             nodePositions={innerGraphNodePositions}
             onNodePositionChange={
-              innerGraphProjectId ? handleNodePositionChange : undefined
+              inWorkPackageGraph ? handleNodePositionChange : undefined
             }
           />
-          {!innerGraphProjectId ? (
+          {!inWorkPackageGraph ? (
             <NodeTypeLegend
               types={nodeTypes}
               visibleTypes={visibleTypes}
