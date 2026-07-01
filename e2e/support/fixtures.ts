@@ -20,6 +20,7 @@ export interface RoadmapState {
 export interface Scenario {
   states: RoadmapState[];
   index?: number;
+  persistUndo?: boolean;
   settings?: {
     max_pan_speed?: number;
   };
@@ -47,6 +48,42 @@ export async function setupPage(page: Page, scenario: Scenario): Promise<void> {
   }, scenario);
   await page.addInitScript({ path: MOCK_PATH });
   await page.goto("/");
+}
+
+/**
+ * Re-applies test init scripts and reloads the app, simulating a new session.
+ * @param page - Playwright page to reload.
+ * @param scenario - Optional scenario seed for the reloaded session.
+ */
+export async function reloadApp(page: Page, scenario?: Scenario): Promise<void> {
+  if (scenario) {
+    await page.addInitScript((seed) => {
+      (window as unknown as { __TEST_SCENARIO__: unknown }).__TEST_SCENARIO__ = seed;
+    }, scenario);
+  }
+  await page.addInitScript({ path: MOCK_PATH });
+  await page.reload();
+}
+
+const PERSIST_KEY_PREFIX = "bellman:undo-history:";
+
+/**
+ * Seeds persisted undo history in localStorage before the app loads.
+ * @param page - Playwright page to configure.
+ * @param root - Roadmap root used as the storage key suffix.
+ * @param payload - Serialized undo stack `{ states, index }`.
+ */
+export async function seedPersistedUndo(
+  page: Page,
+  root: string,
+  payload: { states: RoadmapState[]; index: number },
+): Promise<void> {
+  await page.addInitScript(
+    ({ key, value }) => {
+      globalThis.localStorage?.setItem(key, JSON.stringify(value));
+    },
+    { key: `${PERSIST_KEY_PREFIX}${root}`, value: payload },
+  );
 }
 
 /**

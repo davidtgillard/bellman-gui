@@ -51,7 +51,7 @@ fn load_roadmap_graph_command(
     state: tauri::State<UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let graph = load_roadmap_graph(PathBuf::from(roadmap_root).as_path())?;
-    state.reset(&graph.root)?;
+    state.load_or_reset(Path::new(&graph.root))?;
     Ok(graph)
 }
 
@@ -80,7 +80,7 @@ async fn pick_and_load_roadmap(
         .ok_or_else(|| "selected folder path is unavailable".to_string())?;
 
     let graph = load_roadmap_graph(path_ref)?;
-    state.reset(&graph.root)?;
+    state.load_or_reset(path_ref)?;
     Ok(Some(graph))
 }
 
@@ -239,7 +239,7 @@ fn load_initial_roadmap(
     match cli.initial_roadmap_root.as_ref() {
         Some(path) => {
             let graph = load_roadmap_graph(path.as_path())?;
-            state.reset(&graph.root)?;
+            state.load_or_reset(path.as_path())?;
             Ok(Some(graph))
         }
         None => Ok(None),

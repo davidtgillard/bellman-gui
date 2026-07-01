@@ -9,6 +9,7 @@
   const callbacks = new Map();
   const listeners = new Map();
   const calls = [];
+  const PERSIST_KEY_PREFIX = "bellman:undo-history:";
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -36,8 +37,6 @@
     }
   }
 
-  const scenario = window.__TEST_SCENARIO__ || {};
-
   function defaultState() {
     return {
       root: "/roadmap",
@@ -49,11 +48,117 @@
     };
   }
 
-  const states =
-    scenario.states && scenario.states.length
-      ? scenario.states.map(clone)
-      : [defaultState()];
-  let index = typeof scenario.index === "number" ? scenario.index : states.length - 1;
+  function inferRoot(scenario) {
+    if (scenario.states && scenario.states.length) {
+      const index =
+        typeof scenario.index === "number"
+          ? scenario.index
+          : scenario.states.length - 1;
+      return scenario.states[index]?.root || scenario.states[0].root;
+    }
+    return defaultState().root;
+  }
+
+  function storageKey(root) {
+    return `${PERSIST_KEY_PREFIX}${root}`;
+  }
+
+  function graphSignature(state) {
+    return JSON.stringify({
+      root: state.root,
+      editable: state.editable,
+      nodes: state.nodes,
+      links: state.links,
+      link_types: state.link_types || [],
+    });
+  }
+
+  function graphsMatch(left, right) {
+    return graphSignature(left) === graphSignature(right);
+  }
+
+  function readStoredHistory(root) {
+    try {
+      const raw = globalThis.localStorage?.getItem(storageKey(root));
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw);
+      if (
+        !parsed ||
+        !Array.isArray(parsed.states) ||
+        typeof parsed.index !== "number" ||
+        !parsed.states[parsed.index]
+      ) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function initHistory(scenario) {
+    const persistUndo = scenario.persistUndo === true;
+    const root = inferRoot(scenario);
+
+    if (persistUndo) {
+      const stored = readStoredHistory(root);
+      if (stored) {
+        const expectedState =
+          scenario.states && scenario.states.length
+            ? scenario.states[
+                typeof scenario.index === "number"
+                  ? scenario.index
+                  : scenario.states.length - 1
+              ]
+            : null;
+        if (expectedState && !graphsMatch(stored.states[stored.index], expectedState)) {
+          globalThis.localStorage?.removeItem(storageKey(root));
+        } else {
+          return {
+            states: stored.states.map(clone),
+            index: stored.index,
+            persistUndo,
+            root,
+          };
+        }
+      }
+    }
+
+    const states =
+      scenario.states && scenario.states.length
+        ? scenario.states.map(clone)
+        : [defaultState()];
+    const index =
+      typeof scenario.index === "number" ? scenario.index : states.length - 1;
+    return { states, index, persistUndo, root };
+  }
+
+  const scenario = window.__TEST_SCENARIO__ || {};
+  const history = initHistory(scenario);
+  let states = history.states;
+  let index = history.index;
+  const persistUndo = history.persistUndo;
+  const roadmapRoot = history.root;
+
+  function persistHistory() {
+    if (!persistUndo) {
+      return;
+    }
+    try {
+      globalThis.localStorage?.setItem(
+        storageKey(roadmapRoot),
+        JSON.stringify({ states, index }),
+      );
+    } catch {
+      // Ignore storage failures in tests.
+    }
+  }
+
+  if (persistUndo && !readStoredHistory(roadmapRoot)) {
+    persistHistory();
+  }
 
   function currentGraph() {
     const state = states[index];
@@ -81,6 +186,7 @@
     states.splice(index + 1);
     states.push(clone(next));
     index = states.length - 1;
+    persistHistory();
   }
 
   function fakeInvoke(cmd, args) {
@@ -93,11 +199,13 @@
       case "undo_command":
         if (index > 0) {
           index -= 1;
+          persistHistory();
         }
         return currentGraph();
       case "redo_command":
         if (index < states.length - 1) {
           index += 1;
+          persistHistory();
         }
         return currentGraph();
       case "undo_state_command":

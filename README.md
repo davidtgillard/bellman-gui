@@ -93,7 +93,9 @@ Node drag positions are saved separately and are **not** part of the undo stack.
 - **Menu** — **Edit → Undo** or **Edit → Redo**
 - **Keyboard** — **Ctrl+Z** / **Cmd+Z** to undo; **Ctrl+Shift+Z** / **Cmd+Shift+Z** to redo
 
-History is kept in memory for the current roadmap for the lifetime of the app session. Opening a different roadmap clears that roadmap’s stack. Restarting the app clears all history.
+History is persisted per editable roadmap in `.fits/undo-history.json`. It survives app restarts when you reopen the same roadmap folder. If the on-disk files no longer match the saved undo cursor (for example after `bellman sync`, a git pull, or manual edits outside the app), the saved history is discarded and a fresh stack starts.
+
+Add `.fits/undo-history.json` to your roadmap repo’s `.gitignore` alongside other local GUI state such as `.fits/work-package-layout.json`. There is no app-global undo history today — stacks are scoped to each roadmap root.
 
 **Developer tracing**
 
