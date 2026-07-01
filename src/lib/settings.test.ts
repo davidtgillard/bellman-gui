@@ -16,7 +16,22 @@ describe("settings", () => {
   it("loads max pan speed from the backend settings command", async () => {
     invokeMock.mockResolvedValueOnce({ max_pan_speed: 640 });
 
-    await expect(loadSettings()).resolves.toEqual({ maxPanSpeed: 640 });
+    await expect(loadSettings()).resolves.toEqual({
+      maxPanSpeed: 640,
+      backgroundPanEnabled: false,
+    });
     expect(invokeMock).toHaveBeenCalledWith("load_settings_command");
+  });
+
+  it("loads background pan setting from the backend settings command", async () => {
+    invokeMock.mockResolvedValueOnce({
+      max_pan_speed: 960,
+      background_pan_enabled: true,
+    });
+
+    await expect(loadSettings()).resolves.toEqual({
+      maxPanSpeed: 960,
+      backgroundPanEnabled: true,
+    });
   });
 });

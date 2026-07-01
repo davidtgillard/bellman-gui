@@ -266,6 +266,7 @@
         return (
           liveScenario.settings || {
             max_pan_speed: 960,
+            background_pan_enabled: false,
           }
         );
       }

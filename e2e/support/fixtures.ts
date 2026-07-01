@@ -23,6 +23,7 @@ export interface Scenario {
   persistUndo?: boolean;
   settings?: {
     max_pan_speed?: number;
+    background_pan_enabled?: boolean;
   };
 }
 
@@ -152,6 +153,44 @@ export async function waitForGraph(page: Page): Promise<void> {
       });
     })
     .toBe(true);
+}
+
+/**
+ * Drags across an empty area of the graph canvas to pan the viewport.
+ * @param page - Playwright page to interact with.
+ */
+export async function dragGraphBackground(page: Page): Promise<void> {
+  const canvas = page.locator(".graph-viewport canvas").first();
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("graph canvas is not visible");
+  }
+
+  const startX = box.x + box.width * 0.08;
+  const startY = box.y + box.height * 0.08;
+  const endX = startX + 140;
+  const endY = startY + 90;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(endX, endY, { steps: 12 });
+  await page.mouse.up();
+}
+
+/**
+ * Returns whether cytoscape background panning is currently enabled.
+ * @param page - Playwright page to inspect.
+ */
+export async function isGraphBackgroundPanEnabled(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const bridge = (window as unknown as {
+      __TEST__?: { graphUserPanningEnabled?: () => boolean };
+    }).__TEST__;
+    if (!bridge?.graphUserPanningEnabled) {
+      throw new Error("graph user panning test hook is unavailable");
+    }
+    return bridge.graphUserPanningEnabled();
+  });
 }
 
 /**

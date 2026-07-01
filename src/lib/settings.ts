@@ -4,15 +4,18 @@ export const DEFAULT_MAX_PAN_SPEED = 960;
 
 interface BellmanGuiSettingsDto {
   max_pan_speed: number;
+  background_pan_enabled?: boolean;
 }
 
 export interface BellmanGuiSettings {
   maxPanSpeed: number;
+  backgroundPanEnabled: boolean;
 }
 
 function fromSettingsDto(dto: BellmanGuiSettingsDto): BellmanGuiSettings {
   return {
     maxPanSpeed: dto.max_pan_speed,
+    backgroundPanEnabled: dto.background_pan_enabled ?? false,
   };
 }
 

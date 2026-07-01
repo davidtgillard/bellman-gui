@@ -249,6 +249,7 @@ export function RoadmapGraph({
   const keyboardPanFrameRef = useRef<number | null>(null);
   const [cyReady, setCyReady] = useState(false);
   const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
+  const [backgroundPanEnabled, setBackgroundPanEnabled] = useState(false);
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
     null,
   );
@@ -277,6 +278,7 @@ export function RoadmapGraph({
     void loadSettings()
       .then((settings) => {
         setMaxPanSpeed(settings.maxPanSpeed);
+        setBackgroundPanEnabled(settings.backgroundPanEnabled);
       })
       .catch((error) => {
         console.warn("[settings] failed to load settings", error);
@@ -286,6 +288,14 @@ export function RoadmapGraph({
   useEffect(() => {
     keyboardPanRef.current.setMaxSpeed(maxPanSpeed);
   }, [maxPanSpeed]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy) {
+      return;
+    }
+    cy.userPanningEnabled(backgroundPanEnabled);
+  }, [backgroundPanEnabled, cyReady]);
 
   useEffect(() => {
     const controller = keyboardPanRef.current;
@@ -411,6 +421,7 @@ export function RoadmapGraph({
       style: CYTOSCAPE_STYLESHEET,
       wheelSensitivity: 0.2,
       boxSelectionEnabled: false,
+      userPanningEnabled: false,
       minZoom: 0.2,
       maxZoom: 3,
     });
@@ -421,6 +432,7 @@ export function RoadmapGraph({
     const testWindow = window as typeof window & {
       __TEST__?: {
         graphPan?: () => { x: number; y: number };
+        graphUserPanningEnabled?: () => boolean;
         openNodeContextMenu?: (nodeId: string) => void;
       };
     };
@@ -429,6 +441,7 @@ export function RoadmapGraph({
         const pan = cy.pan();
         return { x: pan.x, y: pan.y };
       };
+      testWindow.__TEST__.graphUserPanningEnabled = () => cy.userPanningEnabled();
       testWindow.__TEST__.openNodeContextMenu = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
         if (node.empty()) {
@@ -572,6 +585,7 @@ export function RoadmapGraph({
       setCyReady(false);
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
+        delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
       }
       cy.destroy();

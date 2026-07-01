@@ -10,6 +10,8 @@ const MAX_MAX_PAN_SPEED: f64 = 10_000.0;
 pub struct BellmanGuiSettingsDto {
     #[serde(default = "default_max_pan_speed")]
     pub max_pan_speed: f64,
+    #[serde(default)]
+    pub background_pan_enabled: bool,
 }
 
 fn default_max_pan_speed() -> f64 {
@@ -20,6 +22,7 @@ impl Default for BellmanGuiSettingsDto {
     fn default() -> Self {
         Self {
             max_pan_speed: DEFAULT_MAX_PAN_SPEED,
+            background_pan_enabled: false,
         }
     }
 }
@@ -67,6 +70,7 @@ pub fn load_settings() -> BellmanGuiSettingsDto {
 
     BellmanGuiSettingsDto {
         max_pan_speed: clamp_max_pan_speed(parsed.max_pan_speed),
+        background_pan_enabled: parsed.background_pan_enabled,
     }
 }
 
@@ -103,6 +107,30 @@ mod tests {
 
         let settings = load_settings();
         assert_eq!(settings.max_pan_speed, 420.0);
+
+        if let Some(value) = previous {
+            env::set_var("XDG_CONFIG_HOME", value);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
+
+    #[test]
+    fn reads_background_pan_enabled_from_settings_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let config_dir = temp.path().join("bellman-gui");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::write(
+            config_dir.join("settings.json"),
+            r#"{ "background_pan_enabled": true }"#,
+        )
+        .expect("write settings");
+
+        let previous = env::var("XDG_CONFIG_HOME").ok();
+        env::set_var("XDG_CONFIG_HOME", temp.path());
+
+        let settings = load_settings();
+        assert!(settings.background_pan_enabled);
 
         if let Some(value) = previous {
             env::set_var("XDG_CONFIG_HOME", value);
