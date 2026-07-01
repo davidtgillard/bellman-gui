@@ -74,6 +74,34 @@ Roadmap data is read from:
 
 Run `bellman init` and `bellman sync` in your roadmap repo before opening it here if the graph artifacts are missing.
 
+## Features
+
+### Undo / redo
+
+Undo and redo are available when you have an **editable** roadmap open (a folder on disk with `.fits/registry.json`). The bundled example graph is read-only and does not support undo/redo.
+
+Each undo step reverses one **structural** edit:
+
+- Create or remove a node
+- Create or remove a link
+
+Node drag positions are saved separately and are **not** part of the undo stack. Undoing a node deletion does restore its saved layout position when one exists.
+
+**How to undo or redo**
+
+- **Toolbar** — **Undo** and **Redo** buttons appear above the graph when the roadmap is editable. Hover a button to see what operation it will apply (for example, `Undo: create goal reduce-churn`).
+- **Menu** — **Edit → Undo** or **Edit → Redo**
+- **Keyboard** — **Ctrl+Z** / **Cmd+Z** to undo; **Ctrl+Shift+Z** / **Cmd+Shift+Z** to redo
+
+History is kept in memory for the current roadmap for the lifetime of the app session. Opening a different roadmap clears that roadmap’s stack. Restarting the app clears all history.
+
+**Developer tracing**
+
+To inspect undo/redo stack activity while developing:
+
+- **Backend** — set `BELLMAN_GUI_TRACE_UNDO` in the environment before starting the app; stack events are logged to stderr.
+- **Frontend** — in dev builds, undo/redo calls are logged to the browser devtools console. In any build, set `localStorage["bellman:trace-undo"]` (any value) and reload to enable the same logging.
+
 ## Releases
 
 Rolling **linux-x86_64** portable bundles are published to the [`dev` release](https://github.com/davidtgillard/bellman-gui/releases/tag/dev):
