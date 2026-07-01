@@ -14,6 +14,14 @@ import {
   usesPresetLayout,
 } from "../lib/cytoscape-layout";
 import { defaultNodePosition, type NodePosition } from "../lib/graph-layout";
+import {
+  ARROW_KEY_DIRECTIONS,
+  isArrowPanKey,
+  KeyboardPanController,
+  PAN_RAMP_UP_MS,
+  shouldIgnoreKeyboardPanTarget,
+} from "../lib/keyboard-pan";
+import { DEFAULT_MAX_PAN_SPEED, loadSettings } from "../lib/settings";
 
 cytoscape.use(fcose);
 
@@ -187,7 +195,15 @@ export function RoadmapGraph({
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
   const contextMenuRef = useRef(contextMenu);
+  const keyboardPanRef = useRef(
+    new KeyboardPanController({
+      maxSpeed: DEFAULT_MAX_PAN_SPEED,
+      rampUpMs: PAN_RAMP_UP_MS,
+    }),
+  );
+  const keyboardPanFrameRef = useRef<number | null>(null);
   const [cyReady, setCyReady] = useState(false);
+  const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
     null,
   );
@@ -211,6 +227,99 @@ export function RoadmapGraph({
   useEffect(() => {
     contextMenuRef.current = contextMenu;
   }, [contextMenu]);
+
+  useEffect(() => {
+    void loadSettings()
+      .then((settings) => {
+        setMaxPanSpeed(settings.maxPanSpeed);
+      })
+      .catch((error) => {
+        console.warn("[settings] failed to load settings", error);
+      });
+  }, []);
+
+  useEffect(() => {
+    keyboardPanRef.current.setMaxSpeed(maxPanSpeed);
+  }, [maxPanSpeed]);
+
+  useEffect(() => {
+    const controller = keyboardPanRef.current;
+
+    const stopKeyboardPanLoop = () => {
+      if (keyboardPanFrameRef.current !== null) {
+        cancelAnimationFrame(keyboardPanFrameRef.current);
+        keyboardPanFrameRef.current = null;
+      }
+    };
+
+    const runKeyboardPanLoop = () => {
+      const cy = cyRef.current;
+      if (!cy || !controller.isActive()) {
+        stopKeyboardPanLoop();
+        return;
+      }
+
+      const { dx, dy } = controller.tick(performance.now());
+      if (dx !== 0 || dy !== 0) {
+        cy.panBy({ x: dx, y: dy });
+      }
+
+      keyboardPanFrameRef.current = requestAnimationFrame(runKeyboardPanLoop);
+    };
+
+    const startKeyboardPanLoop = () => {
+      if (keyboardPanFrameRef.current !== null) {
+        return;
+      }
+      keyboardPanFrameRef.current = requestAnimationFrame(runKeyboardPanLoop);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        shouldIgnoreKeyboardPanTarget(event.target) ||
+        !isArrowPanKey(event.key)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      controller.keyDown(ARROW_KEY_DIRECTIONS[event.key]);
+      controller.beginHold(performance.now());
+      startKeyboardPanLoop();
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!isArrowPanKey(event.key)) {
+        return;
+      }
+      controller.keyUp(ARROW_KEY_DIRECTIONS[event.key]);
+      if (!controller.isActive()) {
+        stopKeyboardPanLoop();
+      }
+    };
+
+    const onWindowBlur = () => {
+      controller.clear();
+      stopKeyboardPanLoop();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+
+    return () => {
+      controller.clear();
+      stopKeyboardPanLoop();
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [cyReady]);
 
   useEffect(() => {
     if (!contextMenuState) {
@@ -261,6 +370,16 @@ export function RoadmapGraph({
 
     cyRef.current = cy;
     setCyReady(true);
+
+    const testWindow = window as typeof window & {
+      __TEST__?: { graphPan?: () => { x: number; y: number } };
+    };
+    if (testWindow.__TEST__) {
+      testWindow.__TEST__.graphPan = () => {
+        const pan = cy.pan();
+        return { x: pan.x, y: pan.y };
+      };
+    }
 
     cy.on("tap", "node", (event) => {
       closeContextMenu();
@@ -377,6 +496,9 @@ export function RoadmapGraph({
       layoutCleanupRef.current = null;
       resizeObserver.disconnect();
       setCyReady(false);
+      if (testWindow.__TEST__) {
+        delete testWindow.__TEST__.graphPan;
+      }
       cy.destroy();
       cyRef.current = null;
       container.replaceChildren();

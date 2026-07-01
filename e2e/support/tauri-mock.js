@@ -153,6 +153,14 @@
             projects: {},
           }
         );
+      case "load_settings_command": {
+        const liveScenario = window.__TEST_SCENARIO__ || {};
+        return (
+          liveScenario.settings || {
+            max_pan_speed: 960,
+          }
+        );
+      }
       case "bellman_version":
         return "test";
       default:

@@ -4,6 +4,7 @@ mod graph;
 mod graph_layout;
 mod node_detail;
 mod roadmap_edit;
+mod settings;
 mod undo;
 
 use bellman_cmd::run_bellman;
@@ -20,6 +21,7 @@ use roadmap_edit::{
     create_link, create_node, remove_link, remove_node, CreateLinkRequest, CreateNodeRequest,
     RemoveLinkRequest, RemoveNodeRequest,
 };
+use settings::load_settings_command;
 use crate::undo::{Snapshot, UndoState, UndoStateDto};
 use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuItem, Submenu};
@@ -285,6 +287,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_roadmap_graph_command,
             load_initial_roadmap,
+            load_settings_command,
             pick_and_load_roadmap,
             bellman_version,
             create_node_command,

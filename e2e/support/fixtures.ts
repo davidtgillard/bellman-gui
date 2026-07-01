@@ -20,6 +20,9 @@ export interface RoadmapState {
 export interface Scenario {
   states: RoadmapState[];
   index?: number;
+  settings?: {
+    max_pan_speed?: number;
+  };
 }
 
 export interface RecordedCall {
@@ -78,6 +81,22 @@ export async function emitEvent(page: Page, event: string): Promise<void> {
     (name) => (window as unknown as { __TEST__: TestBridge }).__TEST__.emit(name),
     event,
   );
+}
+
+/**
+ * Returns the current cytoscape pan position exposed by the graph test hook.
+ * @param page - Playwright page to inspect.
+ */
+export async function getGraphPan(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    const bridge = (window as unknown as {
+      __TEST__?: { graphPan?: () => { x: number; y: number } };
+    }).__TEST__;
+    if (!bridge?.graphPan) {
+      throw new Error("graph pan test hook is unavailable");
+    }
+    return bridge.graphPan();
+  });
 }
 
 export { test, expect };
