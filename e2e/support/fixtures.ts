@@ -136,4 +136,50 @@ export async function getGraphPan(page: Page): Promise<{ x: number; y: number }>
   });
 }
 
+/**
+ * Waits until the graph canvas and test hooks are ready.
+ * @param page - Playwright page to wait on.
+ */
+export async function waitForGraph(page: Page): Promise<void> {
+  await expect(page.locator(".graph-viewport canvas").first()).toBeVisible();
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const bridge = (window as unknown as {
+          __TEST__?: { graphPan?: () => { x: number; y: number } };
+        }).__TEST__;
+        return typeof bridge?.graphPan === "function";
+      });
+    })
+    .toBe(true);
+}
+
+/**
+ * Opens the graph context menu for a node via the cytoscape test hook.
+ * @param page - Playwright page to interact with.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function openNodeContextMenu(page: Page, nodeId: string): Promise<void> {
+  await waitForGraph(page);
+  await expect
+    .poll(async () => {
+      return page.evaluate((id) => {
+        const bridge = (window as unknown as {
+          __TEST__?: { openNodeContextMenu?: (nodeId: string) => void };
+        }).__TEST__;
+        if (!bridge?.openNodeContextMenu) {
+          return false;
+        }
+        try {
+          bridge.openNodeContextMenu(id);
+          return true;
+        } catch {
+          return false;
+        }
+      }, nodeId);
+    })
+    .toBe(true);
+  await expect(page.locator(".graph-context-menu")).toBeVisible();
+}
+
 export { test, expect };

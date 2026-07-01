@@ -372,12 +372,22 @@ export function RoadmapGraph({
     setCyReady(true);
 
     const testWindow = window as typeof window & {
-      __TEST__?: { graphPan?: () => { x: number; y: number } };
+      __TEST__?: {
+        graphPan?: () => { x: number; y: number };
+        openNodeContextMenu?: (nodeId: string) => void;
+      };
     };
     if (testWindow.__TEST__) {
       testWindow.__TEST__.graphPan = () => {
         const pan = cy.pan();
         return { x: pan.x, y: pan.y };
+      };
+      testWindow.__TEST__.openNodeContextMenu = (nodeId: string) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          throw new Error(`Graph node not found: ${nodeId}`);
+        }
+        node.trigger("cxttap");
       };
     }
 
@@ -401,9 +411,25 @@ export function RoadmapGraph({
       }
     });
 
+    const contextMenuPointForNode = (
+      node: cytoscape.NodeSingular,
+      originalEvent?: MouseEvent,
+    ) => {
+      if (originalEvent) {
+        return { x: originalEvent.clientX, y: originalEvent.clientY };
+      }
+      cy.center(node);
+      const bb = node.renderedBoundingBox();
+      const rect = container.getBoundingClientRect();
+      return {
+        x: rect.left + (bb.x1 + bb.x2) / 2,
+        y: rect.top + (bb.y1 + bb.y2) / 2,
+      };
+    };
+
     cy.on("cxttap", "node", (event) => {
       const node = event.target;
-      const originalEvent = event.originalEvent as MouseEvent;
+      const originalEvent = event.originalEvent as MouseEvent | undefined;
       const renderContextMenu = contextMenuRef.current;
       if (!renderContextMenu) {
         return;
@@ -418,9 +444,10 @@ export function RoadmapGraph({
         onClose: closeContextMenu,
       };
 
+      const point = contextMenuPointForNode(node, originalEvent);
       setContextMenuState({
-        x: originalEvent.clientX,
-        y: originalEvent.clientY,
+        x: point.x,
+        y: point.y,
         event: menuEvent,
       });
     });
@@ -498,6 +525,7 @@ export function RoadmapGraph({
       setCyReady(false);
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
+        delete testWindow.__TEST__.openNodeContextMenu;
       }
       cy.destroy();
       cyRef.current = null;

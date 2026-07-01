@@ -935,11 +935,17 @@ function App() {
           nodeType={nodeType}
           canCreateLink={canCreateLink}
           showInnerGraph={!inWorkPackageGraph && nodeType === "project"}
+          innerGraphAvailable={
+            innerGraphForProject(nodes, links, nodeId).nodes.length > 0
+          }
           showWorkPackageInnerGraph={
             inWorkPackageGraph &&
             nodeType === "work_package" &&
             !isOverflowNodeId(nodeId) &&
             activeWorkPackageFocus !== nodeId &&
+            compoundView !== null
+          }
+          workPackageInnerGraphAvailable={
             compoundView !== null &&
             workPackageHasChildren(nodeId, compoundView.childrenByParent)
           }
@@ -964,6 +970,7 @@ function App() {
       handleShowWorkPackageInnerGraph,
       inWorkPackageGraph,
       linkTypes,
+      links,
       nodes,
     ],
   );

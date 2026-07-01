@@ -7,7 +7,9 @@ interface GraphContextMenuProps {
   linkId?: string;
   background?: boolean;
   showInnerGraph?: boolean;
+  innerGraphAvailable?: boolean;
   showWorkPackageInnerGraph?: boolean;
+  workPackageInnerGraphAvailable?: boolean;
   onShowInnerGraph?: (projectId: string) => void;
   onShowWorkPackageInnerGraph?: (workPackageId: string) => void;
   onCreateNode?: () => void;
@@ -25,7 +27,9 @@ export function GraphContextMenu({
   linkId,
   background = false,
   showInnerGraph = false,
+  innerGraphAvailable = true,
   showWorkPackageInnerGraph = false,
+  workPackageInnerGraphAvailable = true,
   onShowInnerGraph,
   onShowWorkPackageInnerGraph,
   onCreateNode,
@@ -75,6 +79,10 @@ export function GraphContextMenu({
   if (showInnerGraph && nodeId && onShowInnerGraph) {
     items.push({
       label: "Show work package graph",
+      disabled: !innerGraphAvailable,
+      title: innerGraphAvailable
+        ? undefined
+        : "This project has no work packages",
       onClick: () => {
         onShowInnerGraph(nodeId);
         onClose();
@@ -85,6 +93,10 @@ export function GraphContextMenu({
   if (showWorkPackageInnerGraph && nodeId && onShowWorkPackageInnerGraph) {
     items.push({
       label: "Show inner graph",
+      disabled: !workPackageInnerGraphAvailable,
+      title: workPackageInnerGraphAvailable
+        ? undefined
+        : "This work package has no sub-packages",
       onClick: () => {
         onShowWorkPackageInnerGraph(nodeId);
         onClose();
