@@ -109,9 +109,14 @@ function App() {
   const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
     EMPTY_WORK_PACKAGE_LAYOUT,
   );
-  const [layoutHydrated, setLayoutHydrated] = useState(
-    !roadmapLayoutPersistable(exampleGraph.root, exampleGraph.editable),
+  const [hydratedLayoutKey, setHydratedLayoutKey] = useState<string | null>(() =>
+    roadmapLayoutPersistable(exampleGraph.root, exampleGraph.editable) ? null : "",
   );
+  const currentLayoutKey = roadmapLayoutPersistable(roadmapRoot, editable)
+    ? `${roadmapRoot}:${editable}`
+    : null;
+  const layoutHydrated =
+    currentLayoutKey === null || hydratedLayoutKey === currentLayoutKey;
   const workPackageLayoutRef = useRef(workPackageLayout);
   const layoutSaveChainRef = useRef(Promise.resolve());
 
@@ -138,9 +143,9 @@ function App() {
       setNodeDetailLoading(false);
       if (!roadmapLayoutPersistable(graph.root, graph.editable)) {
         setWorkPackageLayout(EMPTY_WORK_PACKAGE_LAYOUT);
-        setLayoutHydrated(true);
+        setHydratedLayoutKey("");
       } else {
-        setLayoutHydrated(false);
+        setHydratedLayoutKey(null);
       }
     } else {
       setVisibleTypes((current) => {
@@ -162,13 +167,43 @@ function App() {
 
     if (options.layout) {
       setWorkPackageLayout(options.layout);
-      setLayoutHydrated(true);
+      setHydratedLayoutKey(
+        roadmapLayoutPersistable(graph.root, graph.editable)
+          ? `${graph.root}:${graph.editable}`
+          : "",
+      );
     }
   }, []);
 
   useEffect(() => {
     workPackageLayoutRef.current = workPackageLayout;
   }, [workPackageLayout]);
+
+  useEffect(() => {
+    if (!currentLayoutKey || hydratedLayoutKey === currentLayoutKey) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void loadWorkPackageLayout(roadmapRoot)
+      .then((layout) => {
+        if (!cancelled) {
+          setWorkPackageLayout(layout);
+          setHydratedLayoutKey(currentLayoutKey);
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(String(caught));
+          setHydratedLayoutKey(currentLayoutKey);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentLayoutKey, hydratedLayoutKey, roadmapRoot]);
 
   const persistNodePosition = useCallback(
     (projectId: string | null, nodeId: string, position: NodePosition) => {
@@ -434,34 +469,6 @@ function App() {
       workPackageLayout,
     ],
   );
-
-  useEffect(() => {
-    if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
-      setLayoutHydrated(true);
-      return;
-    }
-
-    setLayoutHydrated(false);
-    let cancelled = false;
-
-    void loadWorkPackageLayout(roadmapRoot)
-      .then((layout) => {
-        if (!cancelled) {
-          setWorkPackageLayout(layout);
-          setLayoutHydrated(true);
-        }
-      })
-      .catch((caught) => {
-        if (!cancelled) {
-          setError(String(caught));
-          setLayoutHydrated(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [editable, roadmapRoot]);
 
   const handleRemoveLink = useCallback(
     async (linkId: string) => {

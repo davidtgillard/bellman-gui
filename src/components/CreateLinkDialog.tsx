@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import {
   canBeLinkFinish,
   canBeLinkStart,
@@ -64,51 +64,47 @@ function compatibleFinishNodes(
   );
 }
 
-export function CreateLinkDialog({
-  open,
+function initialEndpoints(
+  initialNodeId: string | null | undefined,
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+): { source: string; target: string } {
+  if (!initialNodeId) {
+    return { source: "", target: "" };
+  }
+
+  const pinnedNode = nodes.find((node) => node.id === initialNodeId);
+  if (!pinnedNode) {
+    return { source: "", target: "" };
+  }
+
+  const asStart = canBeLinkStart(pinnedNode, nodes, linkTypes);
+  const asFinish = canBeLinkFinish(pinnedNode, nodes, linkTypes);
+
+  if (!asStart && asFinish) {
+    return { source: "", target: initialNodeId };
+  }
+
+  return { source: initialNodeId, target: "" };
+}
+
+type CreateLinkDialogFormProps = Omit<CreateLinkDialogProps, "open">;
+
+function CreateLinkDialogForm({
   nodes,
   linkTypes,
   saving,
   initialNodeId = null,
   onClose,
   onCreate,
-}: CreateLinkDialogProps) {
+}: CreateLinkDialogFormProps) {
   const [linkType, setLinkType] = useState("");
-  const [source, setSource] = useState("");
-  const [target, setTarget] = useState("");
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    setLinkType("");
-
-    if (!initialNodeId) {
-      setSource("");
-      setTarget("");
-      return;
-    }
-
-    const pinnedNode = nodes.find((node) => node.id === initialNodeId);
-    if (!pinnedNode) {
-      setSource("");
-      setTarget("");
-      return;
-    }
-
-    const asStart = canBeLinkStart(pinnedNode, nodes, linkTypes);
-    const asFinish = canBeLinkFinish(pinnedNode, nodes, linkTypes);
-
-    if (!asStart && asFinish) {
-      setSource("");
-      setTarget(initialNodeId);
-      return;
-    }
-
-    setSource(initialNodeId);
-    setTarget("");
-  }, [initialNodeId, linkTypes, nodes, open]);
+  const [source, setSource] = useState(
+    () => initialEndpoints(initialNodeId, nodes, linkTypes).source,
+  );
+  const [target, setTarget] = useState(
+    () => initialEndpoints(initialNodeId, nodes, linkTypes).target,
+  );
 
   const startNode = nodes.find((node) => node.id === source);
   const finishNode = nodes.find((node) => node.id === target);
@@ -187,26 +183,17 @@ export function CreateLinkDialog({
     );
   }, [endpointsSelected, finishNode, linkTypes, startNode]);
 
-  useEffect(() => {
-    if (!linkType) {
-      return;
-    }
-
-    if (!compatibleTypes.some((item) => item.link_type === linkType)) {
-      setLinkType("");
-    }
-  }, [compatibleTypes, linkType]);
-
-  if (!open) {
-    return null;
-  }
+  const validLinkType =
+    linkType && compatibleTypes.some((item) => item.link_type === linkType)
+      ? linkType
+      : "";
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!source || !target || !linkType) {
+    if (!source || !target || !validLinkType) {
       return;
     }
-    onCreate({ linkType, source, target });
+    onCreate({ linkType: validLinkType, source, target });
   };
 
   const handleSwapEndpoints = () => {
@@ -300,7 +287,7 @@ export function CreateLinkDialog({
           <label className="edit-field">
             <span>Link type</span>
             <select
-              value={linkType}
+              value={validLinkType}
               onChange={(event) => setLinkType(event.target.value)}
               required
               disabled={!endpointsSelected || compatibleTypes.length === 0}
@@ -326,7 +313,9 @@ export function CreateLinkDialog({
             </button>
             <button
               type="submit"
-              disabled={saving || !linkType || !source || !target || source === target}
+              disabled={
+                saving || !validLinkType || !source || !target || source === target
+              }
             >
               {saving ? "Creating…" : "Create link"}
             </button>
@@ -334,5 +323,23 @@ export function CreateLinkDialog({
         </form>
       </dialog>
     </div>
+  );
+}
+
+export function CreateLinkDialog({
+  open,
+  initialNodeId = null,
+  ...formProps
+}: CreateLinkDialogProps) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <CreateLinkDialogForm
+      key={initialNodeId ?? ""}
+      initialNodeId={initialNodeId}
+      {...formProps}
+    />
   );
 }

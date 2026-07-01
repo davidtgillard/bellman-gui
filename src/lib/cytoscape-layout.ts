@@ -187,6 +187,7 @@ export function scatterEdgelessNodes(cy: Core, seed: number): void {
  * @param linkCount - Number of visible links in the graph.
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @param onAutoLayoutComplete - Called with computed positions after auto layout.
+ * @param isActive - Function that returns whether the layout is still active.
  */
 export function applyAutoLayout(
   cy: Core,

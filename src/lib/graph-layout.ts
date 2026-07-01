@@ -446,6 +446,12 @@ export function withoutNodePosition(
   };
 }
 
+/**
+ * 
+ * @param roadmapRoot - Roadmap root path on disk.
+ * @param layout - Work package layout document.
+ * @returns Updated work package layout document after save.
+ */
 export async function saveGraphLayout(
   roadmapRoot: string,
   layout: WorkPackageLayout,
