@@ -175,15 +175,17 @@ export function CreateLinkDialog({
     return compatible;
   }, [initialNodeId, linkTypes, nodes, pinnedFinish, startNode, target]);
 
+  const endpointsSelected = Boolean(startNode && finishNode);
+
   const compatibleTypes = useMemo(() => {
-    if (!startNode || !finishNode) {
+    if (!endpointsSelected) {
       return [];
     }
 
-    return [...compatibleLinkTypes(linkTypes, startNode.type, finishNode.type)].sort(
+    return [...compatibleLinkTypes(linkTypes, startNode!.type, finishNode!.type)].sort(
       (left, right) => left.link_type.localeCompare(right.link_type),
     );
-  }, [finishNode, linkTypes, startNode]);
+  }, [endpointsSelected, finishNode, linkTypes, startNode]);
 
   useEffect(() => {
     if (!linkType) {
@@ -301,10 +303,10 @@ export function CreateLinkDialog({
               value={linkType}
               onChange={(event) => setLinkType(event.target.value)}
               required
-              disabled={!startNode || !finishNode || compatibleTypes.length === 0}
+              disabled={!endpointsSelected || compatibleTypes.length === 0}
             >
               <option value="" disabled>
-                {!startNode || !finishNode
+                {!endpointsSelected
                   ? "Select start and finish nodes first"
                   : compatibleTypes.length === 0
                     ? "No compatible link types"

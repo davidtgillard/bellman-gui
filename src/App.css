@@ -583,6 +583,13 @@ body {
   font: inherit;
 }
 
+.edit-field select:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  -webkit-text-fill-color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .edit-field input::placeholder,
 .edit-field textarea::placeholder {
   color: #475569;
