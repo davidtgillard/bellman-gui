@@ -75,7 +75,7 @@ describe("graph-layout", () => {
 
   it("assigns stable fallback grid positions", () => {
     const ids = ["a", "b", "c"];
-    expect(defaultNodePosition("b", ids)).toEqual({ x: 40, y: 40 });
+    expect(defaultNodePosition("b", ids)).toEqual({ x: 85, y: 42.5 });
     expect(defaultNodePosition("missing", ids)).toEqual({ x: 0, y: 0 });
   });
 

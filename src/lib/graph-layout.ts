@@ -553,7 +553,7 @@ export function defaultNodePosition(
   const index = nodeIds.indexOf(nodeId);
   const column = index < 0 ? 0 : index;
   return {
-    x: 40 * column,
-    y: column % 2 === 0 ? 0 : 40,
+    x: MIN_NODE_DISTANCE * column,
+    y: column % 2 === 0 ? 0 : MIN_NODE_DISTANCE * 0.5,
   };
 }

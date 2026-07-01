@@ -10,10 +10,12 @@ import {
 import { createPortal } from "react-dom";
 import { CYTOSCAPE_STYLESHEET } from "../lib/cytoscape-theme";
 import {
+  installDragOverlapConstraints,
   runLayoutWhenContainerReady,
   usesPresetLayout,
 } from "../lib/cytoscape-layout";
 import { defaultNodePosition, type NodePosition } from "../lib/graph-layout";
+import { graphNodeDisplayLabel } from "../lib/graph";
 import {
   ARROW_KEY_DIRECTIONS,
   isArrowPanKey,
@@ -126,9 +128,10 @@ function toElementDefinitions(
   const elements: ElementDefinition[] = sortGraphViewNodes(uniqueGraphViewNodes(nodes)).map((node) => {
     const saved = nodePositions?.[node.id];
     const position = saved ?? (usePreset ? defaultNodePosition(node.id, nodeIds) : undefined);
+    const baseLabel = graphNodeDisplayLabel(node.label ?? node.id);
     const label = node.subLabel
-      ? `${node.label ?? node.id}\n${node.subLabel}`
-      : (node.label ?? node.id);
+      ? `${baseLabel}\n${graphNodeDisplayLabel(node.subLabel)}`
+      : baseLabel;
 
     return {
       data: {
@@ -168,6 +171,46 @@ function focusGraphOnNode(cy: Core, nodeId: string): void {
   }
 }
 
+function graphStructureKey(nodes: GraphViewNode[], links: GraphViewLink[]): string {
+  const nodePart = nodes
+    .map(
+      (node) =>
+        `${node.id}:${node.parent ?? ""}:${node.classes ?? ""}:${node.data?.isCompound ?? false}`,
+    )
+    .sort()
+    .join("\n");
+  const linkPart = links
+    .map((link) => `${link.id}:${link.source}:${link.target}`)
+    .sort()
+    .join("\n");
+  return `${nodePart}\n---\n${linkPart}`;
+}
+
+function syncNodePositions(
+  cy: Core,
+  nodePositions: Record<string, NodePosition> | undefined,
+): void {
+  if (!nodePositions) {
+    return;
+  }
+
+  cy.batch(() => {
+    for (const [nodeId, position] of Object.entries(nodePositions)) {
+      const node = cy.getElementById(nodeId);
+      if (node.empty()) {
+        continue;
+      }
+
+      const current = node.position();
+      if (current.x === position.x && current.y === position.y) {
+        continue;
+      }
+
+      node.position(position);
+    }
+  });
+}
+
 interface ContextMenuState {
   x: number;
   y: number;
@@ -191,6 +234,8 @@ export function RoadmapGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const layoutCleanupRef = useRef<(() => void) | null>(null);
+  const dragConstraintCleanupRef = useRef<(() => void) | null>(null);
+  const graphStructureKeyRef = useRef("");
   const onNodeClickRef = useRef(onNodeClick);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
@@ -349,6 +394,8 @@ export function RoadmapGraph({
 
     layoutCleanupRef.current?.();
     layoutCleanupRef.current = null;
+    dragConstraintCleanupRef.current?.();
+    dragConstraintCleanupRef.current = null;
 
     const existing = cyRef.current;
     if (existing) {
@@ -507,10 +554,8 @@ export function RoadmapGraph({
       });
     });
 
-    cy.on("dragfree", "node", (event) => {
-      const node = event.target;
-      const pos = node.position();
-      onNodePositionChangeRef.current?.(node.id(), { x: pos.x, y: pos.y });
+    dragConstraintCleanupRef.current = installDragOverlapConstraints(cy, (nodeId, position) => {
+      onNodePositionChangeRef.current?.(nodeId, position);
     });
 
     const resizeObserver = new ResizeObserver(() => {
@@ -521,6 +566,8 @@ export function RoadmapGraph({
     return () => {
       layoutCleanupRef.current?.();
       layoutCleanupRef.current = null;
+      dragConstraintCleanupRef.current?.();
+      dragConstraintCleanupRef.current = null;
       resizeObserver.disconnect();
       setCyReady(false);
       if (testWindow.__TEST__) {
@@ -544,11 +591,27 @@ export function RoadmapGraph({
     layoutCleanupRef.current = null;
 
     if (nodes.length === 0) {
+      graphStructureKeyRef.current = "";
       cy.batch(() => {
         cy.elements().remove();
       });
       return;
     }
+
+    const structureKey = graphStructureKey(nodes, links);
+    const structureChanged = structureKey !== graphStructureKeyRef.current;
+
+    if (!structureChanged) {
+      syncNodePositions(cy, nodePositions);
+      if (draggable) {
+        cy.nodes().grabify();
+      } else {
+        cy.nodes().ungrabify();
+      }
+      return;
+    }
+
+    graphStructureKeyRef.current = structureKey;
 
     cy.batch(() => {
       cy.elements().remove();

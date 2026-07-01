@@ -2,6 +2,7 @@ import type { ElementDefinition } from "cytoscape";
 import {
   nodeLabel,
   nodeTypeColor,
+  graphNodeDisplayLabel,
   type GraphLink,
   type GraphNode,
 } from "./graph";
@@ -58,13 +59,17 @@ export function toCytoscapeElementsFromCompoundNodes(
 
   return {
     nodes: sortedNodes.map((node) => {
-      const baseLabel = node.isOverflow
-        ? overflowNodeLabel(
-            node.parent ?? "",
-            overflowByParent.get(node.parent ?? "") ?? node.overflowCount ?? 0,
-          )
-        : compoundNodeLabel(node);
-      const label = node.subLabel ? `${baseLabel}\n${node.subLabel}` : baseLabel;
+      const baseLabel = graphNodeDisplayLabel(
+        node.isOverflow
+          ? overflowNodeLabel(
+              node.parent ?? "",
+              overflowByParent.get(node.parent ?? "") ?? node.overflowCount ?? 0,
+            )
+          : compoundNodeLabel(node),
+      );
+      const label = node.subLabel
+        ? `${baseLabel}\n${graphNodeDisplayLabel(node.subLabel)}`
+        : baseLabel;
 
       return {
         data: {
@@ -105,7 +110,7 @@ export function toCytoscapeElements(
     nodes: nodes.map((node) => ({
       data: {
         id: node.id,
-        label: nodeLabel(node.id),
+        label: graphNodeDisplayLabel(nodeLabel(node.id)),
         type: node.type,
         color: nodeTypeColor(node.type),
       },

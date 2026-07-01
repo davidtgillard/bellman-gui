@@ -182,6 +182,50 @@ export function nodeLabel(nodeId: string): string {
   return nodeId;
 }
 
+export const MAX_NODE_LABEL_LINE_LENGTH = 20;
+
+/**
+ * Splits a long label onto multiple lines at hyphen boundaries.
+ * @param label - Display label for a graph node.
+ * @param maxLineLength - Maximum characters per line before wrapping.
+ * @returns Label text with newline-separated segments when wrapping is needed.
+ */
+export function wrapLabelAtHyphens(
+  label: string,
+  maxLineLength = MAX_NODE_LABEL_LINE_LENGTH,
+): string {
+  if (label.length <= maxLineLength || !label.includes("-")) {
+    return label;
+  }
+
+  const parts = label.split("-");
+  const lines: string[] = [];
+  let current = parts[0] ?? "";
+
+  for (let index = 1; index < parts.length; index++) {
+    const part = parts[index];
+    const candidate = `${current}-${part}`;
+    if (candidate.length <= maxLineLength) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = part;
+    }
+  }
+
+  lines.push(current);
+  return lines.join("\n");
+}
+
+/**
+ * Formats a graph node label for Cytoscape rendering.
+ * @param label - Raw display label.
+ * @returns Label with hyphen-aware line breaks when needed.
+ */
+export function graphNodeDisplayLabel(label: string): string {
+  return wrapLabelAtHyphens(label);
+}
+
 /**
  * Returns whether a node id uses the registry's type-qualified prefix.
  * @param node - Graph node to inspect.

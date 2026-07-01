@@ -12,6 +12,8 @@ import {
   nodeLabel,
   nodeTypeColor,
   nodeTypeLabel,
+  wrapLabelAtHyphens,
+  graphNodeDisplayLabel,
   parseRoadmapGraph,
   normalizeRoadmapGraphData,
   deduplicateGraphNodes,
@@ -69,6 +71,17 @@ describe("parseRoadmapGraph", () => {
       "explore-ml-ranking",
     );
     expect(nodeLabel("billing-redesign--wp-invoicing")).toBe("wp-invoicing");
+  });
+
+  it("wraps long hyphenated labels onto multiple lines", () => {
+    expect(wrapLabelAtHyphens("short-name")).toBe("short-name");
+    expect(wrapLabelAtHyphens("explore-ml-ranking")).toBe("explore-ml-ranking");
+    expect(wrapLabelAtHyphens("billing-redesign-invoicing-pdf-export")).toBe(
+      "billing-redesign\ninvoicing-pdf-export",
+    );
+    expect(graphNodeDisplayLabel("very-long-work-package-name-here")).toBe(
+      "very-long-work\npackage-name-here",
+    );
   });
 
   it("maps node type labels and colors", () => {
