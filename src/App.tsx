@@ -70,6 +70,11 @@ import {
   workPackageHasChildren,
 } from "./lib/work-package-view";
 import { loadNodeDetail, type NodeDetail } from "./lib/node-detail";
+import {
+  loadLegendVisibility,
+  resolveVisibleTypes,
+  saveLegendVisibility,
+} from "./lib/legend-visibility";
 import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
@@ -110,6 +115,7 @@ function App() {
   const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
   const [nodeDetailError, setNodeDetailError] = useState<string | null>(null);
   const nodeDetailRequestRef = useRef(0);
+  const legendPersistReadyRef = useRef(false);
   const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
     EMPTY_WORK_PACKAGE_LAYOUT,
   );
@@ -137,7 +143,12 @@ function App() {
     setNodes(graph.nodes);
     setLinks(graph.links);
     if (options.resetVisibleTypes) {
-      setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
+      setVisibleTypes(
+        resolveVisibleTypes(
+          graph.nodes.map((node) => node.type),
+          loadLegendVisibility(graph.root),
+        ),
+      );
       setFocusNodeId(null);
       setGraphViewStack(INITIAL_GRAPH_VIEW_STACK);
       setSelectedNodeId(null);
@@ -182,6 +193,18 @@ function App() {
   useEffect(() => {
     workPackageLayoutRef.current = workPackageLayout;
   }, [workPackageLayout]);
+
+  useEffect(() => {
+    legendPersistReadyRef.current = false;
+  }, [roadmapRoot]);
+
+  useEffect(() => {
+    if (!legendPersistReadyRef.current) {
+      legendPersistReadyRef.current = true;
+      return;
+    }
+    saveLegendVisibility(roadmapRoot, visibleTypes);
+  }, [roadmapRoot, visibleTypes]);
 
   const refreshUndoState = useCallback(
     async (root: string, isEditable: boolean): Promise<UndoStatus | null> => {
