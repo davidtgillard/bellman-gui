@@ -236,6 +236,7 @@ export function RoadmapGraph({
   const layoutCleanupRef = useRef<(() => void) | null>(null);
   const dragConstraintCleanupRef = useRef<(() => void) | null>(null);
   const graphStructureKeyRef = useRef("");
+  const layoutCompletedRef = useRef(false);
   const onNodeClickRef = useRef(onNodeClick);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
@@ -606,6 +607,7 @@ export function RoadmapGraph({
 
     if (nodes.length === 0) {
       graphStructureKeyRef.current = "";
+      layoutCompletedRef.current = false;
       cy.batch(() => {
         cy.elements().remove();
       });
@@ -615,22 +617,16 @@ export function RoadmapGraph({
     const structureKey = graphStructureKey(nodes, links);
     const structureChanged = structureKey !== graphStructureKeyRef.current;
 
-    if (!structureChanged) {
+    if (structureChanged) {
+      graphStructureKeyRef.current = structureKey;
+      layoutCompletedRef.current = false;
+      cy.batch(() => {
+        cy.elements().remove();
+        cy.add(toElementDefinitions(nodes, links, nodePositions));
+      });
+    } else {
       syncNodePositions(cy, nodePositions);
-      if (draggable) {
-        cy.nodes().grabify();
-      } else {
-        cy.nodes().ungrabify();
-      }
-      return;
     }
-
-    graphStructureKeyRef.current = structureKey;
-
-    cy.batch(() => {
-      cy.elements().remove();
-      cy.add(toElementDefinitions(nodes, links, nodePositions));
-    });
 
     if (draggable) {
       cy.nodes().grabify();
@@ -638,7 +634,7 @@ export function RoadmapGraph({
       cy.nodes().ungrabify();
     }
 
-    if (!layoutReady) {
+    if (!layoutReady || layoutCompletedRef.current) {
       return;
     }
 
@@ -649,6 +645,9 @@ export function RoadmapGraph({
       links.length,
       nodes.some((node) => Boolean(node.parent || node.data?.isCompound)),
       (positions) => onAutoLayoutCompleteRef.current?.(positions),
+      () => {
+        layoutCompletedRef.current = true;
+      },
     );
 
     return () => {

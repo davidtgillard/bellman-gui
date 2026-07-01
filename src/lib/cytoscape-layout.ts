@@ -2,17 +2,19 @@ import type { Core, EventObject, LayoutOptions, NodeSingular } from "cytoscape";
 import type { NodePosition } from "./graph-layout";
 import { MIN_NODE_DISTANCE } from "./graph-layout";
 
+export const LAYOUT_FIT_PADDING = 40;
+
 export const PRESET_LAYOUT = {
   name: "preset",
   fit: true,
-  padding: 40,
+  padding: LAYOUT_FIT_PADDING,
 } as const;
 
 export const COSE_LAYOUT = {
   name: "cose",
   animate: false,
   fit: true,
-  padding: 40,
+  padding: LAYOUT_FIT_PADDING,
   randomize: false,
   nodeRepulsion: 20000,
   idealEdgeLength: 120,
@@ -24,7 +26,7 @@ export const FCOSE_LAYOUT = {
   name: "fcose",
   animate: false,
   fit: true,
-  padding: 40,
+  padding: LAYOUT_FIT_PADDING,
   quality: "default",
   randomize: true,
   packComponents: false,
@@ -179,8 +181,6 @@ export function scatterEdgelessNodes(cy: Core, seed: number): void {
     placed.push(position);
     node.position(position);
   });
-
-  cy.fit(undefined, 30);
 }
 
 interface VisualBox {
@@ -756,6 +756,17 @@ export function resolveNodeOverlaps(cy: Core): void {
 }
 
 /**
+ * Fits the viewport to all visible graph elements.
+ * @param cy - Cytoscape instance containing the graph elements.
+ */
+export function fitGraphViewport(cy: Core): void {
+  if (cy.nodes().length === 0) {
+    return;
+  }
+  cy.fit(undefined, LAYOUT_FIT_PADDING);
+}
+
+/**
  * Applies preset or force-directed layout to the current graph.
  * @param cy - Cytoscape instance containing the graph elements.
  * @param nodePositions - Saved node positions keyed by node id.
@@ -763,6 +774,7 @@ export function resolveNodeOverlaps(cy: Core): void {
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @param onAutoLayoutComplete - Called with computed positions after auto layout.
  * @param isActive - Function that returns whether the layout is still active.
+ * @param onLayoutApplied - Called after layout and viewport fitting complete.
  */
 export function applyAutoLayout(
   cy: Core,
@@ -771,6 +783,7 @@ export function applyAutoLayout(
   hasCompoundNodes = false,
   onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void,
   isActive?: () => boolean,
+  onLayoutApplied?: () => void,
 ): void {
   const snapshotPositions = (): Record<string, NodePosition> => {
     const positions: Record<string, NodePosition> = {};
@@ -788,9 +801,18 @@ export function applyAutoLayout(
     onAutoLayoutComplete?.(snapshotPositions());
   };
 
+  const finishLayout = () => {
+    if (isActive && !isActive()) {
+      return;
+    }
+    fitGraphViewport(cy);
+    onLayoutApplied?.();
+  };
+
   if (usesPresetLayout(nodePositions)) {
     cy.layout(PRESET_LAYOUT).run();
     resolveNodeOverlaps(cy);
+    finishLayout();
     return;
   }
 
@@ -803,6 +825,7 @@ export function applyAutoLayout(
     scatterEdgelessNodes(cy, seed);
     resolveNodeOverlaps(cy);
     completeAutoLayout();
+    finishLayout();
     return;
   }
 
@@ -811,6 +834,7 @@ export function applyAutoLayout(
   layout.one("layoutstop", () => {
     resolveNodeOverlaps(cy);
     completeAutoLayout();
+    finishLayout();
   });
   layout.run();
 }
@@ -823,6 +847,7 @@ export function applyAutoLayout(
  * @param linkCount - Number of visible links in the graph.
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @param onAutoLayoutComplete - Called with computed positions after auto layout.
+ * @param onLayoutApplied - Called after layout and viewport fitting complete.
  * @returns Cleanup function that cancels pending layout attempts.
  */
 export function runLayoutWhenContainerReady(
@@ -832,6 +857,7 @@ export function runLayoutWhenContainerReady(
   linkCount: number,
   hasCompoundNodes = false,
   onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void,
+  onLayoutApplied?: () => void,
 ): () => void {
   let cancelled = false;
   let laidOut = false;
@@ -857,6 +883,7 @@ export function runLayoutWhenContainerReady(
       hasCompoundNodes,
       onAutoLayoutComplete,
       () => !cancelled,
+      onLayoutApplied,
     );
     laidOut = true;
     resizeObserver?.disconnect();
