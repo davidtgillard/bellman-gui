@@ -24,6 +24,11 @@ jobs:
       - run: npm run lint:throws-diff
       - run: npm run test
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - run: npm run test:e2e
+
   rust:
     runs-on: ubuntu-latest
     steps:
