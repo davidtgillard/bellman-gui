@@ -443,6 +443,13 @@ body {
   color: #94a3b8;
 }
 
+.graph-empty-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgb(15 23 42 / 0.88);
+}
+
 .node-legend {
   position: absolute;
   left: 1rem;

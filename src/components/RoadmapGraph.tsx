@@ -310,12 +310,19 @@ export function RoadmapGraph({
   useEffect(() => {
     const cy = cyRef.current;
     const container = containerRef.current;
-    if (!cyReady || !cy || !container || nodes.length === 0) {
+    if (!cyReady || !cy || !container) {
       return;
     }
 
     layoutCleanupRef.current?.();
     layoutCleanupRef.current = null;
+
+    if (nodes.length === 0) {
+      cy.batch(() => {
+        cy.elements().remove();
+      });
+      return;
+    }
 
     const usePreset = usesPresetLayout(draggable, nodePositions);
 
@@ -373,17 +380,14 @@ export function RoadmapGraph({
     return () => window.clearTimeout(timer);
   }, [focusNodeId, nodes]);
 
-  if (nodes.length === 0) {
-    return (
-      <div className="graph-empty">
-        <p>{emptyMessage}</p>
-      </div>
-    );
-  }
-
   return (
     <div className="graph-container">
       <div className="graph-viewport" ref={containerRef} />
+      {nodes.length === 0 ? (
+        <div className="graph-empty graph-empty-overlay" aria-live="polite">
+          <p>{emptyMessage}</p>
+        </div>
+      ) : null}
       {contextMenuState && contextMenu
         ? createPortal(
             <div
