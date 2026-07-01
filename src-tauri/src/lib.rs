@@ -4,6 +4,7 @@ mod graph;
 mod graph_layout;
 mod node_detail;
 mod roadmap_edit;
+mod undo;
 
 use bellman_cmd::run_bellman;
 use cli::CliOptions;
@@ -19,18 +20,44 @@ use roadmap_edit::{
     create_link, create_node, remove_link, remove_node, CreateLinkRequest, CreateNodeRequest,
     RemoveLinkRequest, RemoveNodeRequest,
 };
-use std::path::PathBuf;
+use crate::undo::{Snapshot, UndoState, UndoStateDto};
+use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter};
 use tauri_plugin_dialog::DialogExt;
 
-#[tauri::command]
-fn load_roadmap_graph_command(roadmap_root: String) -> Result<graph::RoadmapGraphDto, String> {
-    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+/// Captures the after-edit snapshot and records the before/after diff on the
+/// undo stack. Snapshot failures are logged but never fail the edit itself.
+fn record_edit(state: &UndoState, root: &str, label: String, before: Option<Snapshot>) {
+    let Some(before) = before else {
+        eprintln!("[undo] skipping record for {root}: failed to capture before snapshot");
+        return;
+    };
+    match crate::undo::capture(Path::new(root)) {
+        Ok(after) => {
+            if let Err(error) = state.push(root, label, before, after) {
+                eprintln!("[undo] failed to record edit for {root}: {error}");
+            }
+        }
+        Err(error) => eprintln!("[undo] failed to capture after snapshot for {root}: {error}"),
+    }
 }
 
 #[tauri::command]
-async fn pick_and_load_roadmap(app: tauri::AppHandle) -> Result<Option<graph::RoadmapGraphDto>, String> {
+fn load_roadmap_graph_command(
+    roadmap_root: String,
+    state: tauri::State<UndoState>,
+) -> Result<graph::RoadmapGraphDto, String> {
+    let graph = load_roadmap_graph(PathBuf::from(roadmap_root).as_path())?;
+    state.reset(&graph.root)?;
+    Ok(graph)
+}
+
+#[tauri::command]
+async fn pick_and_load_roadmap(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, UndoState>,
+) -> Result<Option<graph::RoadmapGraphDto>, String> {
     let dialog_app = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         dialog_app
@@ -50,34 +77,51 @@ async fn pick_and_load_roadmap(app: tauri::AppHandle) -> Result<Option<graph::Ro
         .as_path()
         .ok_or_else(|| "selected folder path is unavailable".to_string())?;
 
-    load_roadmap_graph(path_ref).map(Some)
+    let graph = load_roadmap_graph(path_ref)?;
+    state.reset(&graph.root)?;
+    Ok(Some(graph))
 }
 
 #[tauri::command]
 async fn create_node_command(
     app: tauri::AppHandle,
     request: CreateNodeRequest,
+    state: tauri::State<'_, UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
+    let label = format!("create {:?} {}", request.node_kind, request.name);
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     create_node(&app, request).await?;
+    record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
 
 #[tauri::command]
 async fn create_link_command(
     request: CreateLinkRequest,
+    state: tauri::State<'_, UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
+    let label = format!(
+        "create link {} {} -> {}",
+        request.link_type, request.source, request.target
+    );
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     create_link(request).await?;
+    record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
 
 #[tauri::command]
 async fn remove_link_command(
     request: RemoveLinkRequest,
+    state: tauri::State<'_, UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
+    let label = format!("remove link {}", request.link_id);
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     remove_link(request).await?;
+    record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
 
@@ -85,10 +129,40 @@ async fn remove_link_command(
 async fn remove_node_command(
     app: tauri::AppHandle,
     request: RemoveNodeRequest,
+    state: tauri::State<'_, UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
+    let label = format!("remove {} {}", request.node_type, request.node_id);
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     remove_node(&app, request).await?;
+    record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+fn undo_command(
+    roadmap_root: String,
+    state: tauri::State<UndoState>,
+) -> Result<graph::RoadmapGraphDto, String> {
+    state.undo(&roadmap_root)?;
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+fn redo_command(
+    roadmap_root: String,
+    state: tauri::State<UndoState>,
+) -> Result<graph::RoadmapGraphDto, String> {
+    state.redo(&roadmap_root)?;
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+fn undo_state_command(
+    roadmap_root: String,
+    state: tauri::State<UndoState>,
+) -> Result<UndoStateDto, String> {
+    state.state(&roadmap_root)
 }
 
 #[tauri::command]
@@ -156,9 +230,16 @@ fn remove_top_level_node_position_command(
 }
 
 #[tauri::command]
-fn load_initial_roadmap(cli: tauri::State<CliOptions>) -> Result<Option<graph::RoadmapGraphDto>, String> {
+fn load_initial_roadmap(
+    cli: tauri::State<CliOptions>,
+    state: tauri::State<UndoState>,
+) -> Result<Option<graph::RoadmapGraphDto>, String> {
     match cli.initial_roadmap_root.as_ref() {
-        Some(path) => load_roadmap_graph(path.as_path()).map(Some),
+        Some(path) => {
+            let graph = load_roadmap_graph(path.as_path())?;
+            state.reset(&graph.root)?;
+            Ok(Some(graph))
+        }
         None => Ok(None),
     }
 }
@@ -170,6 +251,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(cli::cli_options_from_env())
+        .manage(UndoState::default())
         .setup(|app| {
             let open_roadmap = MenuItem::with_id(
                 app,
@@ -179,14 +261,26 @@ pub fn run() {
                 Some("CmdOrCtrl+O"),
             )?;
             let file_menu = Submenu::with_items(app, "File", true, &[&open_roadmap])?;
-            let menu = Menu::with_items(app, &[&file_menu])?;
+            let undo_item =
+                MenuItem::with_id(app, "undo", "Undo", true, Some("CmdOrCtrl+Z"))?;
+            let redo_item =
+                MenuItem::with_id(app, "redo", "Redo", true, Some("CmdOrCtrl+Shift+Z"))?;
+            let edit_menu = Submenu::with_items(app, "Edit", true, &[&undo_item, &redo_item])?;
+            let menu = Menu::with_items(app, &[&file_menu, &edit_menu])?;
             app.set_menu(menu)?;
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            if event.id().0 == "open-roadmap" {
+        .on_menu_event(|app, event| match event.id().0.as_str() {
+            "open-roadmap" => {
                 let _ = app.emit("open-roadmap", ());
             }
+            "undo" => {
+                let _ = app.emit("undo", ());
+            }
+            "redo" => {
+                let _ = app.emit("redo", ());
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             load_roadmap_graph_command,
@@ -197,6 +291,9 @@ pub fn run() {
             create_link_command,
             remove_link_command,
             remove_node_command,
+            undo_command,
+            redo_command,
+            undo_state_command,
             load_node_detail_command,
             load_work_package_layout_command,
             save_work_package_node_position_command,

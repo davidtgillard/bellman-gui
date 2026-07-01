@@ -238,6 +238,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tempfile",
+ "undo",
 ]
 
 [[package]]
@@ -4078,6 +4079,16 @@ dependencies = [
  "memoffset",
  "tempfile",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "undo"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1dfbb202cb07dd2a685c765aa040db18d8a0dbe7079cf57c275833521f67653"
+dependencies = [
+ "serde",
+ "slab",
 ]
 
 [[package]]

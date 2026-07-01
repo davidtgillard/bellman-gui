@@ -86,11 +86,36 @@ export default [
     },
   },
   {
-    files: ["vite.config.ts", "eslint.config.js"],
+    files: ["vite.config.ts", "eslint.config.js", "playwright.config.ts"],
     languageOptions: {
       globals: {
         ...globals.node,
       },
+    },
+  },
+  {
+    files: ["e2e/**/*.ts"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+    },
+    rules: {
+      "jsdoc/require-jsdoc": "off",
+      "jsdoc/require-returns": "off",
+    },
+  },
+  {
+    files: ["e2e/**/*.js"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+    },
+    rules: {
+      "jsdoc/require-jsdoc": "off",
+      "jsdoc/require-returns": "off",
     },
   },
   {

@@ -30,6 +30,8 @@ import {
   type NodeKind,
 } from "./lib/graph";
 import { createLink, createNode, removeLink, removeNode } from "./lib/roadmap-api";
+import { redo, undo, undoState, type UndoStatus } from "./lib/undo-api";
+import { traceUndo } from "./lib/undo-trace";
 import {
   applyNodePlacement,
   EMPTY_WORK_PACKAGE_LAYOUT,
@@ -85,6 +87,10 @@ function App() {
   const [links, setLinks] = useState<GraphLink[]>(exampleGraph.links);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const [undoLabel, setUndoLabel] = useState<string | null>(null);
+  const [redoLabel, setRedoLabel] = useState<string | null>(null);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkDialogInitialNodeId, setLinkDialogInitialNodeId] = useState<string | null>(
@@ -178,6 +184,63 @@ function App() {
   useEffect(() => {
     workPackageLayoutRef.current = workPackageLayout;
   }, [workPackageLayout]);
+
+  const refreshUndoState = useCallback(
+    async (root: string, isEditable: boolean): Promise<UndoStatus | null> => {
+      if (!isEditable || root === "example") {
+        setCanUndo(false);
+        setCanRedo(false);
+        setUndoLabel(null);
+        setRedoLabel(null);
+        return null;
+      }
+      try {
+        const status = await undoState(root);
+        setCanUndo(status.canUndo);
+        setCanRedo(status.canRedo);
+        setUndoLabel(status.undoLabel);
+        setRedoLabel(status.redoLabel);
+        return status;
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (!canUndo) {
+      return;
+    }
+    setError(null);
+    try {
+      const graph = await undo(roadmapRoot);
+      applyGraph(graph);
+      const status = await refreshUndoState(graph.root, graph.editable);
+      if (status) {
+        traceUndo("undo", status);
+      }
+    } catch (caught) {
+      setError(String(caught));
+    }
+  }, [applyGraph, canUndo, refreshUndoState, roadmapRoot]);
+
+  const handleRedo = useCallback(async () => {
+    if (!canRedo) {
+      return;
+    }
+    setError(null);
+    try {
+      const graph = await redo(roadmapRoot);
+      applyGraph(graph);
+      const status = await refreshUndoState(graph.root, graph.editable);
+      if (status) {
+        traceUndo("redo", status);
+      }
+    } catch (caught) {
+      setError(String(caught));
+    }
+  }, [applyGraph, canRedo, refreshUndoState, roadmapRoot]);
 
   useEffect(() => {
     if (!currentLayoutKey || hydratedLayoutKey === currentLayoutKey) {
@@ -295,7 +358,9 @@ function App() {
     try {
       const dto = await invoke<RoadmapGraphDto | null>("pick_and_load_roadmap");
       if (dto) {
-        applyGraph(fromRoadmapGraphDto(dto), { resetVisibleTypes: true });
+        const graph = fromRoadmapGraphDto(dto);
+        applyGraph(graph, { resetVisibleTypes: true });
+        void refreshUndoState(graph.root, graph.editable);
       }
     } catch (caught) {
       const message = String(caught);
@@ -305,7 +370,7 @@ function App() {
           : `${message}. If the folder picker did not appear, check that a display server is available (common on WSL).`,
       );
     }
-  }, [applyGraph]);
+  }, [applyGraph, refreshUndoState]);
 
   const handleCreateNode = useCallback(
     async (input: {
@@ -355,6 +420,7 @@ function App() {
           ...(revealNodeId ? { revealNodeId } : {}),
           ...(savedLayout ? { layout: savedLayout } : {}),
         });
+        void refreshUndoState(graph.root, graph.editable);
         setPendingNodePlacement(null);
         setNodeDialogOpen(false);
       } catch (caught) {
@@ -368,6 +434,7 @@ function App() {
       graphViewStack,
       nodes,
       pendingNodePlacement,
+      refreshUndoState,
       roadmapRoot,
       workPackageLayout,
     ],
@@ -386,6 +453,7 @@ function App() {
           target: input.target,
         });
         applyGraph(graph);
+        void refreshUndoState(graph.root, graph.editable);
         setLinkDialogOpen(false);
         setLinkDialogInitialNodeId(null);
       } catch (caught) {
@@ -394,7 +462,7 @@ function App() {
         setSaving(false);
       }
     },
-    [applyGraph, roadmapRoot],
+    [applyGraph, refreshUndoState, roadmapRoot],
   );
 
   const handleRemoveNode = useCallback(
@@ -450,6 +518,7 @@ function App() {
           node_type: nodeType,
         });
         applyGraph(graph);
+        void refreshUndoState(graph.root, graph.editable);
       } catch (caught) {
         setNodes(snapshot.nodes);
         setLinks(snapshot.links);
@@ -464,6 +533,7 @@ function App() {
       graphViewStack,
       links,
       nodes,
+      refreshUndoState,
       roadmapRoot,
       selectedNodeId,
       workPackageLayout,
@@ -483,6 +553,7 @@ function App() {
           link_id: linkId,
         });
         applyGraph(graph);
+        void refreshUndoState(graph.root, graph.editable);
       } catch (caught) {
         setLinks(snapshot);
         setError(String(caught));
@@ -490,18 +561,20 @@ function App() {
         setSaving(false);
       }
     },
-    [applyGraph, links, roadmapRoot],
+    [applyGraph, links, refreshUndoState, roadmapRoot],
   );
 
   useEffect(() => {
     invoke<RoadmapGraphDto | null>("load_initial_roadmap")
       .then((dto) => {
         if (dto) {
-          applyGraph(fromRoadmapGraphDto(dto), { resetVisibleTypes: true });
+          const graph = fromRoadmapGraphDto(dto);
+          applyGraph(graph, { resetVisibleTypes: true });
+          void refreshUndoState(graph.root, graph.editable);
         }
       })
       .catch((caught) => setError(String(caught)));
-  }, [applyGraph]);
+  }, [applyGraph, refreshUndoState]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -516,6 +589,41 @@ function App() {
       unlisten?.();
     };
   }, [handleOpenRoadmap]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey;
+      if (!modifier || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) {
+        void handleRedo();
+      } else {
+        void handleUndo();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleRedo, handleUndo]);
+
+  useEffect(() => {
+    let unlistenUndo: (() => void) | undefined;
+    let unlistenRedo: (() => void) | undefined;
+
+    void listen("undo", () => void handleUndo()).then((dispose) => {
+      unlistenUndo = dispose;
+    });
+    void listen("redo", () => void handleRedo()).then((dispose) => {
+      unlistenRedo = dispose;
+    });
+
+    return () => {
+      unlistenUndo?.();
+      unlistenRedo?.();
+    };
+  }, [handleRedo, handleUndo]);
 
   const activeProjectId = useMemo(
     () => currentProjectId(graphViewStack),
@@ -926,6 +1034,30 @@ function App() {
         <div className="info-banner">
           The bundled example graph is read-only. Open a roadmap folder, then right-click the
           graph to create nodes and right-click a node to create links.
+        </div>
+      ) : null}
+      {editable ? (
+        <div className="undo-toolbar">
+          <button
+            type="button"
+            className="undo-toolbar-button"
+            data-testid="undo-button"
+            onClick={() => void handleUndo()}
+            disabled={!canUndo}
+            title={undoLabel ? `Undo: ${undoLabel}` : "Undo"}
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            className="undo-toolbar-button"
+            data-testid="redo-button"
+            onClick={() => void handleRedo()}
+            disabled={!canRedo}
+            title={redoLabel ? `Redo: ${redoLabel}` : "Redo"}
+          >
+            Redo
+          </button>
         </div>
       ) : null}
       <div className="graph-area">
