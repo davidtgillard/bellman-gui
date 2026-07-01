@@ -89,8 +89,6 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [undoLabel, setUndoLabel] = useState<string | null>(null);
-  const [redoLabel, setRedoLabel] = useState<string | null>(null);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkDialogInitialNodeId, setLinkDialogInitialNodeId] = useState<string | null>(
@@ -190,16 +188,12 @@ function App() {
       if (!isEditable || root === "example") {
         setCanUndo(false);
         setCanRedo(false);
-        setUndoLabel(null);
-        setRedoLabel(null);
         return null;
       }
       try {
         const status = await undoState(root);
         setCanUndo(status.canUndo);
         setCanRedo(status.canRedo);
-        setUndoLabel(status.undoLabel);
-        setRedoLabel(status.redoLabel);
         return status;
       } catch {
         return null;
@@ -1034,30 +1028,6 @@ function App() {
         <div className="info-banner">
           The bundled example graph is read-only. Open a roadmap folder, then right-click the
           graph to create nodes and right-click a node to create links.
-        </div>
-      ) : null}
-      {editable ? (
-        <div className="undo-toolbar">
-          <button
-            type="button"
-            className="undo-toolbar-button"
-            data-testid="undo-button"
-            onClick={() => void handleUndo()}
-            disabled={!canUndo}
-            title={undoLabel ? `Undo: ${undoLabel}` : "Undo"}
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            className="undo-toolbar-button"
-            data-testid="redo-button"
-            onClick={() => void handleRedo()}
-            disabled={!canRedo}
-            title={redoLabel ? `Redo: ${redoLabel}` : "Redo"}
-          >
-            Redo
-          </button>
         </div>
       ) : null}
       <div className="graph-area">

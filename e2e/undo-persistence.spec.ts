@@ -53,20 +53,15 @@ test.describe("undo persistence", () => {
   test("history survives a simulated app restart", async ({ page }) => {
     await setupPage(page, milestoneScenario());
 
-    const undoButton = page.getByTestId("undo-button");
     const legend = page.getByRole("complementary", { name: "Node types" });
 
     await expect(legend.getByText("Milestone")).toBeVisible();
-    await expect(undoButton).toBeEnabled();
-    await expect(undoButton).toHaveAttribute("title", "Undo: create milestone ga");
 
     await reloadApp(page, milestoneScenario());
 
     await expect(legend.getByText("Milestone")).toBeVisible();
-    await expect(undoButton).toBeEnabled();
-    await expect(undoButton).toHaveAttribute("title", "Undo: create milestone ga");
 
-    await undoButton.click();
+    await page.keyboard.press("Control+z");
     await expect(legend.getByText("Milestone")).toHaveCount(0);
     await expect(legend.getByText("Goal")).toBeVisible();
   });
@@ -94,13 +89,12 @@ test.describe("undo persistence", () => {
     });
     await setupPage(page, baseScenario());
 
-    const undoButton = page.getByTestId("undo-button");
-    const redoButton = page.getByTestId("redo-button");
     const legend = page.getByRole("complementary", { name: "Node types" });
 
     await expect(legend.getByText("Milestone")).toHaveCount(0);
-    await expect(undoButton).toBeDisabled();
-    await expect(redoButton).toBeDisabled();
+
+    await page.keyboard.press("Control+z");
+    await expect(legend.getByText("Milestone")).toHaveCount(0);
   });
 
   test("history is not persisted when persistUndo is disabled", async ({ page }) => {
@@ -108,11 +102,13 @@ test.describe("undo persistence", () => {
     delete scenario.persistUndo;
     await setupPage(page, scenario);
 
-    const undoButton = page.getByTestId("undo-button");
-    await expect(undoButton).toBeEnabled();
+    const legend = page.getByRole("complementary", { name: "Node types" });
+    await expect(legend.getByText("Milestone")).toBeVisible();
 
     await reloadApp(page, baseScenario());
 
-    await expect(undoButton).toBeDisabled();
+    await expect(legend.getByText("Milestone")).toHaveCount(0);
+    await page.keyboard.press("Control+z");
+    await expect(legend.getByText("Milestone")).toHaveCount(0);
   });
 });
