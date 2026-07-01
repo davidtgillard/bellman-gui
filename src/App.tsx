@@ -12,6 +12,7 @@ import { NodeTypeLegend } from "./components/NodeTypeLegend";
 import exampleRegistry from "./fixtures/example-roadmap/.fits/registry.json";
 import exampleLinks from "./fixtures/example-roadmap/links/links.json";
 import {
+  canCreateLinkFromNode,
   findAddedNodeId,
   fromRoadmapGraphDto,
   graphWithoutLink,
@@ -773,12 +774,16 @@ function App() {
         typeof event.data.data?.type === "string" ? event.data.data.type : "";
 
       const nodeId = event.data.id;
+      const node = nodes.find((item) => item.id === nodeId);
+      const canCreateLink =
+        node !== undefined && canCreateLinkFromNode(node, nodes, linkTypes);
 
       return (
         <GraphContextMenu
           editable={editable}
           nodeId={nodeId}
           nodeType={nodeType}
+          canCreateLink={canCreateLink}
           showInnerGraph={!inWorkPackageGraph && nodeType === "project"}
           showWorkPackageInnerGraph={
             inWorkPackageGraph &&
@@ -808,6 +813,8 @@ function App() {
       handleShowInnerGraph,
       handleShowWorkPackageInnerGraph,
       inWorkPackageGraph,
+      linkTypes,
+      nodes,
     ],
   );
 

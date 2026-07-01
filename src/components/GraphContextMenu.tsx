@@ -12,6 +12,7 @@ interface GraphContextMenuProps {
   onShowWorkPackageInnerGraph?: (workPackageId: string) => void;
   onCreateNode?: () => void;
   onCreateLink?: (nodeId: string) => void;
+  canCreateLink?: boolean;
   onRemoveNode?: (nodeId: string, nodeType: string) => void;
   onRemoveLink?: (linkId: string) => void;
   onClose: () => void;
@@ -29,11 +30,18 @@ export function GraphContextMenu({
   onShowWorkPackageInnerGraph,
   onCreateNode,
   onCreateLink,
+  canCreateLink = true,
   onRemoveNode,
   onRemoveLink,
   onClose,
 }: GraphContextMenuProps) {
-  const items: Array<{ label: string; onClick: () => void; destructive?: boolean }> = [];
+  const items: Array<{
+    label: string;
+    onClick: () => void;
+    destructive?: boolean;
+    disabled?: boolean;
+    title?: string;
+  }> = [];
 
   if (editable && background && onCreateNode) {
     items.push({
@@ -53,6 +61,10 @@ export function GraphContextMenu({
   ) {
     items.push({
       label: "New link…",
+      disabled: !canCreateLink,
+      title: canCreateLink
+        ? undefined
+        : "This node type cannot be linked to any other node",
       onClick: () => {
         onCreateLink(nodeId);
         onClose();
@@ -113,6 +125,8 @@ export function GraphContextMenu({
           <button
             type="button"
             className={item.destructive ? "graph-context-menu-destructive" : undefined}
+            disabled={item.disabled}
+            title={item.title}
             onClick={item.onClick}
           >
             {item.label}

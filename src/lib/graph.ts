@@ -318,6 +318,24 @@ export function canBeLinkFinish(
 }
 
 /**
+ * Returns whether a node can participate in a new link as start or finish.
+ * @param node - Candidate node from the context menu.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @param linkTypes - Link type metadata from the registry.
+ * @returns Whether link creation can begin from this node.
+ */
+export function canCreateLinkFromNode(
+  node: GraphNode,
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+): boolean {
+  return (
+    canBeLinkStart(node, nodes, linkTypes) ||
+    canBeLinkFinish(node, nodes, linkTypes)
+  );
+}
+
+/**
  * Lists project names derived from project node ids.
  * @param nodes - Graph nodes from the current roadmap.
  * @returns Sorted project names for work-package creation.

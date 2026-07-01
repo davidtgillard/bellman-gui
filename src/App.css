@@ -209,15 +209,21 @@ body {
   cursor: pointer;
 }
 
-.graph-context-menu button:hover {
+.graph-context-menu button:hover:not(:disabled) {
   background: #334155;
+}
+
+.graph-context-menu button:disabled {
+  opacity: 0.5;
+  color: #64748b;
+  cursor: not-allowed;
 }
 
 .graph-context-menu-destructive {
   color: #fca5a5;
 }
 
-.graph-context-menu-destructive:hover {
+.graph-context-menu-destructive:hover:not(:disabled) {
   background: #7f1d1d;
 }
 

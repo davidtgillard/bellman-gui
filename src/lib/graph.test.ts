@@ -4,6 +4,7 @@ import links from "../fixtures/example-roadmap/links/links.json";
 import {
   canBeLinkFinish,
   canBeLinkStart,
+  canCreateLinkFromNode,
   findAddedNodeId,
   graphWithoutLink,
   graphWithoutNode,
@@ -43,6 +44,13 @@ describe("parseRoadmapGraph", () => {
     expect(canBeLinkFinish(goal!, graph.nodes, graph.linkTypes)).toBe(true);
     expect(canBeLinkStart(milestone!, graph.nodes, graph.linkTypes)).toBe(false);
     expect(canBeLinkFinish(milestone!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canCreateLinkFromNode(workPackage!, graph.nodes, graph.linkTypes)).toBe(
+      true,
+    );
+    expect(canCreateLinkFromNode(goal!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canCreateLinkFromNode(milestone!, graph.nodes, graph.linkTypes)).toBe(
+      true,
+    );
   });
 
   it("maps precedence link direction from in to out", () => {
