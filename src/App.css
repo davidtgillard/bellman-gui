@@ -501,18 +501,25 @@ body {
 
 .edit-dialog {
   width: min(28rem, calc(100vw - 2rem));
+  min-width: 18rem;
+  min-height: 12rem;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
   margin: 0;
   padding: 0;
   border: 1px solid #334155;
   border-radius: 0.75rem;
   background: #111827;
   color: inherit;
+  resize: both;
+  overflow: auto;
 }
 
 .edit-dialog form {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
+  min-height: 100%;
   padding: 1rem;
 }
 
