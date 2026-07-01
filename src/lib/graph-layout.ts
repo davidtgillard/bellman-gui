@@ -29,6 +29,13 @@ interface WorkPackageLayoutDto {
   projects: Record<string, Record<string, NodePosition>>;
 }
 
+interface SaveTopLevelNodePositionRequest {
+  roadmap_root: string;
+  node_id: string;
+  x: number;
+  y: number;
+}
+
 interface SaveWorkPackageNodePositionRequest {
   roadmap_root: string;
   project_id: string;
@@ -201,6 +208,49 @@ export function applyNodePlacement(
   return { layout: nextLayout, position };
 }
 
+/**
+ * Returns a layout document with scope positions merged in.
+ * @param layout - Current layout document.
+ * @param scope - Whether positions belong to the top-level or project graph.
+ * @param positions - Node id to position map for the scope.
+ * @returns Updated layout document.
+ */
+export function withScopePositions(
+  layout: WorkPackageLayout,
+  scope: LayoutPlacementScope,
+  positions: Record<string, NodePosition>,
+): WorkPackageLayout {
+  if (scope.kind === "top_level") {
+    return {
+      ...layout,
+      topLevel: {
+        ...layout.topLevel,
+        ...positions,
+      },
+    };
+  }
+
+  const scopeKey = projectLayoutKey(scope.projectId);
+  const nextProjects = { ...layout.projects };
+
+  for (const key of Object.keys(nextProjects)) {
+    if (key !== scopeKey && projectLayoutKey(key) === scopeKey) {
+      delete nextProjects[key];
+    }
+  }
+
+  return {
+    ...layout,
+    projects: {
+      ...nextProjects,
+      [scopeKey]: {
+        ...(nextProjects[scopeKey] ?? {}),
+        ...positions,
+      },
+    },
+  };
+}
+
 function toWorkPackageLayoutDto(layout: WorkPackageLayout): WorkPackageLayoutDto {
   return {
     version: layout.version,
@@ -362,6 +412,20 @@ export async function removeTopLevelNodePosition(
 export async function loadWorkPackageLayout(roadmapRoot: string): Promise<WorkPackageLayout> {
   const dto = await invoke<WorkPackageLayoutDto>("load_work_package_layout_command", {
     roadmapRoot,
+  });
+  return fromWorkPackageLayoutDto(dto);
+}
+
+/**
+ * Persists one top-level node position.
+ * @param request - Layout save payload for the backend.
+ * @returns Updated layout document after save.
+ */
+export async function saveTopLevelNodePosition(
+  request: SaveTopLevelNodePositionRequest,
+): Promise<WorkPackageLayout> {
+  const dto = await invoke<WorkPackageLayoutDto>("save_top_level_node_position_command", {
+    request,
   });
   return fromWorkPackageLayoutDto(dto);
 }

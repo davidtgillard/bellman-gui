@@ -10,7 +10,8 @@ use cli::CliOptions;
 use graph::load_roadmap_graph;
 use graph_layout::{
     load_work_package_layout, remove_top_level_node_position, remove_work_package_node_position,
-    save_graph_layout, save_work_package_node_position, SaveWorkPackageNodePositionRequest,
+    save_graph_layout, save_top_level_node_position, save_work_package_node_position,
+    SaveTopLevelNodePositionRequest, SaveWorkPackageNodePositionRequest,
     WorkPackageLayoutDto,
 };
 use node_detail::load_node_detail_command;
@@ -135,6 +136,18 @@ fn save_graph_layout_command(
 }
 
 #[tauri::command]
+fn save_top_level_node_position_command(
+    request: SaveTopLevelNodePositionRequest,
+) -> Result<WorkPackageLayoutDto, String> {
+    save_top_level_node_position(
+        PathBuf::from(&request.roadmap_root).as_path(),
+        &request.node_id,
+        request.x,
+        request.y,
+    )
+}
+
+#[tauri::command]
 fn remove_top_level_node_position_command(
     roadmap_root: String,
     node_id: String,
@@ -189,6 +202,7 @@ pub fn run() {
             save_work_package_node_position_command,
             remove_work_package_node_position_command,
             save_graph_layout_command,
+            save_top_level_node_position_command,
             remove_top_level_node_position_command,
         ])
         .run(tauri::generate_context!())

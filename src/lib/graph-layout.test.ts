@@ -9,6 +9,7 @@ import {
   resolvePlacedNodePosition,
   topLevelNodePositions,
   withNodePosition,
+  withScopePositions,
   withTopLevelNodePosition,
   withoutNodePosition,
   withoutTopLevelNodePosition,
@@ -128,5 +129,46 @@ describe("graph-layout", () => {
 
     const removed = withoutTopLevelNodePosition(updated, "goal--delta");
     expect(topLevelNodePositions(removed)).toEqual({});
+  });
+
+  it("merges scope positions for top-level and project graphs", () => {
+    const initial = fromWorkPackageLayoutDto({
+      version: 1,
+      kind: "bellman-gui-work-package-layout",
+      top_level: {
+        "goal--alpha": { x: 1, y: 2 },
+      },
+      projects: {
+        "billing-redesign": {
+          "billing-redesign--wp-invoicing": { x: 3, y: 4 },
+        },
+      },
+    });
+
+    const topLevel = withScopePositions(
+      initial,
+      { kind: "top_level" },
+      {
+        "goal--beta": { x: 5, y: 6 },
+        "project--gamma": { x: 7, y: 8 },
+      },
+    );
+    expect(topLevelNodePositions(topLevel)).toEqual({
+      "goal--alpha": { x: 1, y: 2 },
+      "goal--beta": { x: 5, y: 6 },
+      "project--gamma": { x: 7, y: 8 },
+    });
+
+    const project = withScopePositions(
+      initial,
+      { kind: "project", projectId: "project--billing-redesign" },
+      {
+        "billing-redesign--wp-pdf-export": { x: 9, y: 10 },
+      },
+    );
+    expect(projectNodePositions(project, "project--billing-redesign")).toEqual({
+      "billing-redesign--wp-invoicing": { x: 3, y: 4 },
+      "billing-redesign--wp-pdf-export": { x: 9, y: 10 },
+    });
   });
 });

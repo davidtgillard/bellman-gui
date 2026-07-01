@@ -34,6 +34,14 @@ impl Default for WorkPackageLayoutDto {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SaveTopLevelNodePositionRequest {
+    pub roadmap_root: String,
+    pub node_id: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SaveWorkPackageNodePositionRequest {
     pub roadmap_root: String,
     pub project_id: String,
@@ -71,6 +79,37 @@ pub fn load_work_package_layout(root: &Path) -> Result<WorkPackageLayoutDto, Str
             layout.kind
         ));
     }
+
+    Ok(layout)
+}
+
+pub fn save_top_level_node_position(
+    root: &Path,
+    node_id: &str,
+    x: f64,
+    y: f64,
+) -> Result<WorkPackageLayoutDto, String> {
+    let path = layout_path(root);
+    let mut layout = load_work_package_layout(root)?;
+
+    layout.top_level.insert(
+        node_id.to_string(),
+        NodePositionDto { x, y },
+    );
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create layout directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let formatted = serde_json::to_string_pretty(&layout)
+        .map_err(|error| format!("failed to serialize work package layout: {error}"))?;
+    fs::write(&path, format!("{formatted}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
 
     Ok(layout)
 }
@@ -340,19 +379,8 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join(".fits")).expect("fits dir");
 
-        let saved = save_graph_layout(
-            dir.path(),
-            WorkPackageLayoutDto {
-                version: 1,
-                kind: LAYOUT_KIND.to_string(),
-                top_level: BTreeMap::from([(
-                    "initiative--alpha".to_string(),
-                    NodePositionDto { x: 42.0, y: -17.0 },
-                )]),
-                projects: BTreeMap::new(),
-            },
-        )
-        .expect("save");
+        let saved = save_top_level_node_position(dir.path(), "initiative--alpha", 42.0, -17.0)
+            .expect("save");
 
         assert_eq!(
             saved.top_level["initiative--alpha"],

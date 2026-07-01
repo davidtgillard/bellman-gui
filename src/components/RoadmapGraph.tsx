@@ -59,6 +59,8 @@ interface RoadmapGraphProps {
   draggable?: boolean;
   nodePositions?: Record<string, NodePosition>;
   onNodePositionChange?: (nodeId: string, position: NodePosition) => void;
+  onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void;
+  layoutReady?: boolean;
 }
 
 const FOCUS_DELAY_MS = 450;
@@ -164,12 +166,15 @@ export function RoadmapGraph({
   draggable = false,
   nodePositions,
   onNodePositionChange,
+  onAutoLayoutComplete,
+  layoutReady = true,
 }: RoadmapGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const layoutCleanupRef = useRef<(() => void) | null>(null);
   const onNodeClickRef = useRef(onNodeClick);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
+  const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
   const contextMenuRef = useRef(contextMenu);
   const [cyReady, setCyReady] = useState(false);
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
@@ -187,6 +192,10 @@ export function RoadmapGraph({
   useEffect(() => {
     onNodePositionChangeRef.current = onNodePositionChange;
   }, [onNodePositionChange]);
+
+  useEffect(() => {
+    onAutoLayoutCompleteRef.current = onAutoLayoutComplete;
+  }, [onAutoLayoutComplete]);
 
   useEffect(() => {
     contextMenuRef.current = contextMenu;
@@ -378,19 +387,24 @@ export function RoadmapGraph({
       cy.nodes().ungrabify();
     }
 
+    if (!layoutReady) {
+      return;
+    }
+
     layoutCleanupRef.current = runLayoutWhenContainerReady(
       cy,
       container,
       nodePositions,
       links.length,
       nodes.some((node) => Boolean(node.parent || node.data?.isCompound)),
+      (positions) => onAutoLayoutCompleteRef.current?.(positions),
     );
 
     return () => {
       layoutCleanupRef.current?.();
       layoutCleanupRef.current = null;
     };
-  }, [cyReady, draggable, links, nodePositions, nodes]);
+  }, [cyReady, draggable, layoutReady, links, nodePositions, nodes]);
 
   useEffect(() => {
     const cy = cyRef.current;

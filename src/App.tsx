@@ -39,14 +39,18 @@ import {
   removeTopLevelNodePosition,
   removeWorkPackageNodePosition,
   saveGraphLayout,
+  saveTopLevelNodePosition,
   saveWorkPackageNodePosition,
   topLevelNodePositions,
   withNodePosition,
+  withScopePositions,
+  withTopLevelNodePosition,
   withoutNodePosition,
   withoutTopLevelNodePosition,
   type NodePosition,
   type WorkPackageLayout,
 } from "./lib/graph-layout";
+import { hasSavedLayout } from "./lib/cytoscape-layout";
 import {
   buildCompoundWorkPackageView,
   compoundNodeLabel,
@@ -66,7 +70,6 @@ import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
 const INITIAL_GRAPH_VIEW_STACK: GraphViewFrame[] = [{ kind: "top" }];
-const LAYOUT_SAVE_DEBOUNCE_MS = 300;
 
 function roadmapLayoutPersistable(root: string, editable: boolean): boolean {
   return editable && root !== "example";
@@ -106,12 +109,11 @@ function App() {
   const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
     EMPTY_WORK_PACKAGE_LAYOUT,
   );
-  const layoutSaveTimerRef = useRef<number | null>(null);
-  const pendingLayoutSaveRef = useRef<{
-    projectId: string;
-    nodeId: string;
-    position: NodePosition;
-  } | null>(null);
+  const [layoutHydrated, setLayoutHydrated] = useState(
+    !roadmapLayoutPersistable(exampleGraph.root, exampleGraph.editable),
+  );
+  const workPackageLayoutRef = useRef(workPackageLayout);
+  const layoutSaveChainRef = useRef(Promise.resolve());
 
   interface ApplyGraphOptions {
     resetVisibleTypes?: boolean;
@@ -134,7 +136,12 @@ function App() {
       setNodeDetail(null);
       setNodeDetailError(null);
       setNodeDetailLoading(false);
-      setWorkPackageLayout(EMPTY_WORK_PACKAGE_LAYOUT);
+      if (!roadmapLayoutPersistable(graph.root, graph.editable)) {
+        setWorkPackageLayout(EMPTY_WORK_PACKAGE_LAYOUT);
+        setLayoutHydrated(true);
+      } else {
+        setLayoutHydrated(false);
+      }
     } else {
       setVisibleTypes((current) => {
         const available = new Set(graph.nodes.map((node) => node.type));
@@ -155,65 +162,92 @@ function App() {
 
     if (options.layout) {
       setWorkPackageLayout(options.layout);
-    } else if (roadmapLayoutPersistable(graph.root, graph.editable)) {
-      void loadWorkPackageLayout(graph.root)
-        .then(setWorkPackageLayout)
-        .catch((caught) => setError(String(caught)));
+      setLayoutHydrated(true);
     }
   }, []);
 
-  const flushLayoutSave = useCallback(async () => {
-    const pending = pendingLayoutSaveRef.current;
-    pendingLayoutSaveRef.current = null;
-    if (!pending || !roadmapLayoutPersistable(roadmapRoot, editable)) {
-      return;
-    }
+  useEffect(() => {
+    workPackageLayoutRef.current = workPackageLayout;
+  }, [workPackageLayout]);
 
-    try {
-      const layout = await saveWorkPackageNodePosition({
-        roadmap_root: roadmapRoot,
-        project_id: projectLayoutKey(pending.projectId),
-        node_id: pending.nodeId,
-        x: pending.position.x,
-        y: pending.position.y,
-      });
-      setWorkPackageLayout(layout);
-    } catch (caught) {
-      setError(String(caught));
-    }
-  }, [editable, roadmapRoot]);
-
-  const queueLayoutSave = useCallback(
-    (projectId: string, nodeId: string, position: NodePosition) => {
+  const persistNodePosition = useCallback(
+    (projectId: string | null, nodeId: string, position: NodePosition) => {
       if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
         return;
       }
 
-      pendingLayoutSaveRef.current = { projectId, nodeId, position };
-      if (layoutSaveTimerRef.current !== null) {
-        window.clearTimeout(layoutSaveTimerRef.current);
-      }
-      layoutSaveTimerRef.current = window.setTimeout(() => {
-        layoutSaveTimerRef.current = null;
-        void flushLayoutSave();
-      }, LAYOUT_SAVE_DEBOUNCE_MS);
+      layoutSaveChainRef.current = layoutSaveChainRef.current
+        .then(async () => {
+          try {
+            const layout = projectId
+              ? await saveWorkPackageNodePosition({
+                  roadmap_root: roadmapRoot,
+                  project_id: projectLayoutKey(projectId),
+                  node_id: nodeId,
+                  x: position.x,
+                  y: position.y,
+                })
+              : await saveTopLevelNodePosition({
+                  roadmap_root: roadmapRoot,
+                  node_id: nodeId,
+                  x: position.x,
+                  y: position.y,
+                });
+            setWorkPackageLayout(layout);
+          } catch (caught) {
+            setError(String(caught));
+          }
+        })
+        .catch(() => undefined);
     },
-    [editable, flushLayoutSave, roadmapRoot],
+    [editable, roadmapRoot],
   );
 
   const handleNodePositionChange = useCallback(
     (nodeId: string, position: NodePosition) => {
       const projectId = currentProjectId(graphViewStack);
-      if (!projectId) {
-        return;
-      }
-
+      if (projectId) {
       setWorkPackageLayout((current) =>
         withNodePosition(current, projectId, nodeId, position),
       );
-      queueLayoutSave(projectId, nodeId, position);
+      persistNodePosition(projectId, nodeId, position);
+      return;
+    }
+
+    setWorkPackageLayout((current) =>
+      withTopLevelNodePosition(current, nodeId, position),
+    );
+    persistNodePosition(null, nodeId, position);
+  },
+  [graphViewStack, persistNodePosition],
+);
+
+  const handleAutoLayoutComplete = useCallback(
+    (positions: Record<string, NodePosition>) => {
+      if (!roadmapLayoutPersistable(roadmapRoot, editable) || !layoutHydrated) {
+        return;
+      }
+
+      const projectId = currentProjectId(graphViewStack);
+      const scope = projectId
+        ? ({ kind: "project" as const, projectId })
+        : ({ kind: "top_level" as const });
+      const current = workPackageLayoutRef.current;
+      const existing = projectId
+        ? projectNodePositions(current, projectId)
+        : topLevelNodePositions(current);
+
+      if (hasSavedLayout(existing)) {
+        return;
+      }
+
+      const nextLayout = withScopePositions(current, scope, positions);
+      setWorkPackageLayout(nextLayout);
+      void saveGraphLayout(roadmapRoot, nextLayout)
+        .then(setWorkPackageLayout)
+        .catch((caught) => setError(String(caught)));
     },
-    [graphViewStack, queueLayoutSave],
+    [editable, graphViewStack, layoutHydrated, roadmapRoot],
   );
 
   const handleOpenRoadmap = useCallback(async () => {
@@ -402,23 +436,31 @@ function App() {
 
   useEffect(() => {
     if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
+      setLayoutHydrated(true);
       return;
     }
 
-    void loadWorkPackageLayout(roadmapRoot)
-      .then(setWorkPackageLayout)
-      .catch((caught) => setError(String(caught)));
-  }, [editable, roadmapRoot]);
+    setLayoutHydrated(false);
+    let cancelled = false;
 
-  useEffect(() => {
+    void loadWorkPackageLayout(roadmapRoot)
+      .then((layout) => {
+        if (!cancelled) {
+          setWorkPackageLayout(layout);
+          setLayoutHydrated(true);
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(String(caught));
+          setLayoutHydrated(true);
+        }
+      });
+
     return () => {
-      if (layoutSaveTimerRef.current !== null) {
-        window.clearTimeout(layoutSaveTimerRef.current);
-        layoutSaveTimerRef.current = null;
-      }
-      void flushLayoutSave();
+      cancelled = true;
     };
-  }, [flushLayoutSave]);
+  }, [editable, roadmapRoot]);
 
   const handleRemoveLink = useCallback(
     async (linkId: string) => {
@@ -583,6 +625,8 @@ function App() {
       })),
     [filteredLinks],
   );
+  const layoutReady =
+    !roadmapLayoutPersistable(roadmapRoot, editable) || layoutHydrated;
   const innerGraphNodePositions = activeProjectId
     ? projectNodePositions(workPackageLayout, activeProjectId)
     : topLevelNodePositions(workPackageLayout);
@@ -695,16 +739,12 @@ function App() {
   );
 
   const handleBackGraphView = useCallback(() => {
-    if (layoutSaveTimerRef.current !== null) {
-      window.clearTimeout(layoutSaveTimerRef.current);
-      layoutSaveTimerRef.current = null;
-    }
-    void flushLayoutSave();
+    void layoutSaveChainRef.current;
     setGraphViewStack((current) =>
       current.length <= 1 ? INITIAL_GRAPH_VIEW_STACK : current.slice(0, -1),
     );
     clearGraphSelection();
-  }, [clearGraphSelection, flushLayoutSave]);
+  }, [clearGraphSelection]);
 
   const renderContextMenu = useCallback(
     (event: {
@@ -907,10 +947,18 @@ function App() {
             onNodeClick={handleNodeClick}
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
-            draggable={inWorkPackageGraph}
+            draggable
+            layoutReady={layoutReady}
             nodePositions={innerGraphNodePositions}
             onNodePositionChange={
-              inWorkPackageGraph ? handleNodePositionChange : undefined
+              roadmapLayoutPersistable(roadmapRoot, editable)
+                ? handleNodePositionChange
+                : undefined
+            }
+            onAutoLayoutComplete={
+              roadmapLayoutPersistable(roadmapRoot, editable)
+                ? handleAutoLayoutComplete
+                : undefined
             }
           />
           {!inWorkPackageGraph ? (

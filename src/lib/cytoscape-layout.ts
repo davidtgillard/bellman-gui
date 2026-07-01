@@ -183,21 +183,39 @@ export function scatterEdgelessNodes(cy: Core, seed: number): void {
 /**
  * Applies preset or force-directed layout to the current graph.
  * @param cy - Cytoscape instance containing the graph elements.
- * @param draggable - Whether nodes can be dragged in the current view.
  * @param nodePositions - Saved node positions keyed by node id.
  * @param linkCount - Number of visible links in the graph.
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
+ * @param onAutoLayoutComplete - Called with computed positions after auto layout.
  */
 export function applyAutoLayout(
   cy: Core,
   nodePositions: Record<string, NodePosition> | undefined,
   linkCount: number,
   hasCompoundNodes = false,
+  onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void,
+  isActive?: () => boolean,
 ): void {
   if (usesPresetLayout(nodePositions)) {
     cy.layout(PRESET_LAYOUT).run();
     return;
   }
+
+  const snapshotPositions = (): Record<string, NodePosition> => {
+    const positions: Record<string, NodePosition> = {};
+    cy.nodes().forEach((node) => {
+      const position = node.position();
+      positions[node.id()] = { x: position.x, y: position.y };
+    });
+    return positions;
+  };
+
+  const completeAutoLayout = () => {
+    if (isActive && !isActive()) {
+      return;
+    }
+    onAutoLayoutComplete?.(snapshotPositions());
+  };
 
   const seed = graphLayoutSeed(
     cy.nodes().map((node) => node.id()),
@@ -206,21 +224,26 @@ export function applyAutoLayout(
 
   if (linkCount === 0 && !hasCompoundNodes) {
     scatterEdgelessNodes(cy, seed);
+    completeAutoLayout();
     return;
   }
 
   seedRandomNodePositions(cy, seed);
-  cy.layout(autoLayoutOptions(linkCount, hasCompoundNodes)).run();
+  const layout = cy.layout(autoLayoutOptions(linkCount, hasCompoundNodes));
+  layout.one("layoutstop", () => {
+    completeAutoLayout();
+  });
+  layout.run();
 }
 
 /**
  * Runs auto layout once the graph container has a measurable size.
  * @param cy - Cytoscape instance containing the graph elements.
  * @param container - DOM container hosting the graph canvas.
- * @param draggable - Whether nodes can be dragged in the current view.
  * @param nodePositions - Saved node positions keyed by node id.
  * @param linkCount - Number of visible links in the graph.
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
+ * @param onAutoLayoutComplete - Called with computed positions after auto layout.
  * @returns Cleanup function that cancels pending layout attempts.
  */
 export function runLayoutWhenContainerReady(
@@ -229,6 +252,7 @@ export function runLayoutWhenContainerReady(
   nodePositions: Record<string, NodePosition> | undefined,
   linkCount: number,
   hasCompoundNodes = false,
+  onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void,
 ): () => void {
   let cancelled = false;
   let laidOut = false;
@@ -247,7 +271,14 @@ export function runLayoutWhenContainerReady(
       return false;
     }
 
-    applyAutoLayout(cy, nodePositions, linkCount, hasCompoundNodes);
+    applyAutoLayout(
+      cy,
+      nodePositions,
+      linkCount,
+      hasCompoundNodes,
+      onAutoLayoutComplete,
+      () => !cancelled,
+    );
     laidOut = true;
     resizeObserver?.disconnect();
     resizeObserver = undefined;
