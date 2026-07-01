@@ -5,13 +5,18 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
     selector: "node",
     style: {
       label: "data(label)",
-      "text-valign": "bottom",
-      "text-halign": "center",
-      "text-margin-y": 6,
       "font-size": 11,
       color: "#e2e8f0",
       "text-outline-color": "#0f172a",
       "text-outline-width": 2,
+    },
+  },
+  {
+    selector: "node:childless",
+    style: {
+      "text-valign": "bottom",
+      "text-halign": "center",
+      "text-margin-y": 6,
       "background-color": "data(color)",
       width: 36,
       height: 36,
@@ -28,7 +33,6 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
   {
     selector: ":parent",
     style: {
-      label: "data(label)",
       "text-valign": "top",
       "text-halign": "center",
       "text-margin-y": -8,

@@ -121,25 +121,37 @@ fn resolve_node_markdown(
 ) -> Result<(String, PathBuf), String> {
     match node_type {
         "initiative" => {
-            let name = strip_type_prefix(node_id, "initiative--")?;
+            let name = match strip_type_prefix(node_id, "initiative--") {
+                Ok(name) => name.to_string(),
+                Err(_) => node_id.to_string(),
+            };
             let path = root.join("initiatives").join(format!("{name}.md"));
             let markdown = read_markdown_file(&path)?;
             Ok((markdown, path))
         }
         "project" => {
-            let name = strip_type_prefix(node_id, "project--")?;
-            let path = root.join("projects").join(name).join(format!("{name}.md"));
+            let name = match strip_type_prefix(node_id, "project--") {
+                Ok(name) => name.to_string(),
+                Err(_) => node_id.to_string(),
+            };
+            let path = root.join("projects").join(&name).join(format!("{name}.md"));
             let markdown = read_markdown_file(&path)?;
             Ok((markdown, path))
         }
         "milestone" => {
-            let name = strip_type_prefix(node_id, "milestone--")?;
+            let name = match strip_type_prefix(node_id, "milestone--") {
+                Ok(name) => name.to_string(),
+                Err(_) => node_id.to_string(),
+            };
             let path = root.join("milestones").join(format!("{name}.md"));
             let markdown = read_markdown_file(&path)?;
             Ok((markdown, path))
         }
         "goal" => {
-            let name = strip_type_prefix(node_id, "goal--")?;
+            let name = match strip_type_prefix(node_id, "goal--") {
+                Ok(name) => name.to_string(),
+                Err(_) => node_id.to_string(),
+            };
             let path = root.join("goals").join(format!("{name}.md"));
             let markdown = read_markdown_file(&path)?;
             Ok((markdown, path))

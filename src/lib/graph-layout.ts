@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { nodeLabel } from "./graph";
+import { nodeLabel, hasTypedNodePrefix, type GraphNode } from "./graph";
 
 export interface NodePosition {
   x: number;
@@ -55,6 +55,76 @@ export function fromWorkPackageLayoutDto(dto: WorkPackageLayoutDto): WorkPackage
     kind: dto.kind,
     topLevel: dto.top_level ?? {},
     projects: dto.projects ?? {},
+  };
+}
+
+/**
+ * Resolves a saved layout key to the canonical node id from the current graph.
+ * @param layoutKey - Node id or legacy label stored in the layout file.
+ * @param nodes - Graph nodes from the current roadmap.
+ * @returns Canonical node id, or null when no node matches.
+ */
+export function resolveLayoutNodeId(
+  layoutKey: string,
+  nodes: GraphNode[],
+): string | null {
+  if (nodes.some((node) => node.id === layoutKey)) {
+    return layoutKey;
+  }
+
+  const matches = nodes.filter((node) => nodeLabel(node.id) === layoutKey);
+  if (matches.length === 1) {
+    return matches[0].id;
+  }
+  if (matches.length > 1) {
+    const typed = matches.find((node) => hasTypedNodePrefix(node));
+    return typed?.id ?? matches[0].id;
+  }
+
+  return null;
+}
+
+/**
+ * Maps legacy layout keys onto canonical node ids and drops orphans.
+ * @param positions - Saved top-level node positions keyed by node id or label.
+ * @param nodes - Top-level graph nodes from the current roadmap.
+ * @returns Normalized positions keyed only by canonical node ids.
+ */
+export function normalizeTopLevelPositions(
+  positions: Record<string, NodePosition>,
+  nodes: GraphNode[],
+): Record<string, NodePosition> {
+  const normalized: Record<string, NodePosition> = {};
+
+  for (const [key, position] of Object.entries(positions)) {
+    const nodeId = resolveLayoutNodeId(key, nodes);
+    if (!nodeId) {
+      continue;
+    }
+    if (key === nodeId || !(nodeId in normalized)) {
+      normalized[nodeId] = position;
+    }
+  }
+
+  return normalized;
+}
+
+/**
+ * Normalizes a layout document against the current roadmap graph.
+ * @param layout - Work package layout document.
+ * @param nodes - All roadmap graph nodes.
+ * @returns Layout with canonical top-level position keys.
+ */
+export function normalizeLayoutForNodes(
+  layout: WorkPackageLayout,
+  nodes: GraphNode[],
+): WorkPackageLayout {
+  return {
+    ...layout,
+    topLevel: normalizeTopLevelPositions(
+      layout.topLevel,
+      nodes.filter((node) => node.type !== "work_package"),
+    ),
   };
 }
 

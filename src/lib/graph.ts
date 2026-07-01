@@ -106,16 +106,22 @@ export interface RoadmapGraphDto {
  * @returns Normalized roadmap graph with camelCase link fields.
  */
 export function fromRoadmapGraphDto(dto: RoadmapGraphDto): RoadmapGraph {
+  const links = dto.links.map((link) => ({
+    id: link.id,
+    linkType: link.link_type,
+    source: link.source,
+    target: link.target,
+  }));
+  const { nodes, links: normalizedLinks } = normalizeRoadmapGraphData(
+    dto.nodes.map((node) => ({ id: node.id, type: node.type })),
+    links,
+  );
+
   return {
     root: dto.root,
     editable: dto.editable,
-    nodes: dto.nodes,
-    links: dto.links.map((link) => ({
-      id: link.id,
-      linkType: link.link_type,
-      source: link.source,
-      target: link.target,
-    })),
+    nodes,
+    links: normalizedLinks,
     linkTypes: dto.link_types,
   };
 }
@@ -177,6 +183,92 @@ export function nodeLabel(nodeId: string): string {
 }
 
 /**
+ * Returns whether a node id uses the registry's type-qualified prefix.
+ * @param node - Graph node to inspect.
+ * @returns Whether the id starts with `{type}--`.
+ */
+export function hasTypedNodePrefix(node: GraphNode): boolean {
+  return node.id.startsWith(`${node.type}--`);
+}
+
+/**
+ * Builds a deduplication key for nodes that share the same type and label.
+ * @param node - Graph node to key.
+ * @returns Stable key for alias detection.
+ */
+export function nodeDedupKey(node: GraphNode): string {
+  return `${node.type}:${nodeLabel(node.id)}`;
+}
+
+function preferredDuplicateNode(left: GraphNode, right: GraphNode): GraphNode {
+  const leftTyped = hasTypedNodePrefix(left);
+  const rightTyped = hasTypedNodePrefix(right);
+  if (leftTyped !== rightTyped) {
+    return leftTyped ? left : right;
+  }
+  if (left.id.length !== right.id.length) {
+    return left.id.length > right.id.length ? left : right;
+  }
+  return left.id <= right.id ? left : right;
+}
+
+/**
+ * Collapses registry aliases that share a type and display label.
+ * Prefers type-qualified ids such as `project--billing` over `billing`.
+ * @param nodes - Raw graph nodes from the registry.
+ * @returns Canonical nodes and a map from alias id to canonical id.
+ */
+export function deduplicateGraphNodes(nodes: GraphNode[]): {
+  nodes: GraphNode[];
+  idAliases: Map<string, string>;
+} {
+  const groups = new Map<string, GraphNode[]>();
+
+  for (const node of nodes) {
+    const key = nodeDedupKey(node);
+    const group = groups.get(key) ?? [];
+    group.push(node);
+    groups.set(key, group);
+  }
+
+  const idAliases = new Map<string, string>();
+  const canonicalNodes: GraphNode[] = [];
+
+  for (const group of groups.values()) {
+    const canonical = group.reduce(preferredDuplicateNode);
+    canonicalNodes.push(canonical);
+    for (const node of group) {
+      idAliases.set(node.id, canonical.id);
+    }
+  }
+
+  return { nodes: canonicalNodes, idAliases };
+}
+
+/**
+ * Normalizes roadmap nodes and remaps link endpoints through alias ids.
+ * @param nodes - Raw graph nodes from the registry.
+ * @param links - Graph links referencing node ids.
+ * @returns Deduplicated nodes with remapped links.
+ */
+export function normalizeRoadmapGraphData(
+  nodes: GraphNode[],
+  links: GraphLink[],
+): { nodes: GraphNode[]; links: GraphLink[] } {
+  const { nodes: canonicalNodes, idAliases } = deduplicateGraphNodes(nodes);
+  const remapId = (nodeId: string) => idAliases.get(nodeId) ?? nodeId;
+
+  return {
+    nodes: canonicalNodes,
+    links: links.map((link) => ({
+      ...link,
+      source: remapId(link.source),
+      target: remapId(link.target),
+    })),
+  };
+}
+
+/**
  * Builds a roadmap graph from bellman registry and link documents.
  * @param root - Roadmap root path or display name.
  * @param registry - Parsed `.fits/registry.json` contents.
@@ -188,12 +280,14 @@ export function parseRoadmapGraph(
   registry: RegistryDocument,
   links: LinksDocument,
 ): RoadmapGraph {
-  const nodes = registry.instances
+  const rawNodes = registry.instances
     .filter((instance) => instance.kind === "node")
     .map((instance) => ({
       id: instance.id,
       type: instance.type,
     }));
+
+  const uniqueNodes = [...new Map(rawNodes.map((node) => [node.id, node])).values()];
 
   const graphLinks = links.links.map((link) => ({
     id: link.id,
@@ -202,11 +296,16 @@ export function parseRoadmapGraph(
     target: link.out,
   }));
 
+  const { nodes, links: normalizedLinks } = normalizeRoadmapGraphData(
+    uniqueNodes,
+    graphLinks,
+  );
+
   return {
     root,
     editable: false,
     nodes,
-    links: graphLinks,
+    links: normalizedLinks,
     linkTypes: registry.link_types ?? [],
   };
 }

@@ -13,6 +13,8 @@ import {
   nodeTypeColor,
   nodeTypeLabel,
   parseRoadmapGraph,
+  normalizeRoadmapGraphData,
+  deduplicateGraphNodes,
   topLevelGraphNodes,
   workPackageBelongsToProject,
   workPackageProjectName,
@@ -149,5 +151,41 @@ describe("parseRoadmapGraph", () => {
     expect(inner.nodes).toHaveLength(2);
     expect(inner.links).toHaveLength(2);
     expect(inner.nodes.every((node) => node.type === "work_package")).toBe(true);
+  });
+
+  it("collapses registry aliases that share a type and label", () => {
+    const { nodes, idAliases } = deduplicateGraphNodes([
+      { id: "usv-lars-p2", type: "project" },
+      { id: "project--usv-lars-p2", type: "project" },
+      { id: "settings-manager", type: "initiative" },
+      { id: "initiative--settings-manager", type: "initiative" },
+    ]);
+
+    expect(nodes.map((node) => node.id).sort()).toEqual([
+      "initiative--settings-manager",
+      "project--usv-lars-p2",
+    ]);
+    expect(idAliases.get("usv-lars-p2")).toBe("project--usv-lars-p2");
+    expect(idAliases.get("settings-manager")).toBe("initiative--settings-manager");
+  });
+
+  it("remaps links when collapsing duplicate node ids", () => {
+    const { nodes, links } = normalizeRoadmapGraphData(
+      [
+        { id: "usv-lars-p2", type: "project" },
+        { id: "project--usv-lars-p2", type: "project" },
+      ],
+      [
+        {
+          id: "supports--usv-lars-p2--goal--x",
+          linkType: "supports",
+          source: "usv-lars-p2",
+          target: "goal--x",
+        },
+      ],
+    );
+
+    expect(nodes).toHaveLength(1);
+    expect(links[0].source).toBe("project--usv-lars-p2");
   });
 });

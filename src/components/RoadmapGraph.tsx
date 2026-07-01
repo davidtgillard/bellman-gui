@@ -88,6 +88,17 @@ function sortGraphViewNodes(nodes: GraphViewNode[]): GraphViewNode[] {
   return sorted;
 }
 
+function uniqueGraphViewNodes(nodes: GraphViewNode[]): GraphViewNode[] {
+  const seen = new Set<string>();
+  return nodes.filter((node) => {
+    if (seen.has(node.id)) {
+      return false;
+    }
+    seen.add(node.id);
+    return true;
+  });
+}
+
 function snapshotNodePositions(cy: Core): Record<string, NodePosition> {
   const positions: Record<string, NodePosition> = {};
   cy.nodes().forEach((node) => {
@@ -104,7 +115,7 @@ function toElementDefinitions(
 ): ElementDefinition[] {
   const nodeIds = nodes.map((node) => node.id);
   const usePreset = usesPresetLayout(nodePositions);
-  const elements: ElementDefinition[] = sortGraphViewNodes(nodes).map((node) => {
+  const elements: ElementDefinition[] = sortGraphViewNodes(uniqueGraphViewNodes(nodes)).map((node) => {
     const saved = nodePositions?.[node.id];
     const position = saved ?? (usePreset ? defaultNodePosition(node.id, nodeIds) : undefined);
     const label = node.subLabel
@@ -226,6 +237,18 @@ export function RoadmapGraph({
     if (!container) {
       return;
     }
+
+    layoutCleanupRef.current?.();
+    layoutCleanupRef.current = null;
+
+    const existing = cyRef.current;
+    if (existing) {
+      existing.destroy();
+      cyRef.current = null;
+    }
+
+    // Orphaned canvases can remain if init runs again before destroy completes.
+    container.replaceChildren();
 
     const cy = cytoscape({
       container,
@@ -356,6 +379,7 @@ export function RoadmapGraph({
       setCyReady(false);
       cy.destroy();
       cyRef.current = null;
+      container.replaceChildren();
     };
   }, [closeContextMenu]);
 

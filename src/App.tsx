@@ -34,6 +34,8 @@ import {
   applyNodePlacement,
   EMPTY_WORK_PACKAGE_LAYOUT,
   loadWorkPackageLayout,
+  normalizeLayoutForNodes,
+  normalizeTopLevelPositions,
   projectLayoutKey,
   projectNodePositions,
   removeTopLevelNodePosition,
@@ -241,13 +243,17 @@ function App() {
         return;
       }
 
-      const nextLayout = withScopePositions(current, scope, positions);
+      const nextLayout = normalizeLayoutForNodes(
+        withScopePositions(current, scope, positions),
+        nodes,
+      );
+      workPackageLayoutRef.current = nextLayout;
       setWorkPackageLayout(nextLayout);
-      void saveGraphLayout(roadmapRoot, nextLayout)
-        .then(setWorkPackageLayout)
-        .catch((caught) => setError(String(caught)));
+      void saveGraphLayout(roadmapRoot, nextLayout).catch((caught) =>
+        setError(String(caught)),
+      );
     },
-    [editable, graphViewStack, layoutHydrated, roadmapRoot],
+    [editable, graphViewStack, layoutHydrated, nodes, roadmapRoot],
   );
 
   const handleOpenRoadmap = useCallback(async () => {
@@ -627,9 +633,15 @@ function App() {
   );
   const layoutReady =
     !roadmapLayoutPersistable(roadmapRoot, editable) || layoutHydrated;
-  const innerGraphNodePositions = activeProjectId
-    ? projectNodePositions(workPackageLayout, activeProjectId)
-    : topLevelNodePositions(workPackageLayout);
+  const innerGraphNodePositions = useMemo(() => {
+    const positions = activeProjectId
+      ? projectNodePositions(workPackageLayout, activeProjectId)
+      : topLevelNodePositions(workPackageLayout);
+    if (activeProjectId) {
+      return positions;
+    }
+    return normalizeTopLevelPositions(positions, topLevelGraphNodes(nodes));
+  }, [activeProjectId, nodes, workPackageLayout]);
 
   const handleToggleType = useCallback((type: string) => {
     setVisibleTypes((current) => {

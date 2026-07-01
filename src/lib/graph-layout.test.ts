@@ -7,6 +7,7 @@ import {
   projectLayoutKey,
   projectNodePositions,
   resolvePlacedNodePosition,
+  normalizeTopLevelPositions,
   topLevelNodePositions,
   withNodePosition,
   withScopePositions,
@@ -169,6 +170,27 @@ describe("graph-layout", () => {
     expect(projectNodePositions(project, "project--billing-redesign")).toEqual({
       "billing-redesign--wp-invoicing": { x: 3, y: 4 },
       "billing-redesign--wp-pdf-export": { x: 9, y: 10 },
+    });
+  });
+
+  it("maps legacy layout keys onto canonical node ids", () => {
+    const nodes = [
+      { id: "project--usv-lars-p2", type: "project" },
+      { id: "goal--partner-integrations", type: "goal" },
+    ];
+
+    const normalized = normalizeTopLevelPositions(
+      {
+        "usv-lars-p2": { x: 1, y: 2 },
+        "project--usv-lars-p2": { x: 3, y: 4 },
+        "partner-integrations": { x: 5, y: 6 },
+      },
+      nodes,
+    );
+
+    expect(normalized).toEqual({
+      "project--usv-lars-p2": { x: 3, y: 4 },
+      "goal--partner-integrations": { x: 5, y: 6 },
     });
   });
 });
