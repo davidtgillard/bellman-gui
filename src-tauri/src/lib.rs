@@ -18,8 +18,8 @@ use graph_layout::{
 };
 use node_detail::load_node_detail_command;
 use roadmap_edit::{
-    create_link, create_node, remove_link, remove_node, CreateLinkRequest, CreateNodeRequest,
-    RemoveLinkRequest, RemoveNodeRequest,
+    create_link, create_node, remove_link, remove_node, update_work_package, CreateLinkRequest,
+    CreateNodeRequest, RemoveLinkRequest, RemoveNodeRequest, UpdateWorkPackageRequest,
 };
 use settings::load_settings_command;
 use crate::undo::{Snapshot, UndoState, UndoStateDto};
@@ -137,6 +137,35 @@ async fn remove_node_command(
     let label = format!("remove {} {}", request.node_type, request.node_id);
     let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     remove_node(&app, request).await?;
+    record_edit(&state, &roadmap_root, label, before);
+    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+async fn save_node_markdown_command(
+    roadmap_root: String,
+    node_id: String,
+    markdown: String,
+    state: tauri::State<'_, UndoState>,
+) -> Result<node_detail::NodeDetailDto, String> {
+    let label = format!("edit {node_id}");
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
+    let detail =
+        node_detail::save_node_markdown(Path::new(&roadmap_root), &node_id, &markdown)?;
+    record_edit(&state, &roadmap_root, label, before);
+    Ok(detail)
+}
+
+#[tauri::command]
+async fn update_work_package_command(
+    app: tauri::AppHandle,
+    request: UpdateWorkPackageRequest,
+    state: tauri::State<'_, UndoState>,
+) -> Result<graph::RoadmapGraphDto, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    let label = format!("edit {}", request.node_id);
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
+    update_work_package(&app, request).await?;
     record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
@@ -294,6 +323,8 @@ pub fn run() {
             create_link_command,
             remove_link_command,
             remove_node_command,
+            save_node_markdown_command,
+            update_work_package_command,
             undo_command,
             redo_command,
             undo_state_command,

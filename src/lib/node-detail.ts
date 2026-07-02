@@ -7,12 +7,29 @@ import wpInvoicing from "../fixtures/example-roadmap/work-packages/billing-redes
 import wpPdfExport from "../fixtures/example-roadmap/work-packages/billing-redesign--wp-pdf-export.md?raw";
 import { nodeLabel } from "./graph";
 
+export interface WorkPackageDetail {
+  project: string;
+  title: string;
+  description: string;
+  dependencies: string[];
+  availableTitles: string[];
+}
+
 export interface NodeDetail {
   nodeId: string;
   nodeType: string;
   title: string;
   markdown: string;
   sourcePath: string | null;
+  workPackage: WorkPackageDetail | null;
+}
+
+interface WorkPackageDetailDto {
+  project: string;
+  title: string;
+  description: string;
+  dependencies: string[];
+  available_titles: string[];
 }
 
 interface NodeDetailDto {
@@ -21,6 +38,7 @@ interface NodeDetailDto {
   title: string;
   markdown: string;
   source_path: string | null;
+  work_package: WorkPackageDetailDto | null;
 }
 
 const EXAMPLE_NODE_MARKDOWN: Record<string, string> = {
@@ -39,6 +57,15 @@ function fromDto(dto: NodeDetailDto): NodeDetail {
     title: dto.title,
     markdown: dto.markdown,
     sourcePath: dto.source_path,
+    workPackage: dto.work_package
+      ? {
+          project: dto.work_package.project,
+          title: dto.work_package.title,
+          description: dto.work_package.description,
+          dependencies: dto.work_package.dependencies,
+          availableTitles: dto.work_package.available_titles,
+        }
+      : null,
   };
 }
 
@@ -54,6 +81,7 @@ function exampleNodeDetail(nodeId: string, nodeType: string): NodeDetail {
     title: nodeLabel(nodeId),
     markdown,
     sourcePath: null,
+    workPackage: null,
   };
 }
 
@@ -78,6 +106,27 @@ export async function loadNodeDetail(
       roadmap_root: roadmapRoot,
       node_id: nodeId,
     },
+  });
+  return fromDto(dto);
+}
+
+/**
+ * Saves new markdown body content for a markdown-backed node and returns the
+ * refreshed detail. Not valid for work packages (use `updateWorkPackage`).
+ * @param roadmapRoot - Editable roadmap root path.
+ * @param nodeId - Fully qualified node id from the registry.
+ * @param markdown - New markdown body to persist.
+ * @returns Refreshed node detail after the write.
+ */
+export async function saveNodeMarkdown(
+  roadmapRoot: string,
+  nodeId: string,
+  markdown: string,
+): Promise<NodeDetail> {
+  const dto = await invoke<NodeDetailDto>("save_node_markdown_command", {
+    roadmapRoot,
+    nodeId,
+    markdown,
   });
   return fromDto(dto);
 }

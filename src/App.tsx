@@ -29,7 +29,13 @@ import {
   type RoadmapGraphDto,
   type NodeKind,
 } from "./lib/graph";
-import { createLink, createNode, removeLink, removeNode } from "./lib/roadmap-api";
+import {
+  createLink,
+  createNode,
+  removeLink,
+  removeNode,
+  updateWorkPackage,
+} from "./lib/roadmap-api";
 import { redo, undo, undoState, type UndoStatus } from "./lib/undo-api";
 import { traceUndo } from "./lib/undo-trace";
 import {
@@ -69,7 +75,7 @@ import {
   type GraphViewFrame,
   workPackageHasChildren,
 } from "./lib/work-package-view";
-import { loadNodeDetail, type NodeDetail } from "./lib/node-detail";
+import { loadNodeDetail, saveNodeMarkdown, type NodeDetail } from "./lib/node-detail";
 import {
   loadLegendVisibility,
   resolveVisibleTypes,
@@ -117,6 +123,10 @@ function App() {
   const [nodeDetail, setNodeDetail] = useState<NodeDetail | null>(null);
   const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
   const [nodeDetailError, setNodeDetailError] = useState<string | null>(null);
+  const [nodeEditing, setNodeEditing] = useState(false);
+  const [nodeEditSaving, setNodeEditSaving] = useState(false);
+  const [nodeEditError, setNodeEditError] = useState<string | null>(null);
+  const nodeEditDirtyRef = useRef(false);
   const nodeDetailRequestRef = useRef(0);
   const legendPersistReadyRef = useRef(false);
   const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
@@ -780,6 +790,21 @@ function App() {
     });
   }, []);
 
+  const handleNodeEditDirtyChange = useCallback((dirty: boolean) => {
+    nodeEditDirtyRef.current = dirty;
+  }, []);
+
+  const confirmDiscardIfDirty = useCallback(() => {
+    if (!nodeEditDirtyRef.current) {
+      return true;
+    }
+    const confirmed = window.confirm("Discard unsaved changes to this node?");
+    if (confirmed) {
+      nodeEditDirtyRef.current = false;
+    }
+    return confirmed;
+  }, []);
+
   const clearGraphSelection = useCallback(() => {
     setFocusNodeId(null);
     setSelectedNodeId(null);
@@ -787,6 +812,9 @@ function App() {
     setNodeDetail(null);
     setNodeDetailError(null);
     setNodeDetailLoading(false);
+    setNodeEditing(false);
+    setNodeEditError(null);
+    nodeEditDirtyRef.current = false;
   }, []);
 
   const handleNodeClick = useCallback(
@@ -807,8 +835,14 @@ function App() {
         return;
       }
 
+      if (nodeId !== selectedNodeId && !confirmDiscardIfDirty()) {
+        return;
+      }
+
       const node = nodes.find((item) => item.id === nodeId);
       setSelectedNodeId(nodeId);
+      setNodeEditing(false);
+      setNodeEditError(null);
       setNodeDetailOpen(true);
       setNodeDetail(null);
       setNodeDetailError(null);
@@ -842,7 +876,7 @@ function App() {
           }
         });
     },
-    [clearGraphSelection, nodes, roadmapRoot],
+    [clearGraphSelection, confirmDiscardIfDirty, nodes, roadmapRoot, selectedNodeId],
   );
 
   const handleShowInnerGraph = useCallback(
@@ -1016,12 +1050,83 @@ function App() {
       : "Select at least one node type to display.";
 
   const handleDetailClose = useCallback(() => {
+    if (!confirmDiscardIfDirty()) {
+      return;
+    }
     setNodeDetailOpen(false);
     setSelectedNodeId(null);
     setNodeDetail(null);
     setNodeDetailError(null);
     setNodeDetailLoading(false);
+    setNodeEditing(false);
+    setNodeEditError(null);
+  }, [confirmDiscardIfDirty]);
+
+  const handleStartNodeEdit = useCallback(() => {
+    setNodeEditError(null);
+    nodeEditDirtyRef.current = false;
+    setNodeEditing(true);
   }, []);
+
+  const handleCancelNodeEdit = useCallback(() => {
+    nodeEditDirtyRef.current = false;
+    setNodeEditError(null);
+    setNodeEditing(false);
+  }, []);
+
+  const handleSaveNodeMarkdown = useCallback(
+    async (markdown: string) => {
+      if (!nodeDetail) {
+        return;
+      }
+      const nodeId = nodeDetail.nodeId;
+      setNodeEditSaving(true);
+      setNodeEditError(null);
+      try {
+        const detail = await saveNodeMarkdown(roadmapRoot, nodeId, markdown);
+        setNodeDetail(detail);
+        nodeEditDirtyRef.current = false;
+        setNodeEditing(false);
+        void refreshUndoState(roadmapRoot, editable);
+      } catch (caught) {
+        setNodeEditError(String(caught));
+      } finally {
+        setNodeEditSaving(false);
+      }
+    },
+    [editable, nodeDetail, refreshUndoState, roadmapRoot],
+  );
+
+  const handleSaveWorkPackage = useCallback(
+    async (input: { description: string; dependencies: string[] }) => {
+      if (!nodeDetail || !nodeDetail.workPackage) {
+        return;
+      }
+      const nodeId = nodeDetail.nodeId;
+      const nodeType = nodeDetail.nodeType;
+      setNodeEditSaving(true);
+      setNodeEditError(null);
+      try {
+        const graph = await updateWorkPackage({
+          roadmap_root: roadmapRoot,
+          node_id: nodeId,
+          description: input.description,
+          dependencies: input.dependencies,
+        });
+        applyGraph(graph);
+        const detail = await loadNodeDetail(graph.root, nodeId, nodeType);
+        setNodeDetail(detail);
+        nodeEditDirtyRef.current = false;
+        setNodeEditing(false);
+        void refreshUndoState(graph.root, graph.editable);
+      } catch (caught) {
+        setNodeEditError(String(caught));
+      } finally {
+        setNodeEditSaving(false);
+      }
+    },
+    [applyGraph, nodeDetail, refreshUndoState, roadmapRoot],
+  );
 
   const selectedNode = selectedNodeId
     ? nodes.find((item) => item.id === selectedNodeId)
@@ -1106,6 +1211,15 @@ function App() {
               detail={nodeDetail}
               loading={nodeDetailLoading}
               error={missingNodeError ?? nodeDetailError}
+              editable={editable && roadmapRoot !== "example"}
+              editing={nodeEditing}
+              saving={nodeEditSaving}
+              saveError={nodeEditError}
+              onStartEdit={handleStartNodeEdit}
+              onCancelEdit={handleCancelNodeEdit}
+              onSaveMarkdown={(markdown) => void handleSaveNodeMarkdown(markdown)}
+              onSaveWorkPackage={(input) => void handleSaveWorkPackage(input)}
+              onDirtyChange={handleNodeEditDirtyChange}
             />
           </NodeDetailSidebar>
         ) : null}

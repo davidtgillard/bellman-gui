@@ -2,11 +2,22 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { nodeTypeLabel } from "../lib/graph";
 import type { NodeDetail } from "../lib/node-detail";
+import { NodeMarkdownEditor } from "./NodeMarkdownEditor";
+import { WorkPackageEditor } from "./WorkPackageEditor";
 
 interface NodeDetailPanelProps {
   detail: NodeDetail | null;
   loading: boolean;
   error: string | null;
+  editable: boolean;
+  editing: boolean;
+  saving: boolean;
+  saveError: string | null;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveMarkdown: (markdown: string) => void;
+  onSaveWorkPackage: (input: { description: string; dependencies: string[] }) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
 function NodeDetailErrorIcon() {
@@ -28,7 +39,20 @@ function NodeDetailErrorIcon() {
   );
 }
 
-export function NodeDetailPanel({ detail, loading, error }: NodeDetailPanelProps) {
+export function NodeDetailPanel({
+  detail,
+  loading,
+  error,
+  editable,
+  editing,
+  saving,
+  saveError,
+  onStartEdit,
+  onCancelEdit,
+  onSaveMarkdown,
+  onSaveWorkPackage,
+  onDirtyChange,
+}: NodeDetailPanelProps) {
   if (loading) {
     return (
       <div className="node-detail-panel">
@@ -59,8 +83,11 @@ export function NodeDetailPanel({ detail, loading, error }: NodeDetailPanelProps
     );
   }
 
+  const isWorkPackage = detail.nodeType === "work_package";
+  const canEdit = editable && (!isWorkPackage || detail.workPackage !== null);
+
   return (
-    <div className="node-detail-panel">
+    <div className={editing ? "node-detail-panel node-detail-panel-editing" : "node-detail-panel"}>
       <header className="node-detail-header">
         <span className="node-detail-type">{nodeTypeLabel(detail.nodeType)}</span>
         <h2 className="node-detail-title">{detail.title}</h2>
@@ -68,10 +95,40 @@ export function NodeDetailPanel({ detail, loading, error }: NodeDetailPanelProps
         {detail.sourcePath ? (
           <p className="node-detail-source">{detail.sourcePath}</p>
         ) : null}
+        {canEdit && !editing ? (
+          <button type="button" className="node-detail-edit" onClick={onStartEdit}>
+            Edit
+          </button>
+        ) : null}
       </header>
-      <article className="node-detail-markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.markdown}</ReactMarkdown>
-      </article>
+
+      {editing && isWorkPackage && detail.workPackage ? (
+        <WorkPackageEditor
+          key={detail.nodeId}
+          workPackage={detail.workPackage}
+          saving={saving}
+          backendError={saveError}
+          onSave={onSaveWorkPackage}
+          onCancel={onCancelEdit}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : editing ? (
+        <NodeMarkdownEditor
+          key={detail.nodeId}
+          nodeId={detail.nodeId}
+          nodeType={detail.nodeType}
+          initialMarkdown={detail.markdown}
+          saving={saving}
+          backendError={saveError}
+          onSave={onSaveMarkdown}
+          onCancel={onCancelEdit}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : (
+        <article className="node-detail-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.markdown}</ReactMarkdown>
+        </article>
+      )}
     </div>
   );
 }

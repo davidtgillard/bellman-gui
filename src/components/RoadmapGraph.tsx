@@ -471,6 +471,7 @@ export function RoadmapGraph({
         graphPan?: () => { x: number; y: number };
         graphUserPanningEnabled?: () => boolean;
         openNodeContextMenu?: (nodeId: string) => void;
+        selectNode?: (nodeId: string) => void;
       };
     };
     if (testWindow.__TEST__) {
@@ -485,6 +486,15 @@ export function RoadmapGraph({
           throw new Error(`Graph node not found: ${nodeId}`);
         }
         node.trigger("cxttap");
+      };
+      testWindow.__TEST__.selectNode = (nodeId: string) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          throw new Error(`Graph node not found: ${nodeId}`);
+        }
+        cy.nodes().unselect();
+        node.select();
+        onNodeClickRef.current?.(node.id());
       };
     }
 
@@ -626,6 +636,7 @@ export function RoadmapGraph({
         delete testWindow.__TEST__.graphPan;
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
+        delete testWindow.__TEST__.selectNode;
       }
       cy.destroy();
       cyRef.current = null;

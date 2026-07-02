@@ -189,8 +189,21 @@
     persistHistory();
   }
 
+  const savedNodeDetails = new Map();
+
+  function currentNodeDetail(nodeId) {
+    if (nodeId && savedNodeDetails.has(nodeId)) {
+      return clone(savedNodeDetails.get(nodeId));
+    }
+    if (scenario.nodeDetails && nodeId && scenario.nodeDetails[nodeId]) {
+      return clone(scenario.nodeDetails[nodeId]);
+    }
+    return scenario.nodeDetail ? clone(scenario.nodeDetail) : null;
+  }
+
   function fakeInvoke(cmd, args) {
     const request = args && args.request ? args.request : {};
+    const cmdArgs = args || {};
     switch (cmd) {
       case "load_initial_roadmap":
       case "pick_and_load_roadmap":
@@ -246,7 +259,49 @@
         return currentGraph();
       }
       case "load_node_detail_command":
-        return scenario.nodeDetail || null;
+        return currentNodeDetail(request.node_id);
+      case "save_node_markdown_command": {
+        if (scenario.saveError) {
+          throw new Error(scenario.saveError);
+        }
+        const base = currentNodeDetail(cmdArgs.nodeId);
+        const next = base
+          ? { ...base, markdown: cmdArgs.markdown }
+          : {
+              node_id: cmdArgs.nodeId,
+              node_type: "goal",
+              title: cmdArgs.nodeId,
+              markdown: cmdArgs.markdown,
+              source_path: null,
+              work_package: null,
+            };
+        savedNodeDetails.set(cmdArgs.nodeId, clone(next));
+        const state = clone(states[index]);
+        state.label = `edit ${cmdArgs.nodeId}`;
+        pushState(state);
+        return clone(next);
+      }
+      case "update_work_package_command": {
+        if (scenario.saveError) {
+          throw new Error(scenario.saveError);
+        }
+        const base = currentNodeDetail(request.node_id);
+        if (base && base.work_package) {
+          const updated = {
+            ...base,
+            work_package: {
+              ...base.work_package,
+              description: request.description,
+              dependencies: request.dependencies,
+            },
+          };
+          savedNodeDetails.set(request.node_id, clone(updated));
+        }
+        const state = clone(states[index]);
+        state.label = `edit ${request.node_id}`;
+        pushState(state);
+        return currentGraph();
+      }
       case "load_work_package_layout_command":
       case "save_work_package_node_position_command":
       case "remove_work_package_node_position_command":

@@ -6,12 +6,22 @@ use std::path::{Path, PathBuf};
 use crate::graph::load_roadmap_graph;
 
 #[derive(Debug, Serialize, Clone)]
+pub struct WorkPackageDetailDto {
+    pub project: String,
+    pub title: String,
+    pub description: String,
+    pub dependencies: Vec<String>,
+    pub available_titles: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub struct NodeDetailDto {
     pub node_id: String,
     pub node_type: String,
     pub title: String,
     pub markdown: String,
     pub source_path: Option<String>,
+    pub work_package: Option<WorkPackageDetailDto>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,11 +49,46 @@ fn read_markdown_file(path: &Path) -> Result<String, String> {
         .map_err(|error| format!("failed to read {}: {error}", path.display()))
 }
 
-fn work_package_markdown(
+/// Resolves the on-disk `.md` path for a node type that is backed by a markdown
+/// file (everything except work packages, which live in `work-packages.yaml`).
+fn md_path_for(root: &Path, node_id: &str, node_type: &str) -> Result<PathBuf, String> {
+    let (dir, prefix) = match node_type {
+        "initiative" => ("initiatives", "initiative--"),
+        "milestone" => ("milestones", "milestone--"),
+        "goal" => ("goals", "goal--"),
+        "project" => ("projects", "project--"),
+        other => {
+            return Err(format!(
+                "node type {other:?} is not backed by a markdown file"
+            ))
+        }
+    };
+
+    let name = match strip_type_prefix(node_id, prefix) {
+        Ok(name) => name.to_string(),
+        Err(_) => node_id.to_string(),
+    };
+
+    let path = if node_type == "project" {
+        root.join(dir).join(&name).join(format!("{name}.md"))
+    } else {
+        root.join(dir).join(format!("{name}.md"))
+    };
+
+    Ok(path)
+}
+
+struct WorkPackageParsed {
+    markdown: String,
+    path: PathBuf,
+    detail: WorkPackageDetailDto,
+}
+
+fn work_package_detail(
     root: &Path,
     project: &str,
     package_title: &str,
-) -> Result<(String, PathBuf), String> {
+) -> Result<WorkPackageParsed, String> {
     let path = root
         .join("projects")
         .join(project)
@@ -71,6 +116,16 @@ fn work_package_markdown(
             )
         })?;
 
+    let available_titles: Vec<String> = work_packages
+        .iter()
+        .filter_map(|item| {
+            item.as_mapping()
+                .and_then(|map| map.get(YamlValue::from("title")))
+                .and_then(YamlValue::as_str)
+                .map(str::to_string)
+        })
+        .collect();
+
     let entry = work_packages.iter().find(|item| {
         item.as_mapping()
             .and_then(|map| map.get(YamlValue::from("title")))
@@ -89,9 +144,10 @@ fn work_package_markdown(
         .as_mapping()
         .and_then(|map| map.get(YamlValue::from("description")))
         .and_then(YamlValue::as_str)
-        .unwrap_or("No description provided.");
+        .unwrap_or("No description provided.")
+        .to_string();
 
-    let dependencies = entry
+    let dependencies: Vec<String> = entry
         .as_mapping()
         .and_then(|map| map.get(YamlValue::from("dependencies")))
         .and_then(YamlValue::as_sequence)
@@ -99,68 +155,52 @@ fn work_package_markdown(
             items
                 .iter()
                 .filter_map(YamlValue::as_str)
-                .map(|dep| format!("- {dep}"))
-                .collect::<Vec<_>>()
-                .join("\n")
+                .map(str::to_string)
+                .collect()
         })
         .unwrap_or_default();
 
     let mut markdown = format!("# {package_title}\n\n{description}");
     if !dependencies.is_empty() {
         markdown.push_str("\n\n## Dependencies\n\n");
-        markdown.push_str(&dependencies);
+        let rendered = dependencies
+            .iter()
+            .map(|dep| format!("- {dep}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        markdown.push_str(&rendered);
     }
 
-    Ok((markdown, path))
+    Ok(WorkPackageParsed {
+        markdown,
+        path,
+        detail: WorkPackageDetailDto {
+            project: project.to_string(),
+            title: package_title.to_string(),
+            description,
+            dependencies,
+            available_titles,
+        },
+    })
 }
 
 fn resolve_node_markdown(
     root: &Path,
     node_id: &str,
     node_type: &str,
-) -> Result<(String, PathBuf), String> {
+) -> Result<(String, PathBuf, Option<WorkPackageDetailDto>), String> {
     match node_type {
-        "initiative" => {
-            let name = match strip_type_prefix(node_id, "initiative--") {
-                Ok(name) => name.to_string(),
-                Err(_) => node_id.to_string(),
-            };
-            let path = root.join("initiatives").join(format!("{name}.md"));
+        "initiative" | "project" | "milestone" | "goal" => {
+            let path = md_path_for(root, node_id, node_type)?;
             let markdown = read_markdown_file(&path)?;
-            Ok((markdown, path))
-        }
-        "project" => {
-            let name = match strip_type_prefix(node_id, "project--") {
-                Ok(name) => name.to_string(),
-                Err(_) => node_id.to_string(),
-            };
-            let path = root.join("projects").join(&name).join(format!("{name}.md"));
-            let markdown = read_markdown_file(&path)?;
-            Ok((markdown, path))
-        }
-        "milestone" => {
-            let name = match strip_type_prefix(node_id, "milestone--") {
-                Ok(name) => name.to_string(),
-                Err(_) => node_id.to_string(),
-            };
-            let path = root.join("milestones").join(format!("{name}.md"));
-            let markdown = read_markdown_file(&path)?;
-            Ok((markdown, path))
-        }
-        "goal" => {
-            let name = match strip_type_prefix(node_id, "goal--") {
-                Ok(name) => name.to_string(),
-                Err(_) => node_id.to_string(),
-            };
-            let path = root.join("goals").join(format!("{name}.md"));
-            let markdown = read_markdown_file(&path)?;
-            Ok((markdown, path))
+            Ok((markdown, path, None))
         }
         "work_package" => {
             let (project, package_title) = node_id
                 .split_once("--")
                 .ok_or_else(|| format!("invalid work package id: {node_id}"))?;
-            work_package_markdown(root, project, package_title)
+            let parsed = work_package_detail(root, project, package_title)?;
+            Ok((parsed.markdown, parsed.path, Some(parsed.detail)))
         }
         other => Err(format!("unsupported node type: {other}")),
     }
@@ -174,7 +214,8 @@ pub fn load_node_detail(root: &Path, node_id: &str) -> Result<NodeDetailDto, Str
         .find(|node| node.id == node_id)
         .ok_or_else(|| format!("node not found: {node_id}"))?;
 
-    let (markdown, source_path) = resolve_node_markdown(root, node_id, &node.node_type)?;
+    let (markdown, source_path, work_package) =
+        resolve_node_markdown(root, node_id, &node.node_type)?;
 
     Ok(NodeDetailDto {
         node_id: node_id.to_string(),
@@ -182,7 +223,36 @@ pub fn load_node_detail(root: &Path, node_id: &str) -> Result<NodeDetailDto, Str
         title: node_title(node_id),
         markdown,
         source_path: Some(source_path.to_string_lossy().into_owned()),
+        work_package,
     })
+}
+
+/// Writes new markdown body content for a markdown-backed node and returns the
+/// refreshed detail. Work packages are rejected because their content lives in
+/// `work-packages.yaml` and must be edited via the work-package command.
+pub fn save_node_markdown(
+    root: &Path,
+    node_id: &str,
+    markdown: &str,
+) -> Result<NodeDetailDto, String> {
+    let graph = load_roadmap_graph(root)?;
+    let node = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .ok_or_else(|| format!("node not found: {node_id}"))?;
+
+    if node.node_type == "work_package" {
+        return Err(
+            "work packages are edited through their structured fields, not markdown".to_string(),
+        );
+    }
+
+    let path = md_path_for(root, node_id, &node.node_type)?;
+    fs::write(&path, markdown)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    load_node_detail(root, node_id)
 }
 
 #[tauri::command]
@@ -246,5 +316,54 @@ mod tests {
         let detail = load_node_detail(root, "billing--wp-one").unwrap();
         assert!(detail.markdown.contains("Do the thing."));
         assert!(detail.markdown.contains("wp-zero"));
+    }
+
+    #[test]
+    fn work_package_detail_includes_structured_fields() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - wp-zero\n",
+        )
+        .unwrap();
+
+        let detail = load_node_detail(root, "billing--wp-one").unwrap();
+        let wp = detail.work_package.expect("work package detail");
+        assert_eq!(wp.project, "billing");
+        assert_eq!(wp.title, "wp-one");
+        assert_eq!(wp.description, "Do the thing.");
+        assert_eq!(wp.dependencies, vec!["wp-zero".to_string()]);
+        assert!(wp.available_titles.contains(&"wp-one".to_string()));
+    }
+
+    #[test]
+    fn saves_markdown_for_initiative() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("initiatives")).unwrap();
+        fs::write(root.join("initiatives/alpha.md"), "# Alpha\n\nOld body.").unwrap();
+
+        let detail =
+            save_node_markdown(root, "initiative--alpha", "# Alpha\n\nNew body.").unwrap();
+        assert!(detail.markdown.contains("New body."));
+
+        let on_disk = fs::read_to_string(root.join("initiatives/alpha.md")).unwrap();
+        assert!(on_disk.contains("New body."));
+        assert!(!on_disk.contains("Old body."));
+    }
+
+    #[test]
+    fn rejects_saving_markdown_for_work_package() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+
+        let result = save_node_markdown(root, "billing--wp-one", "# wp-one\n\nx");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("work packages"));
     }
 }

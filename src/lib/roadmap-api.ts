@@ -47,3 +47,21 @@ export async function removeNode(request: RemoveNodeRequest) {
   const dto = await invoke<RoadmapGraphDto>("remove_node_command", { request });
   return fromRoadmapGraphDto(dto);
 }
+
+export interface UpdateWorkPackageRequest {
+  roadmap_root: string;
+  node_id: string;
+  description: string;
+  dependencies: string[];
+}
+
+/**
+ * Updates a work package's description and dependencies in work-packages.yaml,
+ * runs a bellman sync, and returns the resulting graph.
+ * @param request - Work package update payload for the backend.
+ * @returns Updated roadmap graph after the edit and sync.
+ */
+export async function updateWorkPackage(request: UpdateWorkPackageRequest) {
+  const dto = await invoke<RoadmapGraphDto>("update_work_package_command", { request });
+  return fromRoadmapGraphDto(dto);
+}

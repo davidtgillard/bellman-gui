@@ -317,6 +317,77 @@ pub fn remove_work_package(root: &Path, project: &str, title: &str) -> Result<()
     Ok(())
 }
 
+pub fn set_work_package_fields(
+    root: &Path,
+    project: &str,
+    title: &str,
+    description: &str,
+    dependencies: &[String],
+) -> Result<(), String> {
+    let registry = read_registry(root)?;
+    let project_id = format!("project--{project}");
+    find_node(&registry, &project_id)?;
+
+    let path = work_packages_path(root, project);
+    if !path.is_file() {
+        return Err(format!(
+            "project {project:?} has no work-packages.yaml at {}",
+            path.display()
+        ));
+    }
+
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
+
+    let entry = work_packages
+        .iter_mut()
+        .find(|entry| {
+            entry
+                .as_mapping()
+                .and_then(|map| map.get(YamlValue::from("title")))
+                .and_then(YamlValue::as_str)
+                .is_some_and(|existing| existing == title)
+        })
+        .ok_or_else(|| format!("work package {title:?} not found in project {project:?}"))?;
+
+    let mapping = entry
+        .as_mapping_mut()
+        .ok_or_else(|| format!("work package {title:?} is not a mapping"))?;
+
+    mapping.insert(
+        YamlValue::from("description"),
+        YamlValue::from(description),
+    );
+    let deps = dependencies
+        .iter()
+        .map(|dep| YamlValue::from(dep.as_str()))
+        .collect();
+    mapping.insert(
+        YamlValue::from("dependencies"),
+        YamlValue::Sequence(deps),
+    );
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    Ok(())
+}
+
 fn write_registry_document(root: &Path, document: &JsonValue) -> Result<(), String> {
     let path = registry_path(root);
     let formatted = serde_json::to_string_pretty(document)
@@ -628,11 +699,52 @@ pub async fn remove_node(app: &AppHandle, request: RemoveNodeRequest) -> Result<
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkPackageRequest {
+    pub roadmap_root: String,
+    pub node_id: String,
+    pub description: String,
+    pub dependencies: Vec<String>,
+}
+
+pub async fn update_work_package(
+    app: &AppHandle,
+    request: UpdateWorkPackageRequest,
+) -> Result<(), String> {
+    let root = PathBuf::from(&request.roadmap_root);
+    if !registry_path(&root).is_file() {
+        return Err(format!(
+            "roadmap root is not editable: {}",
+            request.roadmap_root
+        ));
+    }
+
+    let (project, title) = request
+        .node_id
+        .split_once("--")
+        .ok_or_else(|| format!("invalid work package id {:?}", request.node_id))?;
+    if project.is_empty() || title.is_empty() {
+        return Err(format!("invalid work package id {:?}", request.node_id));
+    }
+
+    set_work_package_fields(
+        &root,
+        project,
+        title,
+        &request.description,
+        &request.dependencies,
+    )?;
+    run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};
+    use tempfile::TempDir;
 
     fn fixture_lock() -> MutexGuard<'static, ()> {
         static LOCK: Mutex<()> = Mutex::new(());
@@ -707,5 +819,59 @@ mod tests {
             bellman_entity_name("settings-manager", "initiative"),
             "settings-manager"
         );
+    }
+
+    #[test]
+    fn set_work_package_fields_updates_description_and_dependencies() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::create_dir_all(root.join(".fits")).unwrap();
+        fs::write(
+            root.join(".fits/registry.json"),
+            r#"{"link_types":[],"instances":[{"id":"project--billing","type":"project","kind":"node"}]}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Old description.\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        set_work_package_fields(
+            root,
+            "billing",
+            "wp-one",
+            "New description.",
+            &["wp-two".to_string()],
+        )
+        .unwrap();
+
+        let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(raw.contains("New description."));
+        assert!(!raw.contains("Old description."));
+        assert!(raw.contains("wp-two"));
+    }
+
+    #[test]
+    fn set_work_package_fields_errors_for_missing_title() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::create_dir_all(root.join(".fits")).unwrap();
+        fs::write(
+            root.join(".fits/registry.json"),
+            r#"{"link_types":[],"instances":[{"id":"project--billing","type":"project","kind":"node"}]}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages: []\n",
+        )
+        .unwrap();
+
+        let result = set_work_package_fields(root, "billing", "ghost", "x", &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
     }
 }

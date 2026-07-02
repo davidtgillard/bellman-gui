@@ -17,6 +17,21 @@ export interface RoadmapState {
   label?: string | null;
 }
 
+export interface NodeDetailFixture {
+  node_id: string;
+  node_type: string;
+  title: string;
+  markdown: string;
+  source_path: string | null;
+  work_package: {
+    project: string;
+    title: string;
+    description: string;
+    dependencies: string[];
+    available_titles: string[];
+  } | null;
+}
+
 export interface Scenario {
   states: RoadmapState[];
   index?: number;
@@ -25,6 +40,9 @@ export interface Scenario {
     max_pan_speed?: number;
     background_pan_enabled?: boolean;
   };
+  nodeDetail?: NodeDetailFixture;
+  nodeDetails?: Record<string, NodeDetailFixture>;
+  saveError?: string;
 }
 
 export interface RecordedCall {
@@ -36,6 +54,7 @@ interface TestBridge {
   calls: RecordedCall[];
   reset(): void;
   emit(event: string, payload?: unknown): void;
+  selectNode?: (nodeId: string) => void;
 }
 
 /**
@@ -219,6 +238,35 @@ export async function openNodeContextMenu(page: Page, nodeId: string): Promise<v
     })
     .toBe(true);
   await expect(page.locator(".graph-context-menu")).toBeVisible();
+}
+
+/**
+ * Opens the node detail panel by simulating a graph node selection via the
+ * cytoscape test hook.
+ * @param page - Playwright page to interact with.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function selectNode(page: Page, nodeId: string): Promise<void> {
+  await waitForGraph(page);
+  await expect
+    .poll(async () => {
+      return page.evaluate((id) => {
+        const bridge = (window as unknown as {
+          __TEST__?: { selectNode?: (nodeId: string) => void };
+        }).__TEST__;
+        if (!bridge?.selectNode) {
+          return false;
+        }
+        try {
+          bridge.selectNode(id);
+          return true;
+        } catch {
+          return false;
+        }
+      }, nodeId);
+    })
+    .toBe(true);
+  await expect(page.getByRole("complementary", { name: "Node details" })).toBeVisible();
 }
 
 export { test, expect };
