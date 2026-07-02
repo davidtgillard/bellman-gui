@@ -24,7 +24,7 @@ VERSION="${BELLMAN_VERSION:-0.1.0}"
 URL="https://github.com/davidtgillard/bellman/releases/download/dev/bellman-${VERSION}-linux-x86_64"
 
 echo "Attempting to download bellman sidecar from ${URL}"
-if curl -fsSL -o "${DEST}.download" "${URL}"; then
+if curl -fsSL --max-time 5 -o "${DEST}.download" "${URL}"; then
   mv "${DEST}.download" "${DEST}"
   chmod +x "${DEST}"
   echo "Installed sidecar at ${DEST}"

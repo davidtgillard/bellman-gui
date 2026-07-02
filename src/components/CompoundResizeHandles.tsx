@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { compoundChromeRenderedBox, redrawGraphSynchronously } from "../lib/cytoscape-layout";
 import {
   COMPOUND_MIN_HEIGHT,
   COMPOUND_MIN_WIDTH,
@@ -14,6 +15,9 @@ import {
 import type { NodePosition } from "../lib/graph-layout";
 
 type Corner = "nw" | "ne" | "sw" | "se";
+
+const HANDLE_SIZE = 12;
+const HANDLE_GAP = 8;
 
 const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
 
@@ -36,6 +40,10 @@ interface HandleRect {
   top: number;
   width: number;
   height: number;
+}
+
+function focusGraphContainer(cy: Core): void {
+  cy.container()?.closest<HTMLElement>(".graph-container")?.focus({ preventScroll: true });
 }
 
 interface ActiveResize {
@@ -148,7 +156,7 @@ export function CompoundResizeHandles({
       setRect(null);
       return;
     }
-    const box = node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+    const box = compoundChromeRenderedBox(node);
     setRect({
       left: box.x1,
       top: box.y1,
@@ -169,11 +177,11 @@ export function CompoundResizeHandles({
     };
 
     recomputeRect();
-    cy.on("render pan zoom position", scheduleRecompute);
+    cy.on("render zoom drag", scheduleRecompute);
     cy.on("remove", scheduleRecompute);
 
     return () => {
-      cy.removeListener("render pan zoom position", scheduleRecompute);
+      cy.removeListener("render zoom drag", scheduleRecompute);
       cy.removeListener("remove", scheduleRecompute);
       if (frameRef.current !== null) {
         window.cancelAnimationFrame(frameRef.current);
@@ -200,6 +208,7 @@ export function CompoundResizeHandles({
         node.data("compoundHeight", height);
         node.position({ x: (box.x1 + box.x2) / 2, y: (box.y1 + box.y2) / 2 });
       });
+      redrawGraphSynchronously(cy);
       recomputeRect();
     },
     [cy, nodeId, recomputeRect],
@@ -213,6 +222,7 @@ export function CompoundResizeHandles({
       }
       event.preventDefault();
       event.stopPropagation();
+      focusGraphContainer(cy);
       (event.target as HTMLElement).setPointerCapture(event.pointerId);
       activeRef.current = {
         corner,
@@ -230,7 +240,7 @@ export function CompoundResizeHandles({
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const active = activeRef.current;
-      if (!active || active.pointerId !== event.pointerId) {
+      if (!active) {
         return;
       }
       event.preventDefault();
@@ -242,7 +252,7 @@ export function CompoundResizeHandles({
   const finishResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const active = activeRef.current;
-      if (!active || active.pointerId !== event.pointerId) {
+      if (!active) {
         return;
       }
       applyResize(active, event.clientX, event.clientY);
@@ -271,8 +281,12 @@ export function CompoundResizeHandles({
       {CORNERS.map((corner) => {
         const isEast = corner === "ne" || corner === "se";
         const isSouth = corner === "sw" || corner === "se";
-        const left = isEast ? rect.left + rect.width : rect.left;
-        const top = isSouth ? rect.top + rect.height : rect.top;
+        const left = isEast
+          ? rect.left + rect.width + HANDLE_GAP
+          : rect.left - HANDLE_GAP - HANDLE_SIZE;
+        const top = isSouth
+          ? rect.top + rect.height + HANDLE_GAP
+          : rect.top - HANDLE_GAP - HANDLE_SIZE;
         return (
           <div
             key={corner}
@@ -281,6 +295,8 @@ export function CompoundResizeHandles({
             style={{
               left,
               top,
+              width: HANDLE_SIZE,
+              height: HANDLE_SIZE,
               cursor: CORNER_CURSOR[corner],
             }}
             onPointerDown={handlePointerDown(corner)}

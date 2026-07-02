@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   autoLayoutOptions,
+  applyCompoundGrabPolicy,
   compoundSizeForContent,
+  dragCompoundParentTo,
   graphLayoutSeed,
   shiftBoxInside,
+  shouldPromoteChildGrabToParent,
   usesPresetLayout,
   wheelZoomLevel,
 } from "./cytoscape-layout";
@@ -85,5 +88,127 @@ describe("cytoscape-layout", () => {
     expect(wheelZoomLevel(1, 120, 0, 0.2, 0.2, 3)).toBeLessThan(1);
     expect(wheelZoomLevel(0.2, 120, 0, 0.2, 0.2, 3)).toBe(0.2);
     expect(wheelZoomLevel(3, -120, 0, 0.2, 0.2, 3)).toBe(3);
+  });
+
+  it("promotes child grabs only when the parent composite is solely selected", () => {
+    const selectedParent = {
+      id: () => "parent",
+      isParent: () => true,
+      selected: () => true,
+    };
+    const unselectedParent = {
+      id: () => "parent",
+      isParent: () => true,
+      selected: () => false,
+    };
+    const parentCollection = (parent: typeof selectedParent) => ({
+      empty: () => false,
+      nonempty: () => true,
+      first: () => parent,
+    });
+    const cy = (parent: typeof selectedParent, selectedCount: number) => ({
+      nodes: () => ({
+        length: selectedCount,
+        first: () => ({ id: () => parent.id() }),
+      }),
+    });
+
+    const childOnSelectedParent = {
+      isChild: () => true,
+      selected: () => false,
+      parent: () => parentCollection(selectedParent),
+      cy: () => cy(selectedParent, 1),
+    };
+    const childOnUnselectedParent = {
+      isChild: () => true,
+      selected: () => false,
+      parent: () => parentCollection(unselectedParent),
+      cy: () => cy(unselectedParent, 0),
+    };
+    const selectedChild = {
+      isChild: () => true,
+      selected: () => true,
+      parent: () => parentCollection(selectedParent),
+      cy: () => cy(selectedParent, 1),
+    };
+    const topLevel = {
+      isChild: () => false,
+      selected: () => false,
+      parent: () => parentCollection(selectedParent),
+      cy: () => cy(selectedParent, 1),
+    };
+
+    expect(shouldPromoteChildGrabToParent(childOnSelectedParent as never)).toBe(false);
+    expect(shouldPromoteChildGrabToParent(childOnUnselectedParent as never)).toBe(false);
+    expect(shouldPromoteChildGrabToParent(selectedChild as never)).toBe(false);
+    expect(shouldPromoteChildGrabToParent(topLevel as never)).toBe(false);
+  });
+
+  it("leaves composite parents with children and all children non-grabbable", () => {
+    const parent = {
+      isParent: () => true,
+      children: () => ({ length: 1 }),
+      ungrabify: vi.fn(),
+    };
+    const emptyParent = {
+      isParent: () => true,
+      children: () => ({ length: 0 }),
+      ungrabify: vi.fn(),
+    };
+    const childCollection = {
+      ungrabify: vi.fn(),
+    };
+    const cy = {
+      nodes: (selector?: string) => {
+        if (selector === ":child") {
+          return childCollection;
+        }
+        return {
+          grabify: vi.fn(),
+          ungrabify: vi.fn(),
+          forEach: (fn: (node: typeof parent) => void) => {
+            if (selector === ":parent") {
+              fn(parent as never);
+              fn(emptyParent as never);
+            }
+          },
+        };
+      },
+    };
+
+    applyCompoundGrabPolicy(cy as never, true);
+
+    expect(parent.ungrabify).toHaveBeenCalled();
+    expect(emptyParent.ungrabify).not.toHaveBeenCalled();
+    expect(childCollection.ungrabify).toHaveBeenCalled();
+  });
+
+  it("dragCompoundParentTo updates parent and restores direct children in one batch", () => {
+    const position = vi.fn();
+    const childPosition = vi.fn();
+    const childNode = {
+      id: () => "child-a",
+      position: childPosition,
+    };
+    const node = {
+      id: () => "parent",
+      isChild: () => false,
+      position,
+      children: () => ({
+        forEach: (fn: (child: typeof childNode) => void) => fn(childNode),
+      }),
+    };
+    const cy = {
+      batch: (fn: () => void) => fn(),
+    };
+    const start = new Map([
+      ["parent", { x: 100, y: 200 }],
+      ["child-a", { x: -90, y: -30 }],
+    ]);
+
+    dragCompoundParentTo(cy as never, node as never, start, { x: 150, y: 170 });
+
+    expect(position).toHaveBeenCalledWith({ x: 150, y: 170 });
+    expect(childPosition).toHaveBeenCalledWith({ x: -90, y: -30 });
   });
 });

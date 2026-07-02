@@ -923,7 +923,11 @@ function App() {
         return;
       }
 
-      if (nodeId !== selectedNodeId && !confirmDiscardIfDirty()) {
+      if (nodeId === selectedNodeId) {
+        return;
+      }
+
+      if (!confirmDiscardIfDirty()) {
         return;
       }
 
@@ -998,12 +1002,23 @@ function App() {
   );
 
   const handleBackGraphView = useCallback(() => {
+    if (!confirmDiscardIfDirty()) {
+      return;
+    }
     void layoutSaveChainRef.current;
     setGraphViewStack((current) =>
       current.length <= 1 ? INITIAL_GRAPH_VIEW_STACK : current.slice(0, -1),
     );
     clearGraphSelection();
-  }, [clearGraphSelection]);
+  }, [clearGraphSelection, confirmDiscardIfDirty]);
+
+  const handleGraphSelectionClear = useCallback((): boolean => {
+    if (!confirmDiscardIfDirty()) {
+      return false;
+    }
+    clearGraphSelection();
+    return true;
+  }, [clearGraphSelection, confirmDiscardIfDirty]);
 
   const renderContextMenu = useCallback(
     (event: {
@@ -1269,6 +1284,7 @@ function App() {
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}
+            onSelectionClear={handleGraphSelectionClear}
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
             draggable

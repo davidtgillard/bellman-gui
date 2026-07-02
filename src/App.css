@@ -416,11 +416,13 @@ body {
   pointer-events: auto;
 }
 
+.graph-container.graph-child-pointer-active .compound-resize-handle,
+.graph-container.graph-child-pointer-active .compound-drag-handle {
+  pointer-events: none;
+}
+
 .compound-resize-handle {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  transform: translate(-50%, -50%);
   border: 1.5px solid #38bdf8;
   border-radius: 2px;
   background: #0f172a;
@@ -453,6 +455,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.compound-drag-handle:hover {
+  border-color: rgba(56, 189, 248, 0.75);
+  background: rgba(15, 23, 42, 0.95);
 }
 
 .compound-drag-handle:active {

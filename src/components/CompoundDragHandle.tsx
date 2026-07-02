@@ -6,14 +6,18 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { COMPOUND_PADDING } from "../lib/cytoscape-theme";
 import {
   collectDragPersistencePositions,
+  compoundChromeRenderedBox,
   dragCompoundParentTo,
   snapshotCompoundAncestorLock,
   snapshotSubtreePositions,
 } from "../lib/cytoscape-layout";
 import type { NodePosition } from "../lib/graph-layout";
+
+function focusGraphContainer(cy: Core): void {
+  cy.container()?.closest<HTMLElement>(".graph-container")?.focus({ preventScroll: true });
+}
 
 interface HandleRect {
   left: number;
@@ -41,9 +45,8 @@ interface CompoundDragHandleProps {
 }
 
 /**
- * Renders a title-bar drag handle over the selected composite node. Dragging the
- * composite from its border or empty interior is awkward when it is full of
- * children; this bar is the reliable way to move the whole composite rigidly.
+ * Renders a title-bar drag handle just above the selected composite node.
+ * Unselected composites rely on direct grab or child-grab promotion instead.
  */
 export function CompoundDragHandle({
   cy,
@@ -62,14 +65,11 @@ export function CompoundDragHandle({
       return;
     }
 
-    const box = node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
-    const titleHeight = Math.min(
-      COMPOUND_PADDING.top * cy.zoom(),
-      Math.max(20, box.y2 - box.y1),
-    );
+    const box = compoundChromeRenderedBox(node);
+    const titleHeight = Math.max(18, Math.min(24, 20 * cy.zoom()));
     setRect({
       left: box.x1,
-      top: box.y1,
+      top: box.y1 - titleHeight,
       width: box.x2 - box.x1,
       height: titleHeight,
     });
@@ -87,11 +87,11 @@ export function CompoundDragHandle({
     };
 
     recomputeRect();
-    cy.on("render pan zoom position drag", scheduleRecompute);
+    cy.on("render zoom drag", scheduleRecompute);
     cy.on("remove", scheduleRecompute);
 
     return () => {
-      cy.removeListener("render pan zoom position drag", scheduleRecompute);
+      cy.removeListener("render zoom drag", scheduleRecompute);
       cy.removeListener("remove", scheduleRecompute);
       if (frameRef.current !== null) {
         window.cancelAnimationFrame(frameRef.current);
@@ -131,8 +131,14 @@ export function CompoundDragHandle({
         return;
       }
 
+      if (!node.selected()) {
+        cy.nodes().unselect();
+        node.select();
+      }
+
       event.preventDefault();
       event.stopPropagation();
+      focusGraphContainer(cy);
       (event.target as HTMLElement).setPointerCapture(event.pointerId);
 
       const position = node.position();
@@ -152,7 +158,7 @@ export function CompoundDragHandle({
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const active = activeRef.current;
-      if (!active || active.pointerId !== event.pointerId) {
+      if (!active) {
         return;
       }
       event.preventDefault();
@@ -164,7 +170,7 @@ export function CompoundDragHandle({
   const finishDrag = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const active = activeRef.current;
-      if (!active || active.pointerId !== event.pointerId) {
+      if (!active) {
         return;
       }
 

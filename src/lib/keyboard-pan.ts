@@ -108,11 +108,47 @@ export function isArrowPanKey(key: string): key is keyof typeof ARROW_KEY_DIRECT
   return key in ARROW_KEY_DIRECTIONS;
 }
 
+function isDomElement(value: EventTarget | null): value is Element {
+  return typeof Element !== "undefined" && value instanceof Element;
+}
+
+function isInConnectedSidebar(element: EventTarget | null): boolean {
+  if (!isDomElement(element)) {
+    return false;
+  }
+  return element.isConnected && Boolean(element.closest(".node-detail-sidebar"));
+}
+
 export function shouldIgnoreKeyboardPanTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
+  if (!isDomElement(target)) {
     return false;
   }
   return Boolean(
     target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']"),
   );
+}
+
+/**
+ * Returns whether arrow-key panning should run for this event. Panning is blocked
+ * only when focus or the event target is inside a mounted node detail sidebar,
+ * or inside an editable/dialog control.
+ * @param event - Keyboard event for an arrow key.
+ */
+export function shouldAllowKeyboardPan(event: KeyboardEvent): boolean {
+  if (shouldIgnoreKeyboardPanTarget(event.target)) {
+    return false;
+  }
+
+  const target = event.target;
+  if (isInConnectedSidebar(target)) {
+    return false;
+  }
+
+  const active =
+    typeof document !== "undefined" ? document.activeElement : null;
+  if (isInConnectedSidebar(active)) {
+    return false;
+  }
+
+  return true;
 }

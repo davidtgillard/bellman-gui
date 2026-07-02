@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { KeyboardPanController, PAN_RAMP_UP_MS } from "./keyboard-pan";
+import {
+  KeyboardPanController,
+  PAN_RAMP_UP_MS,
+  shouldAllowKeyboardPan,
+} from "./keyboard-pan";
 
 describe("KeyboardPanController", () => {
   it("ramps pan speed from zero instead of starting at max speed", () => {
@@ -67,5 +71,12 @@ describe("KeyboardPanController", () => {
 
     expect(controller.isActive()).toBe(false);
     expect(controller.tick(250)).toEqual({ dx: 0, dy: 0 });
+  });
+});
+
+describe("shouldAllowKeyboardPan", () => {
+  it("allows pan for ordinary event targets", () => {
+    const event = { target: {} } as KeyboardEvent;
+    expect(shouldAllowKeyboardPan(event)).toBe(true);
   });
 });

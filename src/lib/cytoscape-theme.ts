@@ -38,6 +38,7 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
       width: 36,
       height: 36,
       shape: "ellipse",
+      "z-index": 10,
     },
   },
   {
@@ -49,16 +50,17 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
       "text-wrap": "wrap",
       "text-max-width": "140px",
       shape: "round-rectangle",
-      // A faint fill makes the whole box hit-testable so the composite can be
-      // grabbed and dragged from any empty interior area, not just the border.
-      "background-opacity": 0.04,
-      "background-color": "#64748b",
+      // Transparent fill: a visible fill made the parent capture presses over its
+      // children (especially near the top-left). Use the title bar and border to
+      // drag the composite instead.
+      "background-opacity": 0,
       "border-width": 2,
       "border-color": "#64748b",
       "border-opacity": 0.6,
       padding: `${COMPOUND_PADDING.top}px ${COMPOUND_PADDING.right}px ${COMPOUND_PADDING.bottom}px ${COMPOUND_PADDING.left}px`,
       "min-width": `${COMPOUND_MIN_WIDTH}px`,
       "min-height": `${COMPOUND_MIN_HEIGHT}px`,
+      "z-index": 0,
     },
   },
   {
@@ -106,13 +108,22 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    // Keep border width stable on composites so selection does not recalculate
-    // compound bounds and shift the node (and all its children) on click.
+    selector: ":child",
+    style: {
+      events: "yes",
+    },
+  },
+  {
+    // While selected, ignore pointer events on the composite shell so inner
+    // nodes (including those in the top-left) receive grabs and drags. Move the
+    // selected composite via its HTML title bar instead.
     selector: ":parent:selected",
     style: {
+      "text-opacity": 0,
       "border-width": 2,
       "border-color": "#38bdf8",
       "border-opacity": 1,
+      events: "no",
     },
   },
   {

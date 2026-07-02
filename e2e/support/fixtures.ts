@@ -43,6 +43,15 @@ export interface Scenario {
   nodeDetail?: NodeDetailFixture;
   nodeDetails?: Record<string, NodeDetailFixture>;
   saveError?: string;
+  layout?: {
+    version: number;
+    kind: string;
+    top_level?: Record<string, { x: number; y: number; w?: number; h?: number }>;
+    projects: Record<
+      string,
+      Record<string, { x: number; y: number; w?: number; h?: number }>
+    >;
+  };
 }
 
 export interface RecordedCall {
@@ -55,6 +64,28 @@ interface TestBridge {
   reset(): void;
   emit(event: string, payload?: unknown): void;
   selectNode?: (nodeId: string) => void;
+  selectGraphNodeOnly?: (nodeId: string) => void;
+  tapGraphNode?: (nodeId: string) => void;
+  getGraphNodeState?: (
+    nodeId: string,
+  ) => { x: number; y: number; w?: number; h?: number; x1?: number; y1?: number } | null;
+  getCompositeChildOffsets?: (
+    parentId: string,
+  ) => Record<string, { dx: number; dy: number }>;
+  getCompositeRenderedBox?: (
+    parentId: string,
+  ) => { x1: number; y1: number; x2: number; y2: number } | null;
+  getGraphNodeRenderedCenter?: (nodeId: string) => { x: number; y: number };
+  getGraphNodeAbsolutePosition?: (nodeId: string) => { x: number; y: number };
+}
+
+export interface GraphNodeState {
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+  x1?: number;
+  y1?: number;
 }
 
 /**
@@ -246,14 +277,22 @@ export async function openNodeContextMenu(page: Page, nodeId: string): Promise<v
  * @param page - Playwright page to interact with.
  * @param nodeId - Roadmap node identifier.
  */
+export async function selectGraphNodeOnly(page: Page, nodeId: string): Promise<void> {
+  await page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.selectGraphNodeOnly) {
+      throw new Error("selectGraphNodeOnly test hook is unavailable");
+    }
+    bridge.selectGraphNodeOnly(id);
+  }, nodeId);
+}
+
 export async function selectNode(page: Page, nodeId: string): Promise<void> {
   await waitForGraph(page);
   await expect
     .poll(async () => {
       return page.evaluate((id) => {
-        const bridge = (window as unknown as {
-          __TEST__?: { selectNode?: (nodeId: string) => void };
-        }).__TEST__;
+        const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
         if (!bridge?.selectNode) {
           return false;
         }
@@ -267,6 +306,218 @@ export async function selectNode(page: Page, nodeId: string): Promise<void> {
     })
     .toBe(true);
   await expect(page.getByRole("complementary", { name: "Node details" })).toBeVisible();
+}
+
+/**
+ * Simulates a graph node tap via the cytoscape test hook.
+ * @param page - Playwright page to interact with.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function tapGraphNode(page: Page, nodeId: string): Promise<void> {
+  await waitForGraph(page);
+  await expect
+    .poll(async () => {
+      return page.evaluate((id) => {
+        const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+        if (!bridge?.tapGraphNode) {
+          return false;
+        }
+        try {
+          bridge.tapGraphNode(id);
+          return true;
+        } catch {
+          return false;
+        }
+      }, nodeId);
+    })
+    .toBe(true);
+}
+
+/**
+ * Returns the current model-space state for a graph node.
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function getGraphNodeAbsolutePosition(
+  page: Page,
+  nodeId: string,
+): Promise<{ x: number; y: number } | null> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getGraphNodeAbsolutePosition) {
+      return null;
+    }
+    return bridge.getGraphNodeAbsolutePosition(id);
+  }, nodeId);
+}
+
+export async function getGraphNodeState(
+  page: Page,
+  nodeId: string,
+): Promise<GraphNodeState | null> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getGraphNodeState) {
+      throw new Error("graph node state test hook is unavailable");
+    }
+    return bridge.getGraphNodeState(id);
+  }, nodeId);
+}
+
+/**
+ * Returns each child's parent-relative position inside a composite.
+ * @param page - Playwright page to inspect.
+ * @param parentId - Composite parent node identifier.
+ */
+export async function getCompositeChildOffsets(
+  page: Page,
+  parentId: string,
+): Promise<Record<string, { dx: number; dy: number }>> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getCompositeChildOffsets) {
+      throw new Error("composite child offset test hook is unavailable");
+    }
+    return bridge.getCompositeChildOffsets(id);
+  }, parentId);
+}
+
+/**
+ * Returns the composite parent's rendered bounding box in viewport pixels.
+ * @param page - Playwright page to inspect.
+ * @param parentId - Composite parent node identifier.
+ */
+export async function getCompositeRenderedBox(
+  page: Page,
+  parentId: string,
+): Promise<{ x1: number; y1: number; x2: number; y2: number } | null> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getCompositeRenderedBox) {
+      throw new Error("composite rendered box test hook is unavailable");
+    }
+    return bridge.getCompositeRenderedBox(id);
+  }, parentId);
+}
+
+/**
+ * Waits until a graph node reaches the expected model-space position/size.
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Roadmap node identifier.
+ * @param expected - Expected node state subset to match.
+ */
+export async function waitForGraphNodeState(
+  page: Page,
+  nodeId: string,
+  expected: GraphNodeState,
+): Promise<void> {
+  await expect
+    .poll(async () => getGraphNodeState(page, nodeId))
+    .toMatchObject(expected);
+}
+
+/**
+ * Drags a graph node by screen-space delta using the rendered node centre.
+ * When parentId is supplied, returns the parent composite state captured at drag start.
+ * @param page - Playwright page to interact with.
+ * @param nodeId - Roadmap node identifier.
+ * @param deltaX - Horizontal drag distance in pixels.
+ * @param deltaY - Vertical drag distance in pixels.
+ * @param parentId - Optional composite parent to snapshot at drag start.
+ */
+export async function dragGraphNode(
+  page: Page,
+  nodeId: string,
+  deltaX: number,
+  deltaY: number,
+  parentId?: string,
+): Promise<GraphNodeState | null> {
+  await waitForGraph(page);
+  const start = await page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getGraphNodeRenderedCenter) {
+      throw new Error("graph node rendered center test hook is unavailable");
+    }
+    return bridge.getGraphNodeRenderedCenter(id);
+  }, nodeId);
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+
+  const parentAtDragStart = parentId
+    ? await getGraphNodeState(page, parentId)
+    : null;
+
+  await page.mouse.move(start.x + deltaX, start.y + deltaY, { steps: 12 });
+  await page.mouse.up();
+
+  return parentAtDragStart;
+}
+
+/**
+ * Opens the work-package graph for a project from the graph context menu.
+ * @param page - Playwright page to interact with.
+ * @param projectId - Project node identifier.
+ */
+export async function openWorkPackageGraph(
+  page: Page,
+  projectId: string,
+): Promise<void> {
+  await openNodeContextMenu(page, projectId);
+  await page.getByRole("button", { name: "Show work package graph" }).click();
+  await expect(page.locator(".graph-view-breadcrumb")).toBeVisible();
+  await waitForGraph(page);
+}
+
+/**
+ * Moves a composite parent by model-space delta via the same path as title-bar drag.
+ */
+export async function dragCompositeParentByModelDelta(
+  page: Page,
+  parentId: string,
+  dx: number,
+  dy: number,
+): Promise<void> {
+  await page.evaluate(
+    ({ id, deltaX, deltaY }) => {
+      const bridge = (window as unknown as {
+        __TEST__?: {
+          dragCompositeParentBy?: (parentId: string, dx: number, dy: number) => void;
+        };
+      }).__TEST__;
+      if (!bridge?.dragCompositeParentBy) {
+        throw new Error("composite drag test hook is unavailable");
+      }
+      bridge.dragCompositeParentBy(id, deltaX, deltaY);
+    },
+    { id: parentId, deltaX: dx, deltaY: dy },
+  );
+}
+
+/**
+ * Drags the selected composite title bar by screen-space delta.
+ * @param page - Playwright page to interact with.
+ * @param deltaX - Horizontal drag distance in pixels.
+ * @param deltaY - Vertical drag distance in pixels.
+ */
+export async function dragCompoundTitleBar(
+  page: Page,
+  deltaX: number,
+  deltaY: number,
+): Promise<void> {
+  const handle = page.locator(".compound-drag-handle").first();
+  await expect(handle).toBeVisible();
+  const box = await handle.boundingBox();
+  if (!box) {
+    throw new Error("compound drag handle is not visible");
+  }
+
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 12 });
+  await page.mouse.up();
 }
 
 export { test, expect };
