@@ -627,8 +627,32 @@ export function RoadmapGraph({
       onNodePositionChangeRef.current?.(nodeId, position);
     });
 
+    let previousContainerWidth: number | null = null;
+    let previousWindowWidth: number | null = null;
     const resizeObserver = new ResizeObserver(() => {
+      const containerWidth = container.clientWidth;
+      const windowWidth = window.innerWidth;
       cy.resize();
+
+      // The node detail sidebar shares the flex row with the graph, so opening,
+      // widening, or closing it changes the graph container width while the
+      // window stays the same. Pan the viewport by that sidebar-driven delta so
+      // the graph is visually pushed left when the panel expands and pulled back
+      // right when it retracts, instead of being clipped/covered on the right.
+      // Width changes that come from the window itself resizing (the sidebar
+      // unchanged) move the container and window by the same amount and cancel
+      // out, leaving the original frame of view untouched.
+      if (previousContainerWidth !== null && previousWindowWidth !== null) {
+        const containerDelta = containerWidth - previousContainerWidth;
+        const windowDelta = windowWidth - previousWindowWidth;
+        const sidebarShift = containerDelta - windowDelta;
+        if (sidebarShift !== 0) {
+          cy.panBy({ x: sidebarShift, y: 0 });
+        }
+      }
+      previousContainerWidth = containerWidth;
+      previousWindowWidth = windowWidth;
+
       // cy.resize() clears the canvas synchronously but defers the repaint to
       // the next animation frame, so a live drag (e.g. resizing the node detail
       // panel) shows a blank frame each tick, which reads as a flash. Force a
