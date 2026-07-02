@@ -110,6 +110,15 @@ function uniqueGraphViewNodes(nodes: GraphViewNode[]): GraphViewNode[] {
   });
 }
 
+function redrawGraphSynchronously(cy: Core): void {
+  const renderer = (
+    cy as unknown as {
+      renderer?: () => { render?: (options?: unknown) => void } | undefined;
+    }
+  ).renderer?.();
+  renderer?.render?.();
+}
+
 function snapshotNodePositions(cy: Core): Record<string, NodePosition> {
   const positions: Record<string, NodePosition> = {};
   cy.nodes().forEach((node) => {
@@ -620,6 +629,11 @@ export function RoadmapGraph({
 
     const resizeObserver = new ResizeObserver(() => {
       cy.resize();
+      // cy.resize() clears the canvas synchronously but defers the repaint to
+      // the next animation frame, so a live drag (e.g. resizing the node detail
+      // panel) shows a blank frame each tick, which reads as a flash. Force a
+      // synchronous redraw so the graph repaints in the same frame it resizes.
+      redrawGraphSynchronously(cy);
     });
     resizeObserver.observe(container);
 
