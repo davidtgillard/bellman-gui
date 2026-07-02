@@ -58,6 +58,7 @@ import {
   withoutNodePosition,
   withoutTopLevelNodePosition,
   type NodePosition,
+  type NodeSize,
   type WorkPackageLayout,
 } from "./lib/graph-layout";
 import { hasSavedLayout } from "./lib/cytoscape-layout";
@@ -135,6 +136,7 @@ function App() {
   const [hydratedLayoutKey, setHydratedLayoutKey] = useState<string | null>(() =>
     roadmapLayoutPersistable(exampleGraph.root, exampleGraph.editable) ? null : "",
   );
+  const [layoutSyncToken, setLayoutSyncToken] = useState(0);
   const currentLayoutKey = roadmapLayoutPersistable(roadmapRoot, editable)
     ? `${roadmapRoot}:${editable}`
     : null;
@@ -200,6 +202,7 @@ function App() {
           ? `${graph.root}:${graph.editable}`
           : "",
       );
+      setLayoutSyncToken((token) => token + 1);
     }
   }, []);
 
@@ -284,6 +287,7 @@ function App() {
         if (!cancelled) {
           setWorkPackageLayout(layout);
           setHydratedLayoutKey(currentLayoutKey);
+          setLayoutSyncToken((token) => token + 1);
         }
       })
       .catch((caught) => {
@@ -314,12 +318,16 @@ function App() {
                   node_id: nodeId,
                   x: position.x,
                   y: position.y,
+                  w: position.w,
+                  h: position.h,
                 })
               : await saveTopLevelNodePosition({
                   roadmap_root: roadmapRoot,
                   node_id: nodeId,
                   x: position.x,
                   y: position.y,
+                  w: position.w,
+                  h: position.h,
                 });
             setWorkPackageLayout(layout);
           } catch (caught) {
@@ -332,23 +340,103 @@ function App() {
   );
 
   const handleNodePositionChange = useCallback(
+    (positions: Record<string, NodePosition>) => {
+      const projectId = currentProjectId(graphViewStack);
+      let nextLayout = workPackageLayoutRef.current;
+
+      for (const [nodeId, position] of Object.entries(positions)) {
+        nextLayout = projectId
+          ? withNodePosition(nextLayout, projectId, nodeId, position)
+          : withTopLevelNodePosition(nextLayout, nodeId, position);
+      }
+
+      workPackageLayoutRef.current = nextLayout;
+      setWorkPackageLayout(nextLayout);
+
+      if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
+        return;
+      }
+
+      void saveGraphLayout(roadmapRoot, nextLayout).catch((caught) =>
+        setError(String(caught)),
+      );
+    },
+    [editable, graphViewStack, roadmapRoot],
+  );
+
+  const handleNodeResize = useCallback(
     (nodeId: string, position: NodePosition) => {
+      // A resize gesture reports the composite's new centre and size together;
+      // withNodePosition/withTopLevelNodePosition merge both into the layout.
       const projectId = currentProjectId(graphViewStack);
       if (projectId) {
-      setWorkPackageLayout((current) =>
-        withNodePosition(current, projectId, nodeId, position),
-      );
-      persistNodePosition(projectId, nodeId, position);
-      return;
-    }
+        setWorkPackageLayout((current) =>
+          withNodePosition(current, projectId, nodeId, position),
+        );
+        persistNodePosition(projectId, nodeId, position);
+        return;
+      }
 
-    setWorkPackageLayout((current) =>
-      withTopLevelNodePosition(current, nodeId, position),
-    );
-    persistNodePosition(null, nodeId, position);
-  },
-  [graphViewStack, persistNodePosition],
-);
+      setWorkPackageLayout((current) =>
+        withTopLevelNodePosition(current, nodeId, position),
+      );
+      persistNodePosition(null, nodeId, position);
+    },
+    [graphViewStack, persistNodePosition],
+  );
+
+  const handleCompoundSizesMeasured = useCallback(
+    (sizes: Record<string, NodeSize>, measuredPositions: Record<string, NodePosition>) => {
+      if (!roadmapLayoutPersistable(roadmapRoot, editable) || !layoutHydrated) {
+        return;
+      }
+
+      const projectId = currentProjectId(graphViewStack);
+      const current = workPackageLayoutRef.current;
+      const existing = projectId
+        ? projectNodePositions(current, projectId)
+        : topLevelNodePositions(current);
+
+      // Freeze an initial size for any composite that does not yet have one, so
+      // its box stops auto-resizing when children are moved. Composites that
+      // already have a saved size are left untouched.
+      let nextLayout = current;
+      let changed = false;
+      for (const [nodeId, size] of Object.entries(sizes)) {
+        const saved = existing[nodeId];
+        if (saved && saved.w !== undefined && saved.h !== undefined) {
+          continue;
+        }
+        const position = saved ?? measuredPositions[nodeId];
+        if (!position) {
+          continue;
+        }
+        nextLayout = projectId
+          ? withNodePosition(nextLayout, projectId, nodeId, {
+              ...position,
+              w: size.w,
+              h: size.h,
+            })
+          : withTopLevelNodePosition(nextLayout, nodeId, {
+              ...position,
+              w: size.w,
+              h: size.h,
+            });
+        changed = true;
+      }
+
+      if (!changed) {
+        return;
+      }
+
+      workPackageLayoutRef.current = nextLayout;
+      setWorkPackageLayout(nextLayout);
+      void saveGraphLayout(roadmapRoot, nextLayout).catch((caught) =>
+        setError(String(caught)),
+      );
+    },
+    [editable, graphViewStack, layoutHydrated, roadmapRoot],
+  );
 
   const handleAutoLayoutComplete = useCallback(
     (positions: Record<string, NodePosition>) => {
@@ -1185,10 +1273,21 @@ function App() {
             emptyMessage={graphEmptyMessage}
             draggable
             layoutReady={layoutReady}
+            layoutSyncToken={layoutSyncToken}
             nodePositions={innerGraphNodePositions}
             onNodePositionChange={
               roadmapLayoutPersistable(roadmapRoot, editable)
                 ? handleNodePositionChange
+                : undefined
+            }
+            onNodeResize={
+              roadmapLayoutPersistable(roadmapRoot, editable)
+                ? handleNodeResize
+                : undefined
+            }
+            onCompoundSizesMeasured={
+              roadmapLayoutPersistable(roadmapRoot, editable)
+                ? handleCompoundSizesMeasured
                 : undefined
             }
             onAutoLayoutComplete={

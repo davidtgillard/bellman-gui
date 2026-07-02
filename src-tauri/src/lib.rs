@@ -216,6 +216,8 @@ fn save_work_package_node_position_command(
         &request.node_id,
         request.x,
         request.y,
+        request.w,
+        request.h,
     )
 }
 
@@ -249,6 +251,8 @@ fn save_top_level_node_position_command(
         &request.node_id,
         request.x,
         request.y,
+        request.w,
+        request.h,
     )
 }
 

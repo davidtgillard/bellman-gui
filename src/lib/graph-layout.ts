@@ -4,6 +4,15 @@ import { nodeLabel, hasTypedNodePrefix, type GraphNode } from "./graph";
 export interface NodePosition {
   x: number;
   y: number;
+  /** Explicit width for composite nodes; absent for leaf nodes. */
+  w?: number;
+  /** Explicit height for composite nodes; absent for leaf nodes. */
+  h?: number;
+}
+
+export interface NodeSize {
+  w: number;
+  h: number;
 }
 
 export interface WorkPackageLayout {
@@ -34,6 +43,8 @@ interface SaveTopLevelNodePositionRequest {
   node_id: string;
   x: number;
   y: number;
+  w?: number;
+  h?: number;
 }
 
 interface SaveWorkPackageNodePositionRequest {
@@ -42,6 +53,8 @@ interface SaveWorkPackageNodePositionRequest {
   node_id: string;
   x: number;
   y: number;
+  w?: number;
+  h?: number;
 }
 
 /**
@@ -155,7 +168,30 @@ export function withTopLevelNodePosition(
     ...layout,
     topLevel: {
       ...layout.topLevel,
-      [nodeId]: position,
+      [nodeId]: { ...layout.topLevel[nodeId], ...position },
+    },
+  };
+}
+
+/**
+ * Returns a layout document with one top-level node's composite size updated.
+ * Position (x/y) is preserved; only width/height change.
+ * @param layout - Current layout document.
+ * @param nodeId - Top-level node identifier.
+ * @param size - Updated composite dimensions.
+ * @returns Updated layout document.
+ */
+export function withTopLevelNodeSize(
+  layout: WorkPackageLayout,
+  nodeId: string,
+  size: NodeSize,
+): WorkPackageLayout {
+  const existing = layout.topLevel[nodeId] ?? { x: 0, y: 0 };
+  return {
+    ...layout,
+    topLevel: {
+      ...layout.topLevel,
+      [nodeId]: { ...existing, w: size.w, h: size.h },
     },
   };
 }
@@ -402,10 +438,34 @@ export function withNodePosition(
       ...nextProjects,
       [scope]: {
         ...(nextProjects[scope] ?? {}),
-        [nodeId]: position,
+        [nodeId]: { ...nextProjects[scope]?.[nodeId], ...position },
       },
     },
   };
+}
+
+/**
+ * Returns a layout document with one project node's composite size updated.
+ * Position (x/y) is preserved; only width/height change.
+ * @param layout - Current layout document.
+ * @param projectId - Project node identifier.
+ * @param nodeId - Work package node identifier.
+ * @param size - Updated composite dimensions.
+ * @returns Updated layout document.
+ */
+export function withNodeSize(
+  layout: WorkPackageLayout,
+  projectId: string,
+  nodeId: string,
+  size: NodeSize,
+): WorkPackageLayout {
+  const existing = projectNodePositions(layout, projectId)[nodeId] ?? { x: 0, y: 0 };
+  return withNodePosition(layout, projectId, nodeId, {
+    x: existing.x,
+    y: existing.y,
+    w: size.w,
+    h: size.h,
+  });
 }
 
 /**

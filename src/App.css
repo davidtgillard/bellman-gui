@@ -416,6 +416,56 @@ body {
   pointer-events: auto;
 }
 
+.compound-resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid #38bdf8;
+  border-radius: 2px;
+  background: #0f172a;
+  z-index: 6;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.compound-resize-handle:hover {
+  background: #38bdf8;
+}
+
+.compound-drag-handle {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+  border: 1.5px solid rgba(56, 189, 248, 0.55);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: rgba(15, 23, 42, 0.88);
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.2;
+  z-index: 5;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compound-drag-handle:active {
+  cursor: grabbing;
+}
+
+.compound-drag-handle-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .graph-empty {
   display: grid;
   place-items: center;

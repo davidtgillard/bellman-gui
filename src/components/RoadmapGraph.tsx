@@ -10,11 +10,16 @@ import {
 import { createPortal } from "react-dom";
 import { CYTOSCAPE_STYLESHEET } from "../lib/cytoscape-theme";
 import {
+  compoundSizeForContent,
+  applyFrozenCompoundSize,
   installDragOverlapConstraints,
+  installWheelZoom,
   runLayoutWhenContainerReady,
   usesPresetLayout,
 } from "../lib/cytoscape-layout";
-import { defaultNodePosition, type NodePosition } from "../lib/graph-layout";
+import { CompoundResizeHandles } from "./CompoundResizeHandles";
+import { CompoundDragHandle } from "./CompoundDragHandle";
+import { defaultNodePosition, type NodePosition, type NodeSize } from "../lib/graph-layout";
 import { graphNodeDisplayLabel } from "../lib/graph";
 import {
   ARROW_KEY_DIRECTIONS,
@@ -69,10 +74,21 @@ interface RoadmapGraphProps {
   contextMenu?: (event: GraphContextMenuEvent) => ReactNode;
   draggable?: boolean;
   nodePositions?: Record<string, NodePosition>;
-  onNodePositionChange?: (nodeId: string, position: NodePosition) => void;
+  onNodePositionChange?: (positions: Record<string, NodePosition>) => void;
+  onNodeResize?: (nodeId: string, position: NodePosition) => void;
+  onCompoundSizesMeasured?: (
+    sizes: Record<string, NodeSize>,
+    positions: Record<string, NodePosition>,
+  ) => void;
   onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void;
   layoutReady?: boolean;
+  layoutSyncToken?: number;
 }
+
+// Extra room added around a composite's tight content bounds when its size is
+// first frozen, so children can be nudged within the box without immediately
+// hitting the walls.
+const INITIAL_COMPOUND_SLACK = 56;
 
 const FOCUS_DELAY_MS = 450;
 
@@ -143,6 +159,9 @@ function toElementDefinitions(
       ? `${baseLabel}\n${graphNodeDisplayLabel(node.subLabel)}`
       : baseLabel;
 
+    const hasSize =
+      node.data?.isCompound && saved?.w !== undefined && saved?.h !== undefined;
+
     return {
       data: {
         id: node.id,
@@ -151,6 +170,7 @@ function toElementDefinitions(
         type: node.data?.type ?? "",
         color: node.fill ?? "#64748b",
         ...(node.parent ? { parent: node.parent } : {}),
+        ...(hasSize ? { compoundWidth: saved!.w, compoundHeight: saved!.h } : {}),
       },
       classes: node.classes,
       ...(position ? { position: { x: position.x, y: position.y } } : {}),
@@ -232,6 +252,14 @@ function syncNodePositions(
         continue;
       }
 
+      if (node.isParent() && position.w !== undefined && position.h !== undefined) {
+        const width = Number(node.data("compoundWidth"));
+        const height = Number(node.data("compoundHeight"));
+        if (width !== position.w || height !== position.h) {
+          applyFrozenCompoundSize(node, position.w, position.h);
+        }
+      }
+
       const current = node.position();
       if (current.x === position.x && current.y === position.y) {
         continue;
@@ -260,18 +288,26 @@ export function RoadmapGraph({
   draggable = false,
   nodePositions,
   onNodePositionChange,
+  onNodeResize,
+  onCompoundSizesMeasured,
   onAutoLayoutComplete,
   layoutReady = true,
+  layoutSyncToken = 0,
 }: RoadmapGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const layoutCleanupRef = useRef<(() => void) | null>(null);
   const dragConstraintCleanupRef = useRef<(() => void) | null>(null);
+  const wheelZoomCleanupRef = useRef<(() => void) | null>(null);
   const graphStructureKeyRef = useRef("");
   const layoutCompletedRef = useRef(false);
+  const lastLayoutSyncTokenRef = useRef(0);
   const visibleNodeIdsRef = useRef(visibleNodeIds);
   const onNodeClickRef = useRef(onNodeClick);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
+  const onNodeResizeRef = useRef(onNodeResize);
+  const onCompoundSizesMeasuredRef = useRef(onCompoundSizesMeasured);
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
   const contextMenuRef = useRef(contextMenu);
   const keyboardPanRef = useRef(
@@ -282,6 +318,7 @@ export function RoadmapGraph({
   );
   const keyboardPanFrameRef = useRef<number | null>(null);
   const [cyReady, setCyReady] = useState(false);
+  const [resizeTargetId, setResizeTargetId] = useState<string | null>(null);
   const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
   const [backgroundPanEnabled, setBackgroundPanEnabled] = useState(false);
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
@@ -300,6 +337,51 @@ export function RoadmapGraph({
     }
   }, []);
 
+  const measureCompoundSizes = useCallback((cy: Core) => {
+    const callback = onCompoundSizesMeasuredRef.current;
+    if (!callback) {
+      return;
+    }
+
+    const sizes: Record<string, NodeSize> = {};
+    const measuredPositions: Record<string, NodePosition> = {};
+    cy.batch(() => {
+      cy.nodes().forEach((node) => {
+        if (!node.isParent()) {
+          return;
+        }
+        if (node.data("compoundWidth") !== undefined && node.data("compoundHeight") !== undefined) {
+          return;
+        }
+
+        const children = node.children();
+        const box = children.nonempty()
+          ? children.boundingBox({ includeLabels: true, includeOverlays: false })
+          : null;
+        const fit = compoundSizeForContent(
+          box ? { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 } : null,
+        );
+        const size = {
+          w: fit.w + INITIAL_COMPOUND_SLACK,
+          h: fit.h + INITIAL_COMPOUND_SLACK,
+        };
+        applyFrozenCompoundSize(node, size.w, size.h);
+        sizes[node.id()] = size;
+        const position = node.position();
+        measuredPositions[node.id()] = {
+          x: position.x,
+          y: position.y,
+          w: size.w,
+          h: size.h,
+        };
+      });
+    });
+
+    if (Object.keys(sizes).length > 0) {
+      callback(sizes, measuredPositions);
+    }
+  }, []);
+
   useEffect(() => {
     visibleNodeIdsRef.current = visibleNodeIds;
   }, [visibleNodeIds]);
@@ -311,6 +393,14 @@ export function RoadmapGraph({
   useEffect(() => {
     onNodePositionChangeRef.current = onNodePositionChange;
   }, [onNodePositionChange]);
+
+  useEffect(() => {
+    onNodeResizeRef.current = onNodeResize;
+  }, [onNodeResize]);
+
+  useEffect(() => {
+    onCompoundSizesMeasuredRef.current = onCompoundSizesMeasured;
+  }, [onCompoundSizesMeasured]);
 
   useEffect(() => {
     onAutoLayoutCompleteRef.current = onAutoLayoutComplete;
@@ -452,6 +542,8 @@ export function RoadmapGraph({
     layoutCleanupRef.current = null;
     dragConstraintCleanupRef.current?.();
     dragConstraintCleanupRef.current = null;
+    wheelZoomCleanupRef.current?.();
+    wheelZoomCleanupRef.current = null;
 
     const existing = cyRef.current;
     if (existing) {
@@ -512,18 +604,21 @@ export function RoadmapGraph({
       const node = event.target;
       cy.nodes().unselect();
       node.select();
+      setResizeTargetId(node.isParent() ? node.id() : null);
       onNodeClickRef.current?.(node.id());
     });
 
     cy.on("tap", "edge", () => {
       closeContextMenu();
       cy.nodes().unselect();
+      setResizeTargetId(null);
     });
 
     cy.on("tap", (event) => {
       if (event.target === cy) {
         closeContextMenu();
         cy.nodes().unselect();
+        setResizeTargetId(null);
       }
     });
 
@@ -623,9 +718,15 @@ export function RoadmapGraph({
       });
     });
 
-    dragConstraintCleanupRef.current = installDragOverlapConstraints(cy, (nodeId, position) => {
-      onNodePositionChangeRef.current?.(nodeId, position);
+    dragConstraintCleanupRef.current = installDragOverlapConstraints(cy, (positions) => {
+      onNodePositionChangeRef.current?.(positions);
     });
+    wheelZoomCleanupRef.current = installWheelZoom(
+      graphContainerRef.current ?? container.parentElement ?? container,
+      cy,
+      container,
+      0.2,
+    );
 
     let previousContainerWidth: number | null = null;
     let previousWindowWidth: number | null = null;
@@ -666,9 +767,12 @@ export function RoadmapGraph({
       layoutCleanupRef.current = null;
       dragConstraintCleanupRef.current?.();
       dragConstraintCleanupRef.current = null;
+      wheelZoomCleanupRef.current?.();
+      wheelZoomCleanupRef.current = null;
       resizeObserver.disconnect();
       graphStructureKeyRef.current = "";
       layoutCompletedRef.current = false;
+      lastLayoutSyncTokenRef.current = 0;
       setCyReady(false);
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
@@ -695,6 +799,7 @@ export function RoadmapGraph({
     if (nodes.length === 0) {
       graphStructureKeyRef.current = "";
       layoutCompletedRef.current = false;
+      setResizeTargetId(null);
       cy.batch(() => {
         cy.elements().remove();
       });
@@ -707,12 +812,17 @@ export function RoadmapGraph({
     if (structureChanged) {
       graphStructureKeyRef.current = structureKey;
       layoutCompletedRef.current = false;
+      setResizeTargetId(null);
       cy.batch(() => {
         cy.elements().remove();
         cy.add(toElementDefinitions(nodes, links, nodePositions));
       });
-    } else {
+    } else if (layoutSyncToken > lastLayoutSyncTokenRef.current) {
+      // Layout just loaded from disk: apply saved positions once. Ongoing drag
+      // and resize updates mutate Cytoscape directly and must not be overwritten
+      // by React state on every persisted position change.
       syncNodePositions(cy, nodePositions);
+      lastLayoutSyncTokenRef.current = layoutSyncToken;
     }
 
     if (draggable) {
@@ -736,6 +846,7 @@ export function RoadmapGraph({
         layoutCompletedRef.current = true;
         if (cyRef.current) {
           applyGraphVisibility(cyRef.current, true);
+          measureCompoundSizes(cyRef.current);
         }
       },
     );
@@ -744,7 +855,17 @@ export function RoadmapGraph({
       layoutCleanupRef.current?.();
       layoutCleanupRef.current = null;
     };
-  }, [applyGraphVisibility, cyReady, draggable, layoutReady, links, nodePositions, nodes]);
+  }, [
+    applyGraphVisibility,
+    cyReady,
+    draggable,
+    layoutReady,
+    layoutSyncToken,
+    links,
+    measureCompoundSizes,
+    nodePositions,
+    nodes,
+  ]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -792,9 +913,33 @@ export function RoadmapGraph({
     visibleNodeIds !== undefined &&
     !nodes.some((node) => visibleNodeIds.has(node.id));
 
+  const resizeCy = cyReady ? cyRef.current : null;
+  const resizeTargetNode = resizeTargetId
+    ? nodes.find((node) => node.id === resizeTargetId)
+    : undefined;
+
   return (
-    <div className="graph-container">
+    <div className="graph-container" ref={graphContainerRef}>
       <div className="graph-viewport" ref={containerRef} />
+      {draggable && resizeCy && resizeTargetId && resizeTargetNode ? (
+        <>
+          <CompoundDragHandle
+            cy={resizeCy}
+            nodeId={resizeTargetId}
+            label={graphNodeDisplayLabel(resizeTargetNode.label ?? resizeTargetId)}
+            onDragComplete={(positions) =>
+              onNodePositionChangeRef.current?.(positions)
+            }
+          />
+          <CompoundResizeHandles
+            cy={resizeCy}
+            nodeId={resizeTargetId}
+            onResizeComplete={(nodeId, position) =>
+              onNodeResizeRef.current?.(nodeId, position)
+            }
+          />
+        </>
+      ) : null}
       {nodes.length === 0 || allTypesHidden ? (
         <div className="graph-empty graph-empty-overlay" aria-live="polite">
           <p>{emptyMessage}</p>

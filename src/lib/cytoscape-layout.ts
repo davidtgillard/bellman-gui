@@ -1,6 +1,7 @@
 import type { Core, EventObject, LayoutOptions, NodeSingular } from "cytoscape";
-import type { NodePosition } from "./graph-layout";
+import type { NodePosition, NodeSize } from "./graph-layout";
 import { MIN_NODE_DISTANCE } from "./graph-layout";
+import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH, COMPOUND_PADDING } from "./cytoscape-theme";
 
 export const LAYOUT_FIT_PADDING = 40;
 
@@ -204,39 +205,6 @@ function nodeVisualBox(node: NodeSingular, padding = NODE_OVERLAP_PADDING): Visu
   };
 }
 
-function nodeRenderedVisualBox(node: NodeSingular, padding = NODE_OVERLAP_PADDING): VisualBox {
-  const box = node.renderedBoundingBox({ includeLabels: true });
-  return {
-    x1: box.x1 - padding,
-    y1: box.y1 - padding,
-    x2: box.x2 + padding,
-    y2: box.y2 + padding,
-  };
-}
-
-function nodeCoreModelBox(node: NodeSingular): VisualBox {
-  const box = node.boundingBox({ includeLabels: false });
-  return {
-    x1: box.x1,
-    y1: box.y1,
-    x2: box.x2,
-    y2: box.y2,
-  };
-}
-
-function siblingNodesForDrag(node: NodeSingular): NodeSingular[] {
-  const parent = node.parent();
-  if (parent.nonempty()) {
-    return parent.children().toArray().filter((other) => other.id() !== node.id());
-  }
-
-  return node
-    .cy()
-    .nodes()
-    .toArray()
-    .filter((other) => other.id() !== node.id() && other.parent().empty());
-}
-
 function visualBoxesOverlap(left: VisualBox, right: VisualBox): boolean {
   return (
     left.x1 < right.x2 &&
@@ -255,14 +223,119 @@ function visualBoxContains(outer: VisualBox, inner: VisualBox): boolean {
   );
 }
 
-function compoundParentInteriorBox(parent: NodeSingular, tolerance = 4): VisualBox {
-  const box = parent.boundingBox({ includeLabels: false });
+function boundingBoxToVisual(box: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}): VisualBox {
+  return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
+}
+
+/**
+ * Returns the interior rectangle of a composite node in model coordinates, i.e.
+ * the region inside its padding where child nodes (and their labels) must stay.
+ * @param parent - Compound parent node.
+ * @returns Interior box that children must remain within.
+ */
+export function compoundInteriorBox(parent: NodeSingular): VisualBox {
+  const box = parent.boundingBox({ includeLabels: false, includeOverlays: false });
   return {
-    x1: box.x1 - tolerance,
-    y1: box.y1 - tolerance,
-    x2: box.x2 + tolerance,
-    y2: box.y2 + tolerance,
+    x1: box.x1 + COMPOUND_PADDING.left,
+    y1: box.y1 + COMPOUND_PADDING.top,
+    x2: box.x2 - COMPOUND_PADDING.right,
+    y2: box.y2 - COMPOUND_PADDING.bottom,
   };
+}
+
+/**
+ * Computes the translation that pulls a footprint fully inside a container box.
+ * When the footprint is larger than the container along an axis, it is centered
+ * on that axis instead. Pure helper so drag clamping can be unit-tested.
+ * @param footprint - The moving element's bounding box.
+ * @param container - The box the footprint must stay within.
+ * @returns Delta to add to the element's position to satisfy the constraint.
+ */
+export function shiftBoxInside(
+  footprint: VisualBox,
+  container: VisualBox,
+): { dx: number; dy: number } {
+  const resolveAxis = (
+    lo: number,
+    hi: number,
+    boundLo: number,
+    boundHi: number,
+  ): number => {
+    const size = hi - lo;
+    const bound = boundHi - boundLo;
+    if (size >= bound) {
+      return (boundLo + boundHi) / 2 - (lo + hi) / 2;
+    }
+    if (lo < boundLo) {
+      return boundLo - lo;
+    }
+    if (hi > boundHi) {
+      return boundHi - hi;
+    }
+    return 0;
+  };
+
+  return {
+    dx: resolveAxis(footprint.x1, footprint.x2, container.x1, container.x2),
+    dy: resolveAxis(footprint.y1, footprint.y2, container.y1, container.y2),
+  };
+}
+
+/**
+ * Returns the smallest composite size (padding included) that still contains the
+ * given child footprint, floored by the global composite minimums. Used to freeze
+ * a composite's initial size and to clamp how small a resize may go.
+ * @param contentBox - Bounding box of the composite's children, or null when empty.
+ * @returns Composite dimensions that fit the content without clipping.
+ */
+export function compoundSizeForContent(contentBox: VisualBox | null): NodeSize {
+  if (!contentBox) {
+    return { w: COMPOUND_MIN_WIDTH, h: COMPOUND_MIN_HEIGHT };
+  }
+  const contentWidth = contentBox.x2 - contentBox.x1;
+  const contentHeight = contentBox.y2 - contentBox.y1;
+  return {
+    w: Math.max(
+      COMPOUND_MIN_WIDTH,
+      contentWidth + COMPOUND_PADDING.left + COMPOUND_PADDING.right,
+    ),
+    h: Math.max(
+      COMPOUND_MIN_HEIGHT,
+      contentHeight + COMPOUND_PADDING.top + COMPOUND_PADDING.bottom,
+    ),
+  };
+}
+
+/**
+ * Pins a composite to explicit dimensions while keeping its top-left corner fixed.
+ * Without this compensation, applying min-width/min-height shifts the node centre
+ * (and every child) down and to the right.
+ * @param node - Compound parent node to resize.
+ * @param w - Pinned width in model units.
+ * @param h - Pinned height in model units.
+ */
+export function applyFrozenCompoundSize(node: NodeSingular, w: number, h: number): void {
+  const before = node.boundingBox({ includeLabels: false, includeOverlays: false });
+  const topLeftX = before.x1;
+  const topLeftY = before.y1;
+
+  node.data("compoundWidth", w);
+  node.data("compoundHeight", h);
+
+  const after = node.boundingBox({ includeLabels: false, includeOverlays: false });
+  const dx = topLeftX - after.x1;
+  const dy = topLeftY - after.y1;
+  if (dx === 0 && dy === 0) {
+    return;
+  }
+
+  const position = node.position();
+  node.position({ x: position.x + dx, y: position.y + dy });
 }
 
 function separationForOverlap(left: VisualBox, right: VisualBox): { dx: number; dy: number } {
@@ -391,305 +464,436 @@ function resolveSiblingGroup(nodes: NodeSingular[]): void {
 }
 
 /**
- * Returns whether a dragged node overlaps a sibling in rendered coordinates.
- * @param node - Node to test at its current position.
- * @returns Whether the node visually conflicts with a sibling.
- */
-export function nodeHasSiblingOverlapDuringDrag(node: NodeSingular): boolean {
-  const movingBox = nodeRenderedVisualBox(node);
-
-  for (const other of siblingNodesForDrag(node)) {
-    if (visualBoxesOverlap(movingBox, nodeRenderedVisualBox(other))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Returns whether a leaf node has been dragged outside its compound parent.
- * @param node - Childless node to test at its current position.
- * @returns Whether the node visually escapes its parent boundary.
+ * Returns whether a child node's footprint currently escapes its compound
+ * parent's interior. Handles both leaf children and inner composite children.
+ * @param node - Child node to test at its current position.
+ * @returns Whether the node visually escapes its parent's interior.
  */
 export function nodeEscapesCompoundParent(node: NodeSingular): boolean {
-  if (!node.isChild() || node.isParent()) {
-    return false;
-  }
-
   const parent = node.parent();
   if (parent.empty()) {
     return false;
   }
 
-  const nodeBox = nodeCoreModelBox(node);
-  const parentBox = compoundParentInteriorBox(parent.first());
-  return !visualBoxContains(parentBox, nodeBox);
+  const footprint = boundingBoxToVisual(
+    node.boundingBox({ includeLabels: true, includeOverlays: false }),
+  );
+  return !visualBoxContains(compoundInteriorBox(parent.first()), footprint);
 }
 
-/**
- * Returns whether a dragged node violates overlap or parent-boundary constraints.
- * @param node - Node to test at its current position.
- * @returns Whether the drag position should be rejected.
- */
-export function nodeViolatesDragConstraints(node: NodeSingular): boolean {
-  return nodeHasSiblingOverlapDuringDrag(node) || nodeEscapesCompoundParent(node);
-}
-
-/**
- * Returns whether a node's label-inclusive box overlaps a draggable sibling.
- * @param node - Node to test at its current position.
- * @returns Whether the node visually conflicts with a sibling.
- */
-export function nodeHasSiblingOverlap(node: NodeSingular): boolean {
-  const movingBox = nodeVisualBox(node);
-
-  for (const other of node.cy().nodes()) {
-    if (other.id() === node.id()) {
-      continue;
-    }
-    if (!shouldSeparateNodes(node, other)) {
-      continue;
-    }
-    if (visualBoxesOverlap(movingBox, nodeVisualBox(other))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-const DRAG_LAST_VALID_KEY = "_dragLastValid";
+const DRAG_ANCESTOR_LOCK_KEY = "_dragAncestorLock";
+const DRAG_START_POSITION_KEY = "_dragStartPosition";
 const DRAG_GRAB_OFFSET_KEY = "_dragGrabOffset";
-const DRAG_POSITION_LOCK_KEY = "_dragPositionLock";
-const DRAG_VIEWPORT_KEY = "_dragViewport";
+const COMPOUND_DRAG_KEY = "_compoundDrag";
 
-// Fraction of the demanded penetration that is actually applied, so pushing a
-// node into a neighbor requires progressively more drag distance ("resistance").
-const DRAG_OVERLAP_RESISTANCE = 0.35;
-// Hard cap on how far a node may penetrate a neighbor during drag, as a fraction
-// of the smaller node's extent along the contact axis.
-const DRAG_MAX_PENETRATION_RATIO = 0.25;
-
-interface ViewportSnapshot {
-  pan: { x: number; y: number };
-  zoom: number;
+interface DragAncestorLock {
+  sizes: Map<string, NodeSize>;
 }
 
-interface AxisPenetration {
-  axis: "x" | "y";
-  overlap: number;
-  direction: number;
+interface CompoundDragState {
+  startPositions: Map<string, NodePosition>;
 }
 
-function snapshotViewport(cy: Core): ViewportSnapshot {
-  return {
-    pan: cy.pan(),
-    zoom: cy.zoom(),
+/**
+ * Captures absolute positions for a composite node and every descendant.
+ * @param root - Composite parent node at drag start.
+ * @returns Node positions keyed by id.
+ */
+export function snapshotSubtreePositions(root: NodeSingular): Map<string, NodePosition> {
+  const positions = new Map<string, NodePosition>();
+  const record = (target: NodeSingular) => {
+    const position = target.position();
+    positions.set(target.id(), { x: position.x, y: position.y });
   };
+  record(root);
+  root.descendants().forEach(record);
+  return positions;
 }
 
-function restoreDragViewport(cy: Core): void {
-  const snapshot = cy.scratch(DRAG_VIEWPORT_KEY) as ViewportSnapshot | undefined;
-  if (!snapshot) {
-    return;
-  }
-  cy.viewport({
-    pan: snapshot.pan,
-    zoom: snapshot.zoom,
+function applySubtreeDeltaFromStart(
+  cy: Core,
+  startPositions: Map<string, NodePosition>,
+  dx: number,
+  dy: number,
+): void {
+  cy.batch(() => {
+    for (const [id, start] of startPositions) {
+      const target = cy.getElementById(id);
+      if (target.empty()) {
+        continue;
+      }
+      target.position({ x: start.x + dx, y: start.y + dy });
+    }
   });
 }
 
-function overlapArea(left: VisualBox, right: VisualBox): number {
-  const overlapX = Math.min(left.x2, right.x2) - Math.max(left.x1, right.x1);
-  const overlapY = Math.min(left.y2, right.y2) - Math.max(left.y1, right.y1);
-  if (overlapX <= 0 || overlapY <= 0) {
-    return 0;
+function moveSubtreeBy(root: NodeSingular, dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) {
+    return;
   }
-  return overlapX * overlapY;
+  root.descendants().forEach((descendant) => moveNodeBy(descendant, dx, dy));
+  moveNodeBy(root, dx, dy);
 }
 
-// Returns the minimum-translation axis, overlap depth, and the direction the
-// moving box must travel to reduce that overlap.
-function minTranslationPenetration(moving: VisualBox, fixed: VisualBox): AxisPenetration | null {
-  const overlapX = Math.min(moving.x2, fixed.x2) - Math.max(moving.x1, fixed.x1);
-  const overlapY = Math.min(moving.y2, fixed.y2) - Math.max(moving.y1, fixed.y1);
-  if (overlapX <= 0 || overlapY <= 0) {
-    return null;
+/**
+ * Moves a composite and its descendants rigidly to a target centre position.
+ * Used instead of native compound dragging, which conflicts with pinned sizes.
+ * @param cy - Cytoscape instance containing the graph nodes.
+ * @param node - Composite parent being dragged.
+ * @param startPositions - Subtree positions captured at drag start.
+ * @param targetPosition - Desired centre for the composite parent.
+ * @param ancestorLock - Optional ancestor size lock for nested composites.
+ */
+export function dragCompoundParentTo(
+  cy: Core,
+  node: NodeSingular,
+  startPositions: Map<string, NodePosition>,
+  targetPosition: NodePosition,
+  ancestorLock?: DragAncestorLock,
+): void {
+  const startParent = startPositions.get(node.id());
+  if (!startParent) {
+    return;
   }
 
-  if (overlapX < overlapY) {
-    const direction = (moving.x1 + moving.x2) / 2 < (fixed.x1 + fixed.x2) / 2 ? -1 : 1;
-    return { axis: "x", overlap: overlapX, direction };
+  const dx = targetPosition.x - startParent.x;
+  const dy = targetPosition.y - startParent.y;
+  applySubtreeDeltaFromStart(cy, startPositions, dx, dy);
+
+  if (!node.isChild()) {
+    return;
   }
 
-  const direction = (moving.y1 + moving.y2) / 2 < (fixed.y1 + fixed.y2) / 2 ? -1 : 1;
-  return { axis: "y", overlap: overlapY, direction };
+  const before = node.position();
+  constrainChildWithinParent(node);
+  moveSubtreeBy(node, node.position().x - before.x, node.position().y - before.y);
+  restoreAncestorSizes(cy, ancestorLock);
 }
 
-function deepestOverlappingSibling(node: NodeSingular): NodeSingular | null {
-  const movingBox = nodeVisualBox(node);
-  let deepest: NodeSingular | null = null;
-  let deepestArea = 0;
+/**
+ * Captures ancestor composite pinned sizes before a child drag.
+ * @param node - The node being dragged inside one or more composites.
+ * @returns Locked ancestor sizes to restore after each drag update.
+ */
+export function snapshotCompoundAncestorLock(node: NodeSingular): DragAncestorLock {
+  return snapshotAncestorLocks(node);
+}
 
-  for (const other of siblingNodesForDrag(node)) {
-    const area = overlapArea(movingBox, nodeVisualBox(other));
-    if (area > deepestArea) {
-      deepestArea = area;
-      deepest = other;
+/**
+ * Clamps a child drag and restores ancestor composite sizes so outer boxes stay
+ * pinned. Ancestor positions are intentionally not restored: resetting a
+ * compound parent's position also translates its descendants and fights the
+ * active drag.
+ * @param cy - Cytoscape instance containing the graph nodes.
+ * @param node - The dragged child or inner composite node.
+ * @param lock - Ancestor snapshot from {@link snapshotCompoundAncestorLock}.
+ */
+export function constrainCompoundChildDrag(
+  cy: Core,
+  node: NodeSingular,
+  lock: DragAncestorLock | undefined,
+): void {
+  if (!node.isChild()) {
+    return;
+  }
+  constrainChildWithinParent(node);
+  restoreAncestorSizes(cy, lock);
+}
+
+function snapshotAncestorLocks(node: NodeSingular): DragAncestorLock {
+  const sizes = new Map<string, NodeSize>();
+
+  let current = node.parent();
+  while (current.nonempty()) {
+    const parent = current.first();
+    const width = parent.data("compoundWidth");
+    const height = parent.data("compoundHeight");
+    if (width !== undefined && height !== undefined) {
+      sizes.set(parent.id(), { w: Number(width), h: Number(height) });
     }
+
+    current = parent.parent();
   }
 
-  return deepest;
+  return { sizes };
 }
 
-// Applies resistance and a hard 25% cap to the node's penetration into its
-// deepest-overlapping sibling, relative to the cursor-driven desired position.
-function dampenSiblingPenetration(node: NodeSingular, desired: NodePosition): void {
-  const sibling = deepestOverlappingSibling(node);
-  if (!sibling) {
+function restoreAncestorSizes(cy: Core, lock: DragAncestorLock | undefined): void {
+  if (!lock) {
     return;
   }
 
-  const movingBox = nodeVisualBox(node);
-  const siblingBox = nodeVisualBox(sibling);
-  const penetration = minTranslationPenetration(movingBox, siblingBox);
-  if (!penetration) {
-    return;
-  }
-
-  const movingExtent =
-    penetration.axis === "x" ? movingBox.x2 - movingBox.x1 : movingBox.y2 - movingBox.y1;
-  const siblingExtent =
-    penetration.axis === "x" ? siblingBox.x2 - siblingBox.x1 : siblingBox.y2 - siblingBox.y1;
-  const maxPenetration = DRAG_MAX_PENETRATION_RATIO * Math.min(movingExtent, siblingExtent);
-
-  const allowed = Math.min(penetration.overlap * DRAG_OVERLAP_RESISTANCE, maxPenetration);
-  const pullBack = penetration.overlap - allowed;
-  if (pullBack <= 0) {
-    return;
-  }
-
-  node.position({
-    x: penetration.axis === "x" ? desired.x + penetration.direction * pullBack : desired.x,
-    y: penetration.axis === "y" ? desired.y + penetration.direction * pullBack : desired.y,
+  cy.batch(() => {
+    for (const [nodeId, size] of lock.sizes) {
+      const parent = cy.getElementById(nodeId);
+      if (parent.empty()) {
+        continue;
+      }
+      if (Number(parent.data("compoundWidth")) !== size.w) {
+        parent.data("compoundWidth", size.w);
+      }
+      if (Number(parent.data("compoundHeight")) !== size.h) {
+        parent.data("compoundHeight", size.h);
+      }
+    }
   });
 }
 
-// Moves only the dragged node fully out of every sibling it overlaps, so the
-// final resting position never overlaps another node (including titles).
-function separateDraggedNode(node: NodeSingular): void {
-  for (let iteration = 0; iteration < MAX_OVERLAP_RESOLUTION_ITERATIONS; iteration++) {
-    const sibling = deepestOverlappingSibling(node);
-    if (!sibling) {
-      return;
-    }
+// Keeps a child node's (label-inclusive) footprint inside its parent's fixed
+// interior. Only the dragged node is moved: siblings are never displaced and the
+// parent is never resized. Inner composite children are carried rigidly with
+// their own descendants because moving a compound node moves its children.
+function constrainChildWithinParent(node: NodeSingular): void {
+  const parent = node.parent();
+  if (parent.empty()) {
+    return;
+  }
 
-    const { dx, dy } = separationToClearOverlap(nodeVisualBox(node), nodeVisualBox(sibling));
-    if (dx === 0 && dy === 0) {
-      return;
-    }
+  const interior = compoundInteriorBox(parent.first());
+  const footprint = boundingBoxToVisual(
+    node.boundingBox({ includeLabels: true, includeOverlays: false }),
+  );
+  const { dx, dy } = shiftBoxInside(footprint, interior);
+  if (dx !== 0 || dy !== 0) {
     moveNodeBy(node, dx, dy);
   }
 }
 
 /**
- * Constrains node drags: allows limited, resisted overlap while dragging and
- * guarantees a non-overlapping final position, without moving other nodes or
- * changing the viewport.
+ * Builds the set of node positions that must be persisted after a drag ends.
+ * Dragging a composite also moves its descendants in Cytoscape, so their
+ * positions must be saved together. Ancestor composite positions are included
+ * when they may have drifted during a nested drag.
  * @param cy - Cytoscape instance containing the graph nodes.
- * @param onDragComplete - Called with the final node position after drag ends.
+ * @param draggedNodeId - Id of the node the user finished dragging.
+ * @returns Node positions keyed by id for layout persistence.
+ */
+export function collectDragPersistencePositions(
+  cy: Core,
+  draggedNodeId: string,
+): Record<string, NodePosition> {
+  const node = cy.getElementById(draggedNodeId);
+  if (node.empty()) {
+    return {};
+  }
+
+  const updates: Record<string, NodePosition> = {};
+
+  const recordNode = (target: NodeSingular) => {
+    const position = target.position();
+    const entry: NodePosition = { x: position.x, y: position.y };
+    if (target.isParent()) {
+      const width = target.data("compoundWidth");
+      const height = target.data("compoundHeight");
+      if (width !== undefined && height !== undefined) {
+        entry.w = Number(width);
+        entry.h = Number(height);
+      }
+    }
+    updates[target.id()] = entry;
+  };
+
+  recordNode(node);
+
+  if (node.isParent()) {
+    node.descendants().forEach((descendant) => {
+      recordNode(descendant);
+    });
+  }
+
+  let ancestor = node.parent();
+  while (ancestor.nonempty()) {
+    recordNode(ancestor.first());
+    ancestor = ancestor.first().parent();
+  }
+
+  return updates;
+}
+
+/**
+ * Installs drag constraints that keep composite work packages coherent:
+ * - Dragging a composite (parent) moves it and its children rigidly; its size,
+ *   shape, and the relative placement of its children are untouched.
+ * - Dragging a child (leaf or inner composite) moves only that node, clamped to
+ *   stay inside the parent's fixed interior, without resizing the parent or
+ *   displacing siblings.
+ * Node size is never changed here; resizing happens solely through the explicit
+ * resize handles.
+ * @param cy - Cytoscape instance containing the graph nodes.
+ * @param onDragComplete - Called with all node positions that changed during drag.
  * @returns Cleanup function that removes drag listeners.
  */
 export function installDragOverlapConstraints(
   cy: Core,
-  onDragComplete?: (nodeId: string, position: NodePosition) => void,
+  onDragComplete?: (positions: Record<string, NodePosition>) => void,
 ): () => void {
   const grabOffset = (node: NodeSingular): NodePosition =>
     (node.scratch(DRAG_GRAB_OFFSET_KEY) as NodePosition | undefined) ?? { x: 0, y: 0 };
 
-  const constrainDraggedNode = (node: NodeSingular, cursor?: NodePosition) => {
-    if (node.scratch(DRAG_POSITION_LOCK_KEY)) {
+  const handleDrag = (node: NodeSingular, cursor?: NodePosition) => {
+    const compoundDrag = node.scratch(COMPOUND_DRAG_KEY) as CompoundDragState | undefined;
+    if (compoundDrag && node.isParent()) {
+      const offset = grabOffset(node);
+      const target = cursor
+        ? { x: cursor.x + offset.x, y: cursor.y + offset.y }
+        : node.position();
+      dragCompoundParentTo(
+        cy,
+        node,
+        compoundDrag.startPositions,
+        target,
+        node.scratch(DRAG_ANCESTOR_LOCK_KEY) as DragAncestorLock | undefined,
+      );
       return;
     }
 
-    node.scratch(DRAG_POSITION_LOCK_KEY, true);
-
-    const offset = grabOffset(node);
-    const desired = cursor
-      ? { x: cursor.x + offset.x, y: cursor.y + offset.y }
-      : { x: node.position().x, y: node.position().y };
-
-    node.position(desired);
-
-    if (nodeEscapesCompoundParent(node)) {
-      const lastValid = node.scratch(DRAG_LAST_VALID_KEY) as NodePosition | undefined;
-      if (lastValid) {
-        node.position(lastValid);
-      }
-      node.scratch(DRAG_POSITION_LOCK_KEY, false);
-      restoreDragViewport(cy);
-      return;
+    if (node.isChild()) {
+      constrainCompoundChildDrag(
+        cy,
+        node,
+        node.scratch(DRAG_ANCESTOR_LOCK_KEY) as DragAncestorLock | undefined,
+      );
     }
-
-    dampenSiblingPenetration(node, desired);
-
-    const settled = node.position();
-    node.scratch(DRAG_LAST_VALID_KEY, { x: settled.x, y: settled.y });
-    node.scratch(DRAG_POSITION_LOCK_KEY, false);
-    restoreDragViewport(cy);
   };
 
   const onGrab = (event: EventObject) => {
     const node = event.target;
     const position = node.position();
     const cursor = event.position;
-    cy.scratch(DRAG_VIEWPORT_KEY, snapshotViewport(cy));
-    node.scratch(DRAG_LAST_VALID_KEY, { x: position.x, y: position.y });
-    node.scratch(
-      DRAG_GRAB_OFFSET_KEY,
-      cursor ? { x: position.x - cursor.x, y: position.y - cursor.y } : { x: 0, y: 0 },
-    );
+    node.scratch(DRAG_START_POSITION_KEY, { x: position.x, y: position.y });
+
+    if (node.isParent()) {
+      node.scratch(COMPOUND_DRAG_KEY, {
+        startPositions: snapshotSubtreePositions(node),
+      });
+      node.scratch(
+        DRAG_GRAB_OFFSET_KEY,
+        cursor ? { x: position.x - cursor.x, y: position.y - cursor.y } : { x: 0, y: 0 },
+      );
+      if (node.isChild()) {
+        node.scratch(DRAG_ANCESTOR_LOCK_KEY, snapshotCompoundAncestorLock(node));
+      }
+      return;
+    }
+
+    if (node.isChild()) {
+      node.scratch(DRAG_ANCESTOR_LOCK_KEY, snapshotCompoundAncestorLock(node));
+    }
   };
 
   const onDrag = (event: EventObject) => {
-    constrainDraggedNode(event.target, event.position);
-  };
-
-  const onPosition = (event: EventObject) => {
-    const node = event.target;
-    if (!node.grabbed()) {
-      return;
-    }
-    constrainDraggedNode(node);
+    handleDrag(event.target, event.position);
   };
 
   const onDragFree = (event: EventObject) => {
     const node = event.target;
-    node.scratch(DRAG_POSITION_LOCK_KEY, true);
-    separateDraggedNode(node);
-    node.scratch(DRAG_POSITION_LOCK_KEY, false);
-    restoreDragViewport(cy);
+    handleDrag(node);
+
+    const start = node.scratch(DRAG_START_POSITION_KEY) as NodePosition | undefined;
+    node.removeScratch(DRAG_ANCESTOR_LOCK_KEY);
+    node.removeScratch(DRAG_START_POSITION_KEY);
+    node.removeScratch(DRAG_GRAB_OFFSET_KEY);
+    node.removeScratch(COMPOUND_DRAG_KEY);
 
     const position = node.position();
-    node.removeScratch(DRAG_LAST_VALID_KEY);
-    node.removeScratch(DRAG_GRAB_OFFSET_KEY);
-    node.removeScratch(DRAG_POSITION_LOCK_KEY);
-    cy.removeScratch(DRAG_VIEWPORT_KEY);
-    onDragComplete?.(node.id(), { x: position.x, y: position.y });
+    const moved =
+      !start || start.x !== position.x || start.y !== position.y;
+    if (moved) {
+      onDragComplete?.(collectDragPersistencePositions(cy, node.id()));
+    }
   };
 
   cy.on("grab", "node", onGrab);
   cy.on("drag", "node", onDrag);
-  cy.on("position", "node", onPosition);
   cy.on("dragfree", "node", onDragFree);
 
   return () => {
     cy.removeListener("grab", "node", onGrab);
     cy.removeListener("drag", "node", onDrag);
-    cy.removeListener("position", "node", onPosition);
     cy.removeListener("dragfree", "node", onDragFree);
   };
+}
+
+/** Default wheel sensitivity; matches Cytoscape's `wheelSensitivity` init option. */
+export const DEFAULT_WHEEL_SENSITIVITY = 0.2;
+
+/**
+ * Computes the next zoom level for a wheel event, mirroring Cytoscape's internal
+ * scroll-to-zoom formula so behaviour stays consistent when panning is disabled.
+ * @param currentZoom - Current graph zoom level.
+ * @param deltaY - Wheel delta along the Y axis.
+ * @param deltaMode - DOM delta mode (`0` = pixels, `1` = lines).
+ * @param sensitivity - Wheel sensitivity multiplier.
+ * @param minZoom - Minimum allowed zoom level.
+ * @param maxZoom - Maximum allowed zoom level.
+ * @returns Clamped zoom level after applying the wheel delta.
+ */
+export function wheelZoomLevel(
+  currentZoom: number,
+  deltaY: number,
+  deltaMode: number,
+  sensitivity: number,
+  minZoom: number,
+  maxZoom: number,
+): number {
+  let delta = deltaY;
+  if (Math.abs(delta) > 5) {
+    delta = Math.sign(delta) * 5;
+  }
+
+  let diff = delta / -250;
+  if (deltaMode === 1) {
+    diff *= 33;
+  }
+  diff *= sensitivity;
+
+  const nextZoom = currentZoom * 10 ** diff;
+  return Math.min(maxZoom, Math.max(minZoom, nextZoom));
+}
+
+/**
+ * Installs mouse-wheel zoom on the graph container. Cytoscape only zooms on
+ * wheel when `userPanningEnabled` is true, but background drag-pan is toggled
+ * independently in settings — this keeps wheel zoom always available.
+ * @param wheelContainer - Element that receives wheel events (may include overlays).
+ * @param cy - Cytoscape instance to zoom.
+ * @param cyContainer - Cytoscape canvas container used for zoom focal coordinates.
+ * @param sensitivity - Wheel sensitivity multiplier.
+ * @returns Cleanup function that removes the wheel listener.
+ */
+export function installWheelZoom(
+  wheelContainer: HTMLElement,
+  cy: Core,
+  cyContainer: HTMLElement,
+  sensitivity = DEFAULT_WHEEL_SENSITIVITY,
+): () => void {
+  const onWheel = (event: WheelEvent) => {
+    if (!cy.zoomingEnabled() || cy.destroyed()) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const rect = cyContainer.getBoundingClientRect();
+    const renderedPosition = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const nextZoom = wheelZoomLevel(
+      cy.zoom(),
+      event.deltaY,
+      event.deltaMode,
+      sensitivity,
+      cy.minZoom(),
+      cy.maxZoom(),
+    );
+
+    cy.zoom({ level: nextZoom, renderedPosition });
+  };
+
+  wheelContainer.addEventListener("wheel", onWheel, { passive: false });
+  return () => wheelContainer.removeEventListener("wheel", onWheel);
 }
 
 function separationToClearOverlap(moving: VisualBox, fixed: VisualBox): { dx: number; dy: number } {
@@ -811,7 +1015,6 @@ export function applyAutoLayout(
 
   if (usesPresetLayout(nodePositions)) {
     cy.layout(PRESET_LAYOUT).run();
-    resolveNodeOverlaps(cy);
     finishLayout();
     return;
   }

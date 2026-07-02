@@ -1,5 +1,20 @@
 import type { StylesheetStyle } from "cytoscape";
 
+/**
+ * Interior padding of a composite (compound) node, in model units.
+ * The top band is larger so the composite's own title sits above its children.
+ */
+export const COMPOUND_PADDING = {
+  top: 52,
+  right: 36,
+  bottom: 36,
+  left: 36,
+} as const;
+
+/** Minimum width/height a composite node may be resized to. */
+export const COMPOUND_MIN_WIDTH = 80;
+export const COMPOUND_MIN_HEIGHT = 80;
+
 export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
   {
     selector: "node",
@@ -34,15 +49,35 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
       "text-wrap": "wrap",
       "text-max-width": "140px",
       shape: "round-rectangle",
-      "background-opacity": 0,
+      // A faint fill makes the whole box hit-testable so the composite can be
+      // grabbed and dragged from any empty interior area, not just the border.
+      "background-opacity": 0.04,
       "background-color": "#64748b",
       "border-width": 2,
       "border-color": "#64748b",
       "border-opacity": 0.6,
-      padding: "52px 36px 36px 36px",
-      "min-width": "80px",
-      "min-height": "80px",
+      padding: `${COMPOUND_PADDING.top}px ${COMPOUND_PADDING.right}px ${COMPOUND_PADDING.bottom}px ${COMPOUND_PADDING.left}px`,
+      "min-width": `${COMPOUND_MIN_WIDTH}px`,
+      "min-height": `${COMPOUND_MIN_HEIGHT}px`,
     },
+  },
+  {
+    // Composite nodes with an explicit, user-controlled size. The box is pinned
+    // to these dimensions; children are constrained to stay inside so the box
+    // never auto-grows or auto-shrinks when children are moved. Extra space is
+    // anchored to the bottom-right so moving one child does not re-center the
+    // whole group and shift siblings.
+    // `min-height-bias-bottom` is valid in Cytoscape but missing from its
+    // TypeScript definitions, so this style object is cast to satisfy the compiler.
+    selector: ":parent[compoundWidth]",
+    style: {
+      "min-width": "data(compoundWidth)",
+      "min-width-bias-left": "0%",
+      "min-width-bias-right": "100%",
+      "min-height": "data(compoundHeight)",
+      "min-height-bias-top": "0%",
+      "min-height-bias-bottom": "100%",
+    } as StylesheetStyle["style"],
   },
   {
     selector: "node.overflow",
@@ -63,7 +98,7 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    selector: "node:selected",
+    selector: "node:selected:childless",
     style: {
       "border-width": 3,
       "border-color": "#38bdf8",
@@ -71,7 +106,17 @@ export const CYTOSCAPE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    selector: "node:active",
+    // Keep border width stable on composites so selection does not recalculate
+    // compound bounds and shift the node (and all its children) on click.
+    selector: ":parent:selected",
+    style: {
+      "border-width": 2,
+      "border-color": "#38bdf8",
+      "border-opacity": 1,
+    },
+  },
+  {
+    selector: "node:active:childless",
     style: {
       "overlay-opacity": 0.15,
       "overlay-color": "#38bdf8",

@@ -10,6 +10,10 @@ const LAYOUT_KIND: &str = "bellman-gui-work-package-layout";
 pub struct NodePositionDto {
     pub x: f64,
     pub y: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub w: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub h: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -39,6 +43,10 @@ pub struct SaveTopLevelNodePositionRequest {
     pub node_id: String,
     pub x: f64,
     pub y: f64,
+    #[serde(default)]
+    pub w: Option<f64>,
+    #[serde(default)]
+    pub h: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +56,10 @@ pub struct SaveWorkPackageNodePositionRequest {
     pub node_id: String,
     pub x: f64,
     pub y: f64,
+    #[serde(default)]
+    pub w: Option<f64>,
+    #[serde(default)]
+    pub h: Option<f64>,
 }
 
 fn project_layout_key(project_id: &str) -> String {
@@ -88,14 +100,20 @@ pub fn save_top_level_node_position(
     node_id: &str,
     x: f64,
     y: f64,
+    w: Option<f64>,
+    h: Option<f64>,
 ) -> Result<WorkPackageLayoutDto, String> {
     let path = layout_path(root);
     let mut layout = load_work_package_layout(root)?;
 
-    layout.top_level.insert(
-        node_id.to_string(),
-        NodePositionDto { x, y },
-    );
+    let existing = layout.top_level.get(node_id);
+    let merged = NodePositionDto {
+        x,
+        y,
+        w: w.or_else(|| existing.and_then(|entry| entry.w)),
+        h: h.or_else(|| existing.and_then(|entry| entry.h)),
+    };
+    layout.top_level.insert(node_id.to_string(), merged);
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -120,6 +138,8 @@ pub fn save_work_package_node_position(
     node_id: &str,
     x: f64,
     y: f64,
+    w: Option<f64>,
+    h: Option<f64>,
 ) -> Result<WorkPackageLayoutDto, String> {
     let path = layout_path(root);
     let mut layout = load_work_package_layout(root)?;
@@ -134,14 +154,15 @@ pub fn save_work_package_node_position(
         }
     }
 
-    layout
-        .projects
-        .entry(project_key)
-        .or_default()
-        .insert(
-            node_id.to_string(),
-            NodePositionDto { x, y },
-        );
+    let bucket = layout.projects.entry(project_key).or_default();
+    let existing = bucket.get(node_id);
+    let merged = NodePositionDto {
+        x,
+        y,
+        w: w.or_else(|| existing.and_then(|entry| entry.w)),
+        h: h.or_else(|| existing.and_then(|entry| entry.h)),
+    };
+    bucket.insert(node_id.to_string(), merged);
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -290,16 +311,62 @@ mod tests {
             "billing-redesign--wp-invoicing",
             12.5,
             -8.0,
+            None,
+            None,
         )
         .expect("save");
 
         assert_eq!(
             saved.projects["billing-redesign"]["billing-redesign--wp-invoicing"],
-            NodePositionDto { x: 12.5, y: -8.0 }
+            NodePositionDto {
+                x: 12.5,
+                y: -8.0,
+                w: None,
+                h: None
+            }
         );
 
         let loaded = load_work_package_layout(dir.path()).expect("load");
         assert_eq!(loaded, saved);
+    }
+
+    #[test]
+    fn preserves_size_when_saving_position_and_merges_size() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join(".fits")).expect("fits dir");
+
+        save_work_package_node_position(
+            dir.path(),
+            "project--billing-redesign",
+            "billing-redesign--wp-parent",
+            0.0,
+            0.0,
+            Some(240.0),
+            Some(180.0),
+        )
+        .expect("save size");
+
+        // A later position-only save (drag) must preserve the composite size.
+        let moved = save_work_package_node_position(
+            dir.path(),
+            "project--billing-redesign",
+            "billing-redesign--wp-parent",
+            50.0,
+            -25.0,
+            None,
+            None,
+        )
+        .expect("save move");
+
+        assert_eq!(
+            moved.projects["billing-redesign"]["billing-redesign--wp-parent"],
+            NodePositionDto {
+                x: 50.0,
+                y: -25.0,
+                w: Some(240.0),
+                h: Some(180.0)
+            }
+        );
     }
 
     #[test]
@@ -315,7 +382,12 @@ mod tests {
                 "project--billing-redesign".to_string(),
                 BTreeMap::from([(
                     "billing-redesign--wp-invoicing".to_string(),
-                    NodePositionDto { x: 1.0, y: 2.0 },
+                    NodePositionDto {
+                        x: 1.0,
+                        y: 2.0,
+                        w: None,
+                        h: None,
+                    },
                 )]),
             )]),
         };
@@ -335,17 +407,29 @@ mod tests {
             "billing-redesign--wp-pdf-export",
             3.0,
             4.0,
+            None,
+            None,
         )
         .expect("save");
 
         assert!(!saved.projects.contains_key("project--billing-redesign"));
         assert_eq!(
             saved.projects["billing-redesign"]["billing-redesign--wp-invoicing"],
-            NodePositionDto { x: 1.0, y: 2.0 }
+            NodePositionDto {
+                x: 1.0,
+                y: 2.0,
+                w: None,
+                h: None
+            }
         );
         assert_eq!(
             saved.projects["billing-redesign"]["billing-redesign--wp-pdf-export"],
-            NodePositionDto { x: 3.0, y: 4.0 }
+            NodePositionDto {
+                x: 3.0,
+                y: 4.0,
+                w: None,
+                h: None
+            }
         );
     }
 
@@ -360,6 +444,8 @@ mod tests {
             "billing-redesign--wp-invoicing",
             1.0,
             2.0,
+            None,
+            None,
         )
         .expect("save");
 
@@ -379,12 +465,18 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join(".fits")).expect("fits dir");
 
-        let saved = save_top_level_node_position(dir.path(), "initiative--alpha", 42.0, -17.0)
-            .expect("save");
+        let saved =
+            save_top_level_node_position(dir.path(), "initiative--alpha", 42.0, -17.0, None, None)
+                .expect("save");
 
         assert_eq!(
             saved.top_level["initiative--alpha"],
-            NodePositionDto { x: 42.0, y: -17.0 }
+            NodePositionDto {
+                x: 42.0,
+                y: -17.0,
+                w: None,
+                h: None
+            }
         );
 
         let loaded = load_work_package_layout(dir.path()).expect("load");
@@ -403,7 +495,12 @@ mod tests {
                 kind: LAYOUT_KIND.to_string(),
                 top_level: BTreeMap::from([(
                     "initiative--alpha".to_string(),
-                    NodePositionDto { x: 1.0, y: 2.0 },
+                    NodePositionDto {
+                        x: 1.0,
+                        y: 2.0,
+                        w: None,
+                        h: None,
+                    },
                 )]),
                 projects: BTreeMap::new(),
             },
