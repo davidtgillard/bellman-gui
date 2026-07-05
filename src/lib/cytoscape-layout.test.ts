@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   autoLayoutOptions,
+  compoundGraphMaxZoom,
   compoundSizeForContent,
   graphLayoutSeed,
   shiftBoxInside,
+  TOP_LEVEL_GRAPH_MAX_ZOOM,
+  TOP_LEVEL_NODE_DIAMETER,
   usesPresetLayout,
   wheelZoomLevel,
 } from "./cytoscape-layout";
@@ -88,5 +91,16 @@ describe("cytoscape-layout", () => {
     expect(wheelZoomLevel(1, 120, 0, 0.2, 0.2, 3)).toBeLessThan(1);
     expect(wheelZoomLevel(0.2, 120, 0, 0.2, 0.2, 3)).toBe(0.2);
     expect(wheelZoomLevel(3, -120, 0, 0.2, 0.2, 3)).toBe(3);
+  });
+
+  it("matches work-package max zoom to top-level node screen size", () => {
+    const leafDiameter = 36;
+    const referenceZoom = 1.25;
+    const maxZoom = compoundGraphMaxZoom(referenceZoom, leafDiameter);
+    const topLevelMaxScreen = TOP_LEVEL_NODE_DIAMETER * TOP_LEVEL_GRAPH_MAX_ZOOM;
+    const leafMaxScreen = (leafDiameter / referenceZoom) * maxZoom;
+
+    expect(maxZoom).toBe(TOP_LEVEL_GRAPH_MAX_ZOOM * referenceZoom);
+    expect(leafMaxScreen).toBeCloseTo(topLevelMaxScreen);
   });
 });

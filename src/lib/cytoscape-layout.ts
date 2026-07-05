@@ -1,9 +1,39 @@
 import type { Core, EventObject, LayoutOptions, NodeSingular } from "cytoscape";
 import type { NodePosition, NodeSize } from "./graph-layout";
 import { MIN_NODE_DISTANCE } from "./graph-layout";
-import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH, COMPOUND_PADDING } from "./cytoscape-theme";
+import {
+  BELLMAN_COMPOUND_GRAPH_THEME,
+  COMPOUND_MIN_HEIGHT,
+  COMPOUND_MIN_WIDTH,
+  COMPOUND_PADDING,
+} from "./cytoscape-theme";
 
 export const LAYOUT_FIT_PADDING = 40;
+
+/** Maximum Cytoscape zoom for the top-level roadmap graph. */
+export const TOP_LEVEL_GRAPH_MAX_ZOOM = 3;
+
+/** Cytoscape model diameter of top-level circular nodes. */
+export const TOP_LEVEL_NODE_DIAMETER = 36;
+
+/**
+ * Maximum Cytoscape zoom for work-package graphs so leaf nodes reach the same
+ * on-screen diameter as top-level nodes at {@link TOP_LEVEL_GRAPH_MAX_ZOOM}.
+ *
+ * Leaf nodes are sized as `cssDiameter / referenceZoom` in model space, so their
+ * rendered diameter is `cssDiameter * (zoom / referenceZoom)`.
+ */
+export function compoundGraphMaxZoom(
+  referenceZoom: number,
+  leafNodeDiameter = BELLMAN_COMPOUND_GRAPH_THEME.leafNode.diameter,
+  topLevelNodeDiameter = TOP_LEVEL_NODE_DIAMETER,
+  topLevelMaxZoom = TOP_LEVEL_GRAPH_MAX_ZOOM,
+): number {
+  if (!(referenceZoom > 0)) {
+    return topLevelMaxZoom;
+  }
+  return topLevelMaxZoom * referenceZoom * (topLevelNodeDiameter / leafNodeDiameter);
+}
 
 /** Forces an immediate canvas repaint; use after programmatic position/size changes. */
 export function redrawGraphSynchronously(cy: Core): void {

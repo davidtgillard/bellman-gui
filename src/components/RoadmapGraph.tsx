@@ -22,10 +22,12 @@ import {
 import type { CompoundGraphScene } from "@dgillard/cytoscape-compound-graph";
 import { layoutModelFromCy } from "@dgillard/cytoscape-compound-graph";
 import {
+  compoundGraphMaxZoom,
   graphNodeModelPosition,
   installWheelZoom,
   redrawGraphSynchronously,
   runLayoutWhenContainerReady,
+  TOP_LEVEL_GRAPH_MAX_ZOOM,
   usesPresetLayout,
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
@@ -527,8 +529,9 @@ export function RoadmapGraph({
   }, []);
 
   const syncCompoundReferenceZoom = useCallback((cy: Core) => {
-    const zoom = cy.zoom();
-    setCompoundReferenceZoom(zoom > 0 ? zoom : 1);
+    const referenceZoom = cy.zoom() > 0 ? cy.zoom() : 1;
+    setCompoundReferenceZoom(referenceZoom);
+    cy.maxZoom(compoundGraphMaxZoom(referenceZoom));
   }, []);
 
   const initializeCompoundScene = useCallback(
@@ -835,7 +838,7 @@ export function RoadmapGraph({
       boxSelectionEnabled: false,
       userPanningEnabled: false,
       minZoom: 0.2,
-      maxZoom: 3,
+      maxZoom: TOP_LEVEL_GRAPH_MAX_ZOOM,
     });
 
     cyRef.current = cy;
@@ -1515,6 +1518,18 @@ export function RoadmapGraph({
     }
     cy.style().fromJson(compoundGraph ? workPackageGraphStylesheet() : CYTOSCAPE_STYLESHEET);
   }, [compoundGraph, cyReady]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy) {
+      return;
+    }
+    cy.maxZoom(
+      compoundGraph
+        ? compoundGraphMaxZoom(compoundReferenceZoom)
+        : TOP_LEVEL_GRAPH_MAX_ZOOM,
+    );
+  }, [compoundGraph, compoundReferenceZoom, cyReady]);
 
   useEffect(() => {
     const shell = graphContainerRef.current;
