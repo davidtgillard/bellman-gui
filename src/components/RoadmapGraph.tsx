@@ -9,25 +9,26 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { CYTOSCAPE_STYLESHEET } from "../lib/cytoscape-theme";
+import type { WorkPackageLayoutModel } from "@dgillard/cytoscape-compound-graph";
 import {
-  compoundSizeForContent,
-  applyCompoundGrabPolicy,
-  applyFrozenCompoundSize,
-  applySavedNodePositions,
-  childLeafAtRenderedPoint,
-  compoundAbsolutePosition,
-  compoundChromeRenderedBox,
-  installDragOverlapConstraints,
+  CYTOSCAPE_STYLESHEET,
+  workPackageGraphStylesheet,
+} from "../lib/cytoscape-theme";
+import {
+  buildCompoundGraphScene,
+  isCompoundGraphNodes,
+  sceneLayoutInputs,
+} from "../lib/compound-graph-adapter";
+import type { CompoundGraphScene } from "@dgillard/cytoscape-compound-graph";
+import { layoutModelFromCy } from "@dgillard/cytoscape-compound-graph";
+import {
+  graphNodeModelPosition,
   installWheelZoom,
-  dragCompoundParentTo,
-  snapshotSubtreePositions,
   redrawGraphSynchronously,
   runLayoutWhenContainerReady,
   usesPresetLayout,
 } from "../lib/cytoscape-layout";
-import { CompoundResizeHandles } from "./CompoundResizeHandles";
-import { CompoundDragHandle } from "./CompoundDragHandle";
+import { CompoundOverlays } from "./CompoundOverlays";
 import { defaultNodePosition, type NodePosition, type NodeSize } from "../lib/graph-layout";
 import { graphNodeDisplayLabel } from "../lib/graph";
 import {
@@ -95,12 +96,8 @@ interface RoadmapGraphProps {
   onAutoLayoutComplete?: (positions: Record<string, NodePosition>) => void;
   layoutReady?: boolean;
   layoutSyncToken?: number;
+  compoundGraph?: boolean;
 }
-
-// Extra room added around a composite's tight content bounds when its size is
-// first frozen, so children can be nudged within the box without immediately
-// hitting the walls.
-const INITIAL_COMPOUND_SLACK = 56;
 
 const FOCUS_DELAY_MS = 450;
 
@@ -152,7 +149,7 @@ function compositeChromeTargetId(
   }
 
   const node = selected.first();
-  if (!node.isParent()) {
+  if (node.data("kind") !== "container") {
     return null;
   }
 
@@ -188,8 +185,7 @@ function toElementDefinitions(
       ? `${baseLabel}\n${graphNodeDisplayLabel(node.subLabel)}`
       : baseLabel;
 
-    const hasSize =
-      node.data?.isCompound && saved?.w !== undefined && saved?.h !== undefined;
+    const hasSize = saved?.w !== undefined && saved?.h !== undefined;
 
     return {
       data: {
@@ -266,23 +262,86 @@ function graphStructureKey(nodes: GraphViewNode[], links: GraphViewLink[]): stri
   return `${nodePart}\n---\n${linkPart}`;
 }
 
-function syncNodePositions(
-  cy: Core,
-  nodePositions: Record<string, NodePosition> | undefined,
-): void {
-  applySavedNodePositions(cy, nodePositions);
+function modelAbsoluteCenter(
+  model: WorkPackageLayoutModel,
+  nodeId: string,
+): { x: number; y: number } {
+  const node = model.nodes.get(nodeId);
+  if (!node) {
+    return { x: 0, y: 0 };
+  }
+  let x = node.center.x;
+  let y = node.center.y;
+  let parentId = model.parentOf.get(nodeId);
+  while (parentId) {
+    const parent = model.nodes.get(parentId);
+    if (!parent) {
+      break;
+    }
+    x += parent.center.x;
+    y += parent.center.y;
+    parentId = model.parentOf.get(parentId);
+  }
+  return { x, y };
 }
 
-function nodePositionsKey(
-  nodePositions: Record<string, NodePosition> | undefined,
-): string {
-  if (!nodePositions) {
-    return "";
+function collectSubtreeIds(
+  model: WorkPackageLayoutModel,
+  rootId: string,
+): string[] {
+  const result: string[] = [rootId];
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    for (const childId of model.childrenOf.get(id) ?? []) {
+      result.push(childId);
+      stack.push(childId);
+    }
   }
-  return Object.entries(nodePositions)
-    .sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-    .map(([id, pos]) => `${id}:${pos.x},${pos.y},${pos.w ?? ""},${pos.h ?? ""}`)
-    .join("|");
+  return result;
+}
+
+function boxesOverlap(
+  left: { x1: number; y1: number; x2: number; y2: number },
+  right: { x1: number; y1: number; x2: number; y2: number },
+): boolean {
+  return !(
+    left.x2 <= right.x1 ||
+    right.x2 <= left.x1 ||
+    left.y2 <= right.y1 ||
+    right.y2 <= left.y1
+  );
+}
+
+function compoundLayoutOuterBox(layout: {
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+}): { x1: number; y1: number; x2: number; y2: number } | null {
+  if (layout.w === undefined || layout.h === undefined) {
+    return null;
+  }
+  return {
+    x1: layout.x - layout.w / 2,
+    y1: layout.y - layout.h / 2,
+    x2: layout.x + layout.w / 2,
+    y2: layout.y + layout.h / 2,
+  };
+}
+
+function layoutBoxToRendered(
+  cy: Core,
+  box: { x1: number; y1: number; x2: number; y2: number },
+): { x1: number; y1: number; x2: number; y2: number } {
+  const zoom = cy.zoom();
+  const pan = cy.pan();
+  return {
+    x1: box.x1 * zoom + pan.x,
+    y1: box.y1 * zoom + pan.y,
+    x2: box.x2 * zoom + pan.x,
+    y2: box.y2 * zoom + pan.y,
+  };
 }
 
 interface ContextMenuState {
@@ -309,15 +368,17 @@ export function RoadmapGraph({
   onAutoLayoutComplete,
   layoutReady = true,
   layoutSyncToken = 0,
+  compoundGraph = false,
 }: RoadmapGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const layoutCleanupRef = useRef<(() => void) | null>(null);
-  const dragConstraintCleanupRef = useRef<(() => void) | null>(null);
+  const sceneChildDragCleanupRef = useRef<(() => void) | null>(null);
+  const sceneParentDragCleanupRef = useRef<(() => void) | null>(null);
   const wheelZoomCleanupRef = useRef<(() => void) | null>(null);
   const graphStructureKeyRef = useRef("");
-  const appliedNodePositionsKeyRef = useRef("");
+  const sceneRef = useRef<CompoundGraphScene | null>(null);
   const layoutCompletedRef = useRef(false);
   const lastLayoutSyncTokenRef = useRef(0);
   const visibleNodeIdsRef = useRef(visibleNodeIds);
@@ -326,6 +387,160 @@ export function RoadmapGraph({
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onNodeResizeRef = useRef(onNodeResize);
   const onCompoundSizesMeasuredRef = useRef(onCompoundSizesMeasured);
+  const nodesRef = useRef(nodes);
+  const nodePositionsRef = useRef(nodePositions);
+  const layoutReadyRef = useRef(layoutReady);
+  const compoundGraphRef = useRef(compoundGraph);
+  const selectedNodeIdRef = useRef(selectedNodeId);
+  const lastSelectedCompoundLeafRef = useRef<string | null>(null);
+  const compoundLeafTapRef = useRef<
+    ((childId: string, wasSelected: boolean) => void) | null
+  >(null);
+  const compoundLeafClearAfterDragRef = useRef<((childId: string) => void) | null>(null);
+  const compoundLeafClickHandledRef = useRef(false);
+  const suppressLeafSelectionRef = useRef(false);
+  const pendingLeafDeselectRef = useRef(false);
+
+  const useCompoundScene = useCallback(
+    () => compoundGraphRef.current && isCompoundGraphNodes(nodesRef.current),
+    [],
+  );
+
+  const rebuildScene = useCallback(
+    (positions: Record<string, NodePosition> | undefined) => {
+      if (!useCompoundScene()) {
+        sceneRef.current = null;
+        return null;
+      }
+      const scene = buildCompoundGraphScene(
+        nodesRef.current,
+        links,
+        positions ?? nodePositionsRef.current,
+      );
+      sceneRef.current = scene;
+      return scene;
+    },
+    [links, useCompoundScene],
+  );
+
+  const persistSceneLayout = useCallback(() => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+    redrawGraphSynchronously(cyRef.current!);
+    setGraphSelectionRevision((revision) => revision + 1);
+    onNodePositionChangeRef.current?.(scene.flatLayout());
+  }, []);
+
+  const attachSceneHandlers = useCallback(
+    (cy: Core, scene: CompoundGraphScene) => {
+      sceneChildDragCleanupRef.current?.();
+      sceneParentDragCleanupRef.current?.();
+      let childDragGesture: {
+        childId: string;
+        wasSelected: boolean;
+        startLayout: { x: number; y: number };
+        pointerMoved: boolean;
+      } | null = null;
+
+      sceneChildDragCleanupRef.current = scene.attachChildDragHandlers(cy, {
+        onStart: (childId) => {
+          suppressLeafSelectionRef.current = true;
+          const node = cy.getElementById(childId);
+          const layout = scene.flatLayout()[childId];
+          childDragGesture = {
+            childId,
+            wasSelected:
+              (!node.empty() && node.selected()) ||
+              childId === selectedNodeIdRef.current ||
+              childId === lastSelectedCompoundLeafRef.current,
+            startLayout: { x: layout?.x ?? 0, y: layout?.y ?? 0 },
+            pointerMoved: false,
+          };
+        },
+        onMove: () => {
+          if (childDragGesture) {
+            childDragGesture.pointerMoved = true;
+          }
+        },
+        onEnd: () => {
+          persistSceneLayout();
+          const gesture = childDragGesture;
+          childDragGesture = null;
+          if (!gesture) {
+            return;
+          }
+          const endLayout = scene.flatLayout()[gesture.childId];
+          const modelMoved =
+            Math.hypot(
+              (endLayout?.x ?? 0) - gesture.startLayout.x,
+              (endLayout?.y ?? 0) - gesture.startLayout.y,
+            ) > 1;
+          if (!modelMoved && (gesture.wasSelected || !gesture.pointerMoved)) {
+            suppressLeafSelectionRef.current = false;
+            if (gesture.wasSelected) {
+              pendingLeafDeselectRef.current = true;
+            } else {
+              compoundLeafClickHandledRef.current = true;
+            }
+            compoundLeafTapRef.current?.(gesture.childId, gesture.wasSelected);
+            return;
+          }
+          if (!gesture.wasSelected) {
+            compoundLeafClearAfterDragRef.current?.(gesture.childId);
+          }
+        },
+      });
+      sceneParentDragCleanupRef.current = scene.attachParentDragHandlers(cy, {
+        onChange: persistSceneLayout,
+      });
+    },
+    [persistSceneLayout],
+  );
+
+  const reportNewCompoundSizes = useCallback((scene: CompoundGraphScene) => {
+    if (!layoutReadyRef.current || usesPresetLayout(nodePositionsRef.current)) {
+      return;
+    }
+    const callback = onCompoundSizesMeasuredRef.current;
+    if (!callback) {
+      return;
+    }
+    const layout = scene.flatLayout();
+    const sizes: Record<string, NodeSize> = {};
+    const measuredPositions: Record<string, NodePosition> = {};
+    for (const [nodeId, position] of Object.entries(layout)) {
+      if (position.w === undefined || position.h === undefined) {
+        continue;
+      }
+      const saved = nodePositionsRef.current?.[nodeId];
+      if (saved?.w !== undefined && saved?.h !== undefined) {
+        continue;
+      }
+      sizes[nodeId] = { w: position.w, h: position.h };
+      measuredPositions[nodeId] = position;
+    }
+    if (Object.keys(sizes).length > 0) {
+      callback(sizes, measuredPositions);
+    }
+  }, []);
+
+  const initializeCompoundScene = useCallback(
+    (cy: Core) => {
+      if (!useCompoundScene()) {
+        return;
+      }
+      const scene = rebuildScene(nodePositionsRef.current);
+      if (!scene) {
+        return;
+      }
+      scene.initializeFromCy(cy);
+      attachSceneHandlers(cy, scene);
+      reportNewCompoundSizes(scene);
+    },
+    [attachSceneHandlers, rebuildScene, reportNewCompoundSizes, useCompoundScene],
+  );
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
   const contextMenuRef = useRef(contextMenu);
   const keyboardPanRef = useRef(
@@ -355,49 +570,8 @@ export function RoadmapGraph({
     }
   }, []);
 
-  const measureCompoundSizes = useCallback((cy: Core) => {
-    const callback = onCompoundSizesMeasuredRef.current;
-    if (!callback) {
-      return;
-    }
-
-    const sizes: Record<string, NodeSize> = {};
-    const measuredPositions: Record<string, NodePosition> = {};
-    cy.batch(() => {
-      cy.nodes().forEach((node) => {
-        if (!node.isParent()) {
-          return;
-        }
-        if (node.data("compoundWidth") !== undefined && node.data("compoundHeight") !== undefined) {
-          return;
-        }
-
-        const children = node.children();
-        const box = children.nonempty()
-          ? children.boundingBox({ includeLabels: true, includeOverlays: false })
-          : null;
-        const fit = compoundSizeForContent(
-          box ? { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 } : null,
-        );
-        const size = {
-          w: fit.w + INITIAL_COMPOUND_SLACK,
-          h: fit.h + INITIAL_COMPOUND_SLACK,
-        };
-        applyFrozenCompoundSize(node, size.w, size.h);
-        sizes[node.id()] = size;
-        const position = node.position();
-        measuredPositions[node.id()] = {
-          x: position.x,
-          y: position.y,
-          w: size.w,
-          h: size.h,
-        };
-      });
-    });
-
-    if (Object.keys(sizes).length > 0) {
-      callback(sizes, measuredPositions);
-    }
+  const measureCompoundSizes = useCallback(() => {
+    // Compound sizing is handled by CompoundGraphScene.initializeFromCy.
   }, []);
 
   useEffect(() => {
@@ -419,6 +593,51 @@ export function RoadmapGraph({
   useEffect(() => {
     onNodeResizeRef.current = onNodeResize;
   }, [onNodeResize]);
+
+  useEffect(() => {
+    compoundGraphRef.current = compoundGraph;
+  }, [compoundGraph]);
+
+  useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId;
+  }, [selectedNodeId]);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    nodePositionsRef.current = nodePositions;
+  }, [nodePositions]);
+
+  useEffect(() => {
+    layoutReadyRef.current = layoutReady;
+  }, [layoutReady]);
+
+  useEffect(() => {
+    if (!cyReady || !useCompoundScene()) {
+      return;
+    }
+    const cy = cyRef.current;
+    if (!cy || !usesPresetLayout(nodePositions) || cy.nodes().length === 0) {
+      return;
+    }
+    const scene = rebuildScene(nodePositions);
+    if (!scene) {
+      return;
+    }
+    scene.initializeFromCy(cy);
+    if (layoutCompletedRef.current) {
+      attachSceneHandlers(cy, scene);
+    }
+  }, [
+    attachSceneHandlers,
+    cyReady,
+    layoutSyncToken,
+    nodePositions,
+    rebuildScene,
+    useCompoundScene,
+  ]);
 
   useEffect(() => {
     onCompoundSizesMeasuredRef.current = onCompoundSizesMeasured;
@@ -578,8 +797,10 @@ export function RoadmapGraph({
 
     layoutCleanupRef.current?.();
     layoutCleanupRef.current = null;
-    dragConstraintCleanupRef.current?.();
-    dragConstraintCleanupRef.current = null;
+    sceneChildDragCleanupRef.current?.();
+    sceneChildDragCleanupRef.current = null;
+    sceneParentDragCleanupRef.current?.();
+    sceneParentDragCleanupRef.current = null;
     wheelZoomCleanupRef.current?.();
     wheelZoomCleanupRef.current = null;
 
@@ -594,7 +815,7 @@ export function RoadmapGraph({
 
     const cy = cytoscape({
       container,
-      style: CYTOSCAPE_STYLESHEET,
+      style: compoundGraph ? workPackageGraphStylesheet() : CYTOSCAPE_STYLESHEET,
       wheelSensitivity: 0.2,
       boxSelectionEnabled: false,
       userPanningEnabled: false,
@@ -613,6 +834,7 @@ export function RoadmapGraph({
         selectNode?: (nodeId: string) => void;
         selectGraphNodeOnly?: (nodeId: string) => void;
         tapGraphNode?: (nodeId: string) => void;
+        tapGraphBackground?: () => void;
         getGraphNodeState?: (
           nodeId: string,
         ) => { x: number; y: number; w?: number; h?: number } | null;
@@ -629,6 +851,13 @@ export function RoadmapGraph({
           dx: number,
           dy: number,
         ) => void;
+        getNodeVisualBox?: (
+          nodeId: string,
+        ) => { x1: number; y1: number; x2: number; y2: number } | null;
+        nodesOverlap?: (leftId: string, rightId: string) => boolean;
+        isNodeRenderedVisible?: (nodeId: string) => boolean;
+        getSubtreeNodeIds?: (rootId: string) => string[];
+        getSelectedGraphNodeId?: () => string | null;
       };
     };
     if (testWindow.__TEST__) {
@@ -666,15 +895,38 @@ export function RoadmapGraph({
         if (node.empty()) {
           throw new Error(`Graph node not found: ${nodeId}`);
         }
+        if (compoundGraph && node.data("kind") === "leaf") {
+          if (node.selected()) {
+            const cleared = onSelectionClearRef.current?.() ?? false;
+            if (cleared) {
+              cy.nodes().unselect();
+              graphContainerRef.current?.focus({ preventScroll: true });
+            }
+          } else {
+            suppressLeafSelectionRef.current = false;
+            cy.nodes().unselect();
+            node.select();
+            onNodeClickRef.current?.(nodeId);
+          }
+          return;
+        }
         node.trigger("mousedown");
         node.trigger("tap");
+      };
+      testWindow.__TEST__.tapGraphBackground = () => {
+        closeContextMenu();
+        const cleared = onSelectionClearRef.current?.() ?? false;
+        if (cleared) {
+          cy.nodes().unselect();
+          graphContainerRef.current?.focus({ preventScroll: true });
+        }
       };
       testWindow.__TEST__.getGraphNodeState = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
         if (node.empty()) {
           return null;
         }
-        const position = node.position();
+        const position = graphNodeModelPosition(node);
         const state: {
           x: number;
           y: number;
@@ -686,40 +938,64 @@ export function RoadmapGraph({
           x: position.x,
           y: position.y,
         };
-        if (node.isParent()) {
+        const width = node.data("compoundWidth");
+        const height = node.data("compoundHeight");
+        const isCompound =
+          node.data("kind") === "container" ||
+          width !== undefined ||
+          height !== undefined;
+        if (isCompound) {
           const box = node.boundingBox({ includeLabels: false, includeOverlays: false });
           state.x1 = box.x1;
           state.y1 = box.y1;
-          const width = node.data("compoundWidth");
-          const height = node.data("compoundHeight");
           if (width !== undefined && height !== undefined) {
             state.w = Number(width);
             state.h = Number(height);
+          } else {
+            state.w = box.x2 - box.x1;
+            state.h = box.y2 - box.y1;
           }
         }
         return state;
       };
       testWindow.__TEST__.getCompositeChildOffsets = (parentId: string) => {
-        const parent = cy.getElementById(parentId);
-        if (parent.empty() || !parent.isParent()) {
+        const scene = sceneRef.current;
+        const model = scene?.getModel();
+        if (!model) {
           return {};
         }
         const offsets: Record<string, { dx: number; dy: number }> = {};
-        parent.children().forEach((child) => {
-          const position = child.position();
-          offsets[child.id()] = {
-            dx: position.x,
-            dy: position.y,
-          };
-        });
+        for (const childId of model.childrenOf.get(parentId) ?? []) {
+          const child = model.nodes.get(childId);
+          if (child) {
+            offsets[childId] = { dx: child.center.x, dy: child.center.y };
+          }
+        }
         return offsets;
       };
       testWindow.__TEST__.getCompositeRenderedBox = (parentId: string) => {
-        const parent = cy.getElementById(parentId);
-        if (parent.empty() || !parent.isParent()) {
+        const node = cy.getElementById(parentId);
+        if (node.empty()) {
           return null;
         }
-        const box = compoundChromeRenderedBox(parent);
+        const position = graphNodeModelPosition(node);
+        const width = node.data("compoundWidth");
+        const height = node.data("compoundHeight");
+        if (width !== undefined && height !== undefined) {
+          const outer = compoundLayoutOuterBox({
+            x: position.x,
+            y: position.y,
+            w: Number(width),
+            h: Number(height),
+          });
+          if (outer) {
+            return layoutBoxToRendered(cy, outer);
+          }
+        }
+        const box = node.renderedBoundingBox({
+          includeLabels: false,
+          includeOverlays: false,
+        });
         return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
       };
       testWindow.__TEST__.getGraphNodeRenderedCenter = (nodeId: string) => {
@@ -739,23 +1015,77 @@ export function RoadmapGraph({
         };
       };
       testWindow.__TEST__.getGraphNodeAbsolutePosition = (nodeId: string) => {
+        if (compoundGraphRef.current && isCompoundGraphNodes(nodesRef.current)) {
+          const model = layoutModelFromCy(cy, sceneLayoutInputs(nodesRef.current));
+          return modelAbsoluteCenter(model, nodeId);
+        }
         const node = cy.getElementById(nodeId);
         if (node.empty()) {
           throw new Error(`Graph node not found: ${nodeId}`);
         }
-        return compoundAbsolutePosition(node);
+        const position = node.position();
+        return { x: position.x, y: position.y };
       };
       testWindow.__TEST__.dragCompositeParentBy = (parentId, dx, dy) => {
-        const node = cy.getElementById(parentId);
-        if (node.empty() || !node.isParent()) {
+        const scene = sceneRef.current;
+        if (!scene) {
+          throw new Error("compound scene is unavailable");
+        }
+        const parent = cy.getElementById(parentId);
+        if (parent.empty()) {
           throw new Error(`Composite parent not found: ${parentId}`);
         }
-        const start = snapshotSubtreePositions(node);
-        const position = node.position();
-        dragCompoundParentTo(cy, node, start, {
-          x: position.x + dx,
-          y: position.y + dy,
-        });
+        const position = parent.position();
+        parent.trigger("grab");
+        parent.position({ x: position.x + dx, y: position.y + dy });
+        parent.trigger("drag");
+        parent.trigger("free");
+      };
+      testWindow.__TEST__.getNodeVisualBox = (nodeId) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          return null;
+        }
+        const box = node.boundingBox({ includeLabels: true, includeOverlays: false });
+        return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
+      };
+      testWindow.__TEST__.nodesOverlap = (leftId, rightId) => {
+        const scene = sceneRef.current;
+        if (scene) {
+          const layout = scene.flatLayout();
+          const leftOuter = layout[leftId] ? compoundLayoutOuterBox(layout[leftId]) : null;
+          const rightOuter = layout[rightId] ? compoundLayoutOuterBox(layout[rightId]) : null;
+          if (leftOuter && rightOuter) {
+            return boxesOverlap(leftOuter, rightOuter);
+          }
+        }
+        const left = cy.getElementById(leftId);
+        const right = cy.getElementById(rightId);
+        if (left.empty() || right.empty()) {
+          return false;
+        }
+        const leftBox = left.boundingBox({ includeLabels: true, includeOverlays: false });
+        const rightBox = right.boundingBox({ includeLabels: true, includeOverlays: false });
+        return boxesOverlap(leftBox, rightBox);
+      };
+      testWindow.__TEST__.isNodeRenderedVisible = (nodeId) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          return false;
+        }
+        return node.style("display") !== "none";
+      };
+      testWindow.__TEST__.getSubtreeNodeIds = (rootId) => {
+        const scene = sceneRef.current;
+        const model = scene?.getModel();
+        if (!model) {
+          return [rootId];
+        }
+        return collectSubtreeIds(model, rootId);
+      };
+      testWindow.__TEST__.getSelectedGraphNodeId = () => {
+        const selected = cy.nodes(":selected");
+        return selected.length > 0 ? selected[0].id() : null;
       };
     }
 
@@ -770,15 +1100,76 @@ export function RoadmapGraph({
       const cleared = onSelectionClearRef.current?.() ?? false;
       if (cleared) {
         cy.nodes().unselect();
+        lastSelectedCompoundLeafRef.current = null;
         graphContainerRef.current?.focus({ preventScroll: true });
       }
       return cleared;
+    };
+
+    const selectCompoundLeaf = (childId: string) => {
+      suppressLeafSelectionRef.current = false;
+      closeContextMenu();
+      cy.nodes().unselect();
+      const node = cy.getElementById(childId);
+      if (!node.empty()) {
+        node.select();
+      }
+    };
+
+    compoundLeafTapRef.current = (childId, wasSelected) => {
+      if (wasSelected) {
+        selectedNodeIdAtPointerDown = null;
+        clearGraphSelectionIfAllowed();
+        return;
+      }
+      selectedNodeIdAtPointerDown = null;
+      selectCompoundLeaf(childId);
+    };
+
+    compoundLeafClearAfterDragRef.current = (childId) => {
+      const node = cy.getElementById(childId);
+      if (!node.empty() && node.selected()) {
+        clearGraphSelectionIfAllowed();
+      }
     };
 
     cy.on("tap", "node", (event) => {
       closeContextMenu();
       const node = event.target;
       const nodeId = node.id();
+
+      if (compoundGraph && node.data("kind") === "leaf") {
+        if (compoundLeafClickHandledRef.current) {
+          compoundLeafClickHandledRef.current = false;
+          return;
+        }
+        const childId = nodeId;
+        const shouldToggleOff =
+          pendingLeafDeselectRef.current ||
+          node.selected() ||
+          childId === selectedNodeIdRef.current ||
+          childId === lastSelectedCompoundLeafRef.current;
+        window.setTimeout(() => {
+          if (pendingLeafDeselectRef.current) {
+            pendingLeafDeselectRef.current = false;
+            clearGraphSelectionIfAllowed();
+            return;
+          }
+          if (!shouldToggleOff) {
+            return;
+          }
+          const cyNode = cy.getElementById(childId);
+          if (
+            cyNode.nonempty() &&
+            (cyNode.selected() ||
+              childId === selectedNodeIdRef.current ||
+              childId === lastSelectedCompoundLeafRef.current)
+          ) {
+            clearGraphSelectionIfAllowed();
+          }
+        }, 0);
+        return;
+      }
 
       if (selectedNodeIdAtPointerDown === nodeId) {
         selectedNodeIdAtPointerDown = null;
@@ -797,6 +1188,19 @@ export function RoadmapGraph({
       setGraphSelectionRevision((revision) => revision + 1);
     };
     cy.on("select", "node", (event) => {
+      const node = event.target;
+      if (
+        compoundGraph &&
+        node.data("kind") === "leaf" &&
+        suppressLeafSelectionRef.current
+      ) {
+        suppressLeafSelectionRef.current = false;
+        node.unselect();
+        return;
+      }
+      if (compoundGraph && node.data("kind") === "leaf") {
+        lastSelectedCompoundLeafRef.current = node.id();
+      }
       onNodeClickRef.current?.(event.target.id());
       bumpGraphSelection();
     });
@@ -910,11 +1314,6 @@ export function RoadmapGraph({
       });
     });
 
-    dragConstraintCleanupRef.current = installDragOverlapConstraints(cy, (positions) => {
-      redrawGraphSynchronously(cy);
-      setGraphSelectionRevision((revision) => revision + 1);
-      onNodePositionChangeRef.current?.(positions);
-    });
     wheelZoomCleanupRef.current = installWheelZoom(
       graphContainerRef.current ?? container.parentElement ?? container,
       cy,
@@ -959,8 +1358,10 @@ export function RoadmapGraph({
     return () => {
       layoutCleanupRef.current?.();
       layoutCleanupRef.current = null;
-      dragConstraintCleanupRef.current?.();
-      dragConstraintCleanupRef.current = null;
+      sceneChildDragCleanupRef.current?.();
+      sceneChildDragCleanupRef.current = null;
+      sceneParentDragCleanupRef.current?.();
+      sceneParentDragCleanupRef.current = null;
       wheelZoomCleanupRef.current?.();
       wheelZoomCleanupRef.current = null;
       resizeObserver.disconnect();
@@ -968,6 +1369,8 @@ export function RoadmapGraph({
       layoutCompletedRef.current = false;
       lastLayoutSyncTokenRef.current = 0;
       setCyReady(false);
+      compoundLeafTapRef.current = null;
+      compoundLeafClearAfterDragRef.current = null;
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
         delete testWindow.__TEST__.graphUserPanningEnabled;
@@ -1005,41 +1408,34 @@ export function RoadmapGraph({
 
     if (structureChanged) {
       graphStructureKeyRef.current = structureKey;
-      appliedNodePositionsKeyRef.current = "";
       layoutCompletedRef.current = false;
       setGraphSelectionRevision((revision) => revision + 1);
       cy.batch(() => {
         cy.elements().remove();
-        cy.add(toElementDefinitions(nodes, links, nodePositions));
+        if (compoundGraph && isCompoundGraphNodes(nodes)) {
+          const scene = rebuildScene(nodePositions);
+          if (scene) {
+            cy.add(scene.buildElements());
+            if (usesPresetLayout(nodePositions)) {
+              scene.initializeFromCy(cy);
+            }
+          }
+        } else {
+          cy.add(toElementDefinitions(nodes, links, nodePositions));
+        }
       });
-      if (usesPresetLayout(nodePositions)) {
-        applySavedNodePositions(cy, nodePositions);
-      }
     } else if (layoutSyncToken > lastLayoutSyncTokenRef.current) {
-      // Layout just loaded from disk: apply saved positions once. Ongoing drag
-      // and resize updates mutate Cytoscape directly and must not be overwritten
-      // by React state on every persisted position change.
-      syncNodePositions(cy, nodePositions);
+      if (compoundGraph && isCompoundGraphNodes(nodes)) {
+        const scene = rebuildScene(nodePositions);
+        if (scene && usesPresetLayout(nodePositions) && cy.nodes().length > 0) {
+          scene.initializeFromCy(cy);
+        }
+      }
       lastLayoutSyncTokenRef.current = layoutSyncToken;
     }
 
-    const positionsKey = nodePositionsKey(nodePositions);
-    const hasCompoundStructure = nodes.some(
-      (node) => Boolean(node.parent || node.data?.isCompound),
-    );
-    if (
-      hasCompoundStructure &&
-      positionsKey &&
-      positionsKey !== appliedNodePositionsKeyRef.current
-    ) {
-      appliedNodePositionsKeyRef.current = positionsKey;
-      applySavedNodePositions(cy, nodePositions);
-      if (layoutCompletedRef.current) {
-        measureCompoundSizes(cy);
-      }
-    }
-
-    applyCompoundGrabPolicy(cy, draggable);
+    const hasCompoundNodes =
+      compoundGraph && nodes.some((node) => Boolean(node.parent || node.data?.isCompound));
 
     if (!layoutReady || layoutCompletedRef.current) {
       return;
@@ -1050,14 +1446,19 @@ export function RoadmapGraph({
       container,
       nodePositions,
       links.length,
-      nodes.some((node) => Boolean(node.parent || node.data?.isCompound)),
-      (positions) => onAutoLayoutCompleteRef.current?.(positions),
+      Boolean(hasCompoundNodes),
+      (positions) => {
+        onAutoLayoutCompleteRef.current?.(positions);
+      },
       () => {
         layoutCompletedRef.current = true;
         if (cyRef.current) {
           applyGraphVisibility(cyRef.current, true);
-          measureCompoundSizes(cyRef.current);
-          applyCompoundGrabPolicy(cyRef.current, draggable);
+          if (hasCompoundNodes) {
+            initializeCompoundScene(cyRef.current);
+          } else {
+            measureCompoundSizes();
+          }
         }
       },
     );
@@ -1068,14 +1469,17 @@ export function RoadmapGraph({
     };
   }, [
     applyGraphVisibility,
+    compoundGraph,
     cyReady,
     draggable,
+    initializeCompoundScene,
     layoutReady,
     layoutSyncToken,
     links,
     measureCompoundSizes,
     nodePositions,
     nodes,
+    rebuildScene,
   ]);
 
   useEffect(() => {
@@ -1088,53 +1492,32 @@ export function RoadmapGraph({
   }, [applyGraphVisibility, cyReady, visibleNodeIds]);
 
   useEffect(() => {
-    const shell = graphContainerRef.current;
     const cy = cyRef.current;
-    if (!cyReady || !shell || !cy || !draggable) {
+    if (!cyReady || !cy) {
       return;
     }
+    cy.style().fromJson(compoundGraph ? workPackageGraphStylesheet() : CYTOSCAPE_STYLESHEET);
+  }, [compoundGraph, cyReady]);
 
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest(".compound-resize-handle, .compound-drag-handle")
-      ) {
-        return;
-      }
-
-      const container = cy.container();
-      if (!container) {
-        return;
-      }
-
-      const rect = container.getBoundingClientRect();
-      const child = childLeafAtRenderedPoint(
-        cy,
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-      );
-      if (!child) {
-        return;
-      }
-
-      shell.classList.add("graph-child-pointer-active");
-    };
+  useEffect(() => {
+    const shell = graphContainerRef.current;
+    const cy = cyRef.current;
+    if (!cyReady || !shell || !cy || !draggable || !compoundGraph) {
+      return;
+    }
 
     const onPointerEnd = () => {
       shell.classList.remove("graph-child-pointer-active");
     };
 
-    shell.addEventListener("pointerdown", onPointerDown, true);
     shell.addEventListener("pointerup", onPointerEnd, true);
     shell.addEventListener("pointercancel", onPointerEnd, true);
     return () => {
-      shell.removeEventListener("pointerdown", onPointerDown, true);
       shell.removeEventListener("pointerup", onPointerEnd, true);
       shell.removeEventListener("pointercancel", onPointerEnd, true);
       shell.classList.remove("graph-child-pointer-active");
     };
-  }, [cyReady, draggable]);
+  }, [compoundGraph, cyReady, draggable]);
 
   useEffect(() => {
     const shell = graphContainerRef.current;
@@ -1205,32 +1588,34 @@ export function RoadmapGraph({
     !nodes.some((node) => visibleNodeIds.has(node.id));
 
   const resizeCy = cyReady ? cyRef.current : null;
+  const activeScene = sceneRef.current;
   void graphSelectionRevision;
   const compositeChromeId = compositeChromeTargetId(resizeCy, nodes);
   const compositeChromeNode = compositeChromeId
     ? nodes.find((node) => node.id === compositeChromeId)
     : undefined;
+  const overlayProbeLabel = graphNodeDisplayLabel(
+    compositeChromeNode?.label ??
+      nodes.find((node) => node.data?.isCompound === false && !node.data?.isOverflow)?.label ??
+      "child",
+  );
 
   return (
     <div className="graph-container" ref={graphContainerRef} aria-label="Roadmap graph">
-      <div className="graph-viewport" ref={containerRef} />
-      {draggable && resizeCy && compositeChromeId && compositeChromeNode?.data?.isCompound ? (
-        <CompoundDragHandle
+      <div
+        className={`graph-viewport${activeScene?.isChildDragInProgress() ? " graph-viewport-dragging" : ""}`}
+        ref={containerRef}
+      />
+      {draggable && resizeCy && activeScene && compoundGraph ? (
+        <CompoundOverlays
           cy={resizeCy}
-          nodeId={compositeChromeId}
-          label={graphNodeDisplayLabel(compositeChromeNode.label ?? compositeChromeId)}
-          onDragComplete={(positions) =>
-            onNodePositionChangeRef.current?.(positions)
-          }
-        />
-      ) : null}
-      {draggable && resizeCy && compositeChromeId ? (
-        <CompoundResizeHandles
-          cy={resizeCy}
-          nodeId={compositeChromeId}
+          scene={activeScene}
+          probeLabel={overlayProbeLabel}
+          selectedContainerId={compositeChromeId}
           onResizeComplete={(nodeId, position) =>
             onNodeResizeRef.current?.(nodeId, position)
           }
+          onOverlayChange={() => setGraphSelectionRevision((revision) => revision + 1)}
         />
       ) : null}
       {nodes.length === 0 || allTypesHidden ? (

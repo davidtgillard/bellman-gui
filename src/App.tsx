@@ -41,6 +41,7 @@ import { traceUndo } from "./lib/undo-trace";
 import {
   applyNodePlacement,
   EMPTY_WORK_PACKAGE_LAYOUT,
+  fromWorkPackageLayoutDto,
   loadWorkPackageLayout,
   normalizeLayoutForNodes,
   normalizeTopLevelPositions,
@@ -89,6 +90,16 @@ const INITIAL_GRAPH_VIEW_STACK: GraphViewFrame[] = [{ kind: "top" }];
 
 function roadmapLayoutPersistable(root: string, editable: boolean): boolean {
   return editable && root !== "example";
+}
+
+function readTestScenarioLayout(): WorkPackageLayout | undefined {
+  const scenario = (
+    window as typeof window & { __TEST_SCENARIO__?: { layout?: Parameters<typeof fromWorkPackageLayoutDto>[0] } }
+  ).__TEST_SCENARIO__;
+  if (!scenario?.layout) {
+    return undefined;
+  }
+  return fromWorkPackageLayoutDto(scenario.layout);
 }
 
 function App() {
@@ -143,6 +154,7 @@ function App() {
   const layoutHydrated =
     currentLayoutKey === null || hydratedLayoutKey === currentLayoutKey;
   const workPackageLayoutRef = useRef(workPackageLayout);
+  const layoutLoadRequestRef = useRef(0);
   const layoutSaveChainRef = useRef(Promise.resolve());
 
   interface ApplyGraphOptions {
@@ -276,29 +288,36 @@ function App() {
   }, [applyGraph, canRedo, refreshUndoState, roadmapRoot]);
 
   useEffect(() => {
-    if (!currentLayoutKey || hydratedLayoutKey === currentLayoutKey) {
+    if (!currentLayoutKey) {
+      return;
+    }
+    if (
+      hydratedLayoutKey === currentLayoutKey &&
+      Object.keys(workPackageLayoutRef.current.projects).length > 0
+    ) {
       return;
     }
 
-    let cancelled = false;
+    const requestId = ++layoutLoadRequestRef.current;
 
     void loadWorkPackageLayout(roadmapRoot)
       .then((layout) => {
-        if (!cancelled) {
-          setWorkPackageLayout(layout);
-          setHydratedLayoutKey(currentLayoutKey);
-          setLayoutSyncToken((token) => token + 1);
+        if (requestId !== layoutLoadRequestRef.current) {
+          return;
         }
+        setWorkPackageLayout(layout);
+        setHydratedLayoutKey(currentLayoutKey);
+        setLayoutSyncToken((token) => token + 1);
       })
       .catch((caught) => {
-        if (!cancelled) {
-          setError(String(caught));
-          setHydratedLayoutKey(currentLayoutKey);
+        if (requestId !== layoutLoadRequestRef.current) {
+          return;
         }
+        setError(String(caught));
       });
 
     return () => {
-      cancelled = true;
+      layoutLoadRequestRef.current += 1;
     };
   }, [currentLayoutKey, hydratedLayoutKey, roadmapRoot]);
 
@@ -392,48 +411,53 @@ function App() {
       }
 
       const projectId = currentProjectId(graphViewStack);
-      const current = workPackageLayoutRef.current;
-      const existing = projectId
-        ? projectNodePositions(current, projectId)
-        : topLevelNodePositions(current);
-
-      // Freeze an initial size for any composite that does not yet have one, so
-      // its box stops auto-resizing when children are moved. Composites that
-      // already have a saved size are left untouched.
-      let nextLayout = current;
-      let changed = false;
-      for (const [nodeId, size] of Object.entries(sizes)) {
-        const saved = existing[nodeId];
-        if (saved && saved.w !== undefined && saved.h !== undefined) {
-          continue;
-        }
-        const position = saved ?? measuredPositions[nodeId];
-        if (!position) {
-          continue;
-        }
-        nextLayout = projectId
-          ? withNodePosition(nextLayout, projectId, nodeId, {
-              ...position,
-              w: size.w,
-              h: size.h,
-            })
-          : withTopLevelNodePosition(nextLayout, nodeId, {
-              ...position,
-              w: size.w,
-              h: size.h,
-            });
-        changed = true;
-      }
-
-      if (!changed) {
+      if (isWorkPackageGraphView(graphViewStack) && !projectId) {
         return;
       }
 
-      workPackageLayoutRef.current = nextLayout;
-      setWorkPackageLayout(nextLayout);
-      void saveGraphLayout(roadmapRoot, nextLayout).catch((caught) =>
-        setError(String(caught)),
-      );
+      setWorkPackageLayout((current) => {
+        const existing = projectId
+          ? projectNodePositions(current, projectId)
+          : topLevelNodePositions(current);
+
+        // Freeze an initial size for any composite that does not yet have one, so
+        // its box stops auto-resizing when children are moved. Composites that
+        // already have a saved size are left untouched.
+        let nextLayout = current;
+        let changed = false;
+        for (const [nodeId, size] of Object.entries(sizes)) {
+          const saved = existing[nodeId];
+          if (saved && saved.w !== undefined && saved.h !== undefined) {
+            continue;
+          }
+          const position = saved ?? measuredPositions[nodeId];
+          if (!position) {
+            continue;
+          }
+          nextLayout = projectId
+            ? withNodePosition(nextLayout, projectId, nodeId, {
+                ...position,
+                w: size.w,
+                h: size.h,
+              })
+            : withTopLevelNodePosition(nextLayout, nodeId, {
+                ...position,
+                w: size.w,
+                h: size.h,
+              });
+          changed = true;
+        }
+
+        if (!changed) {
+          return current;
+        }
+
+        workPackageLayoutRef.current = nextLayout;
+        void saveGraphLayout(roadmapRoot, nextLayout).catch((caught) =>
+          setError(String(caught)),
+        );
+        return nextLayout;
+      });
     },
     [editable, graphViewStack, layoutHydrated, roadmapRoot],
   );
@@ -687,12 +711,29 @@ function App() {
       .then((dto) => {
         if (dto) {
           const graph = fromRoadmapGraphDto(dto);
-          applyGraph(graph, { resetVisibleTypes: true });
+          const testLayout = readTestScenarioLayout();
+          applyGraph(graph, {
+            resetVisibleTypes: true,
+            ...(testLayout ? { layout: testLayout } : {}),
+          });
           void refreshUndoState(graph.root, graph.editable);
         }
       })
       .catch((caught) => setError(String(caught)));
   }, [applyGraph, refreshUndoState]);
+
+  useEffect(() => {
+    if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
+      return;
+    }
+    const testLayout = readTestScenarioLayout();
+    if (!testLayout || Object.keys(workPackageLayout.projects).length > 0) {
+      return;
+    }
+    setWorkPackageLayout(testLayout);
+    setHydratedLayoutKey(`${roadmapRoot}:${editable}`);
+    setLayoutSyncToken((token) => token + 1);
+  }, [editable, roadmapRoot, workPackageLayout.projects]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -1280,6 +1321,7 @@ function App() {
           <RoadmapGraphView
             nodes={graphViewNodes}
             links={graphViewLinks}
+            compoundGraph={inWorkPackageGraph}
             visibleNodeIds={visibleNodeIds}
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}

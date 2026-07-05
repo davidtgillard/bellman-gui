@@ -29,6 +29,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@uiw/react-codemirror": "^4.25.10",
+    "@dgillard/cytoscape-compound-graph": "file:../cytoscope-compound-graph.git/packages/cytoscape-compound-graph",
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",
     "react": "^19.1.0",

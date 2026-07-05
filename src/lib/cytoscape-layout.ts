@@ -253,6 +253,31 @@ function boundingBoxToVisual(box: {
   return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
 }
 
+function compoundOuterBox(parent: NodeSingular): VisualBox {
+  const box = parent.boundingBox({ includeLabels: false, includeOverlays: false });
+  const width = parent.data("compoundWidth");
+  const height = parent.data("compoundHeight");
+  if (width === undefined || height === undefined) {
+    return boundingBoxToVisual(box);
+  }
+
+  const w = Number(width);
+  const h = Number(height);
+  const renderedW = box.x2 - box.x1;
+  const renderedH = box.y2 - box.y1;
+  if (Math.abs(renderedW - w) <= 1 && Math.abs(renderedH - h) <= 1) {
+    return boundingBoxToVisual(box);
+  }
+
+  const center = parent.position();
+  return {
+    x1: center.x - w / 2,
+    y1: center.y - h / 2,
+    x2: center.x + w / 2,
+    y2: center.y + h / 2,
+  };
+}
+
 /**
  * Returns the interior rectangle of a composite node in model coordinates, i.e.
  * the region inside its padding where child nodes (and their labels) must stay.
@@ -260,12 +285,23 @@ function boundingBoxToVisual(box: {
  * @returns Interior box that children must remain within.
  */
 export function compoundInteriorBox(parent: NodeSingular): VisualBox {
-  const box = parent.boundingBox({ includeLabels: false, includeOverlays: false });
+  const box = compoundOuterBox(parent);
   return {
     x1: box.x1 + COMPOUND_PADDING.left,
     y1: box.y1 + COMPOUND_PADDING.top,
     x2: box.x2 - COMPOUND_PADDING.right,
     y2: box.y2 - COMPOUND_PADDING.bottom,
+  };
+}
+
+function compoundInteriorRelativeToParent(parent: NodeSingular): VisualBox {
+  const interior = compoundInteriorBox(parent);
+  const center = parent.position();
+  return {
+    x1: interior.x1 - center.x,
+    y1: interior.y1 - center.y,
+    x2: interior.x2 - center.x,
+    y2: interior.y2 - center.y,
   };
 }
 
@@ -508,6 +544,152 @@ const DRAG_GRAB_OFFSET_KEY = "_dragGrabOffset";
 const COMPOUND_DRAG_KEY = "_compoundDrag";
 const PROMOTED_PARENT_DRAG_KEY = "_promotedParentDrag";
 const CHILD_DRAG_KEY = "_childDrag";
+const ORPHAN_PARENT_KEY = "_orphanParentId";
+const COMPOUND_INTERIOR_DRAG_CLASS = "compound-interior-drag";
+const COMPOUND_CHILD_DRAG_CLASS = "compound-child-drag";
+
+/** Scratch key marking a node temporarily detached from its compound parent during drag. */
+export const orphanParentScratchKey = ORPHAN_PARENT_KEY;
+
+/** Returns the model position stored for persistence (parent-relative when compound-parented). */
+export function graphNodeModelPosition(node: NodeSingular): NodePosition {
+  const position = node.position();
+  const orphanParentId = node.scratch(ORPHAN_PARENT_KEY) as string | undefined;
+  if (!orphanParentId) {
+    return { x: position.x, y: position.y };
+  }
+
+  const parent = node.cy().getElementById(orphanParentId);
+  if (parent.empty()) {
+    return { x: position.x, y: position.y };
+  }
+
+  const parentPosition = parent.position();
+  return {
+    x: position.x - parentPosition.x,
+    y: position.y - parentPosition.y,
+  };
+}
+
+/**
+ * Re-parents any nodes left detached after a compound drag so compounds keep
+ * their border and pinned dimensions in the steady state.
+ */
+function reparentScratchedOrphans(cy: Core): void {
+  const orphans: NodeSingular[] = [];
+  cy.nodes().forEach((node) => {
+    if (node.scratch(ORPHAN_PARENT_KEY)) {
+      orphans.push(node);
+    }
+  });
+  if (orphans.length === 0) {
+    return;
+  }
+
+  cy.batch(() => {
+    for (const node of orphans) {
+      const parentId = node.scratch(ORPHAN_PARENT_KEY) as string;
+      const parent = cy.getElementById(parentId);
+      if (parent.empty()) {
+        continue;
+      }
+      const absolute = node.position();
+      const parentPosition = parent.position();
+      node.removeScratch(ORPHAN_PARENT_KEY);
+      node.move({ parent: parentId });
+      node.position({
+        x: absolute.x - parentPosition.x,
+        y: absolute.y - parentPosition.y,
+      });
+    }
+  });
+}
+
+function pinCompoundSubtree(
+  cy: Core,
+  parent: NodeSingular,
+  subtree: Map<string, NodePosition>,
+  targetCenter: NodePosition,
+  frozenSize?: { w: number; h: number },
+): void {
+  cy.batch(() => {
+    parent.unlock();
+    parent.position(targetCenter);
+    if (frozenSize) {
+      applyFrozenCompoundSize(parent, frozenSize.w, frozenSize.h);
+      parent.position(targetCenter);
+    }
+    for (const [childId, position] of subtree) {
+      const child = cy.getElementById(childId);
+      if (!child.empty()) {
+        child.position(position);
+      }
+    }
+    parent.position(targetCenter);
+    parent.lock();
+  });
+}
+
+/**
+ * Applies persisted drag positions and re-establishes compound rigidity after
+ * child drags that temporarily detach nodes from their parents.
+ */
+export function applyDragPositionUpdates(
+  cy: Core,
+  positions: Record<string, NodePosition>,
+): void {
+  reparentScratchedOrphans(cy);
+
+  const parentIds = new Set<string>();
+  for (const nodeId of Object.keys(positions)) {
+    const node = cy.getElementById(nodeId);
+    if (node.empty()) {
+      continue;
+    }
+    if (node.isParent()) {
+      parentIds.add(nodeId);
+      continue;
+    }
+    const parent = node.parent();
+    if (parent.nonempty()) {
+      parentIds.add(parent.first().id());
+    }
+  }
+
+  cy.batch(() => {
+    for (const parentId of parentIds) {
+      const parent = cy.getElementById(parentId);
+      if (parent.empty() || !parent.isParent() || parent.children().length === 0) {
+        continue;
+      }
+
+      const parentPosition = positions[parentId] ?? parent.position();
+      const targetCenter = { x: parentPosition.x, y: parentPosition.y };
+      const subtree = new Map<string, NodePosition>();
+
+      parent.children().forEach((child) => {
+        const override = positions[child.id()];
+        if (override) {
+          subtree.set(child.id(), { x: override.x, y: override.y });
+          return;
+        }
+        const current = child.position();
+        subtree.set(child.id(), { x: current.x, y: current.y });
+      });
+
+      parent.unlock();
+      pinCompoundSubtree(
+        cy,
+        parent,
+        subtree,
+        targetCenter,
+        parentPosition.w !== undefined && parentPosition.h !== undefined
+          ? { w: parentPosition.w, h: parentPosition.h }
+          : undefined,
+      );
+    }
+  });
+}
 
 function clientPointToModelPosition(
   cy: Core,
@@ -528,17 +710,17 @@ function clientPointToModelPosition(
   };
 }
 
-interface AncestorLockEntry {
+export interface AncestorLockEntry {
   position: NodePosition;
   size: NodeSize;
   topLeft: { x: number; y: number };
 }
 
-interface DragAncestorLock {
+export interface DragAncestorLock {
   ancestors: Map<string, AncestorLockEntry>;
 }
 
-interface ChildDragState {
+export interface ChildDragState {
   siblingPositions: Map<string, NodePosition>;
 }
 
@@ -560,6 +742,128 @@ export function snapshotSubtreePositions(root: NodeSingular): Map<string, NodePo
   record(root);
   root.descendants().forEach(record);
   return positions;
+}
+
+export const LAYOUT_ANCHOR_SUFFIX = "--layout-anchor";
+
+/** Returns the cytoscape-only anchor id used to stabilize single-child compounds. */
+export function layoutAnchorId(parentId: string): string {
+  return `${parentId}${LAYOUT_ANCHOR_SUFFIX}`;
+}
+
+/** Whether a node is an invisible layout anchor rather than a roadmap entity. */
+export function isLayoutAnchorNode(node: NodeSingular): boolean {
+  return (
+    Boolean(node.data("layoutAnchor")) || node.id().endsWith(LAYOUT_ANCHOR_SUFFIX)
+  );
+}
+
+function realChildCount(parent: NodeSingular): number {
+  const children = parent.children();
+  if (typeof children.forEach !== "function") {
+    return Number(children.length ?? 0);
+  }
+
+  let count = 0;
+  children.forEach((child) => {
+    if (!isLayoutAnchorNode(child)) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
+/** Removes the layout anchor so a solitary real child can move independently while locked. */
+export function removeLayoutAnchorForChildDrag(cy: Core, parent: NodeSingular): void {
+  if (realChildCount(parent) !== 1) {
+    return;
+  }
+
+  const anchor = cy.getElementById(layoutAnchorId(parent.id()));
+  if (anchor.nonempty()) {
+    anchor.remove();
+  }
+}
+
+function layoutAnchorPosition(parent: NodeSingular): NodePosition {
+  const interior = compoundInteriorRelativeToParent(parent);
+  return {
+    x: interior.x2 - 16,
+    y: interior.y2 - 16,
+  };
+}
+
+/** Ensures a single-child composite has a hidden anchor child to prevent re-centering. */
+export function ensureLayoutAnchor(
+  cy: Core,
+  parent: NodeSingular,
+): NodeSingular | null {
+  if (typeof parent.id !== "function" || !parent.isParent() || realChildCount(parent) !== 1) {
+    return null;
+  }
+
+  const anchorId = layoutAnchorId(parent.id());
+  let anchor = cy.getElementById(anchorId);
+  if (anchor.nonempty()) {
+    anchor.ungrabify();
+    return anchor as NodeSingular;
+  }
+
+  const parentCenter = { ...parent.position() };
+  const childPositions = new Map<string, NodePosition>();
+  parent.children().forEach((child) => {
+    if (!isLayoutAnchorNode(child)) {
+      childPositions.set(child.id(), { ...child.position() });
+    }
+  });
+  const anchorPosition = layoutAnchorPosition(parent);
+
+  if (anchor.empty()) {
+    cy.add({
+      group: "nodes",
+      data: {
+        id: anchorId,
+        parent: parent.id(),
+        label: "",
+        layoutAnchor: true,
+      },
+      position: anchorPosition,
+      classes: "layout-anchor",
+    });
+    anchor = cy.getElementById(anchorId);
+  }
+
+  cy.batch(() => {
+    parent.position(parentCenter);
+    for (const [id, position] of childPositions) {
+      cy.getElementById(id).position(position);
+    }
+    anchor.position(anchorPosition);
+    parent.position(parentCenter);
+  });
+
+  anchor.ungrabify();
+  return anchor as NodeSingular;
+}
+
+/** Adds or removes layout anchors so every single-child composite stays stable. */
+export function syncLayoutAnchors(cy: Core): void {
+  const parents = cy.nodes(":parent");
+  if (typeof parents.forEach === "function") {
+    parents.forEach((parent) => {
+      ensureLayoutAnchor(cy, parent);
+    });
+  }
+
+  const anchors = cy.nodes(".layout-anchor");
+  if (typeof anchors.forEach === "function") {
+    anchors.forEach((anchor) => {
+      const parent = anchor.parent();
+      if (parent.nonempty() && realChildCount(parent.first()) !== 1) {
+        anchor.remove();
+      }
+    });
+  }
 }
 
 /**
@@ -591,48 +895,69 @@ export function applySavedNodePositions(
     return depth;
   };
 
-  entries.sort(([leftId], [rightId]) => depthOf(leftId) - depthOf(rightId));
-  const parentEntries = entries.filter(([nodeId]) =>
-    cy.getElementById(nodeId).isParent(),
-  );
-  const leafEntries = entries.filter(
-    ([nodeId]) => !cy.getElementById(nodeId).isParent(),
+  const parentIds = new Set<string>();
+  for (const [nodeId] of entries) {
+    const node = cy.getElementById(nodeId);
+    if (node.empty()) {
+      continue;
+    }
+    if (node.isParent()) {
+      parentIds.add(nodeId);
+      continue;
+    }
+    const parent = node.parent();
+    if (parent.nonempty()) {
+      parentIds.add(parent.first().id());
+    }
+  }
+
+  const sortedParentIds = [...parentIds].sort(
+    (leftId, rightId) => depthOf(leftId) - depthOf(rightId),
   );
 
   cy.batch(() => {
-    for (const [nodeId, position] of parentEntries) {
-      const node = cy.getElementById(nodeId);
-      if (position.w !== undefined && position.h !== undefined) {
-        const width = Number(node.data("compoundWidth"));
-        const height = Number(node.data("compoundHeight"));
-        if (width !== position.w || height !== position.h) {
-          applyFrozenCompoundSize(node, position.w, position.h);
+    for (const parentId of sortedParentIds) {
+      const parent = cy.getElementById(parentId);
+      if (parent.empty() || !parent.isParent() || parent.children().length === 0) {
+        continue;
+      }
+
+      const parentPosition = nodePositions[parentId] ?? parent.position();
+      const targetCenter = { x: parentPosition.x, y: parentPosition.y };
+      const subtree = new Map<string, NodePosition>();
+
+      parent.children().forEach((child) => {
+        const override = nodePositions[child.id()];
+        if (override && !isLayoutAnchorNode(child)) {
+          subtree.set(child.id(), { x: override.x, y: override.y });
+          return;
         }
-      }
-    }
-  });
+        const current = child.position();
+        subtree.set(child.id(), { x: current.x, y: current.y });
+      });
 
-  cy.batch(() => {
-    for (const [nodeId, position] of parentEntries) {
-      const node = cy.getElementById(nodeId);
-      const current = node.position();
-      if (current.x !== position.x || current.y !== position.y) {
-        node.position({ x: position.x, y: position.y });
-      }
+      pinCompoundSubtree(
+        cy,
+        parent,
+        subtree,
+        targetCenter,
+        parentPosition.w !== undefined && parentPosition.h !== undefined
+          ? { w: parentPosition.w, h: parentPosition.h }
+          : undefined,
+      );
     }
-  });
 
-  cy.batch(() => {
-    for (const [nodeId, position] of leafEntries) {
+    for (const [nodeId, position] of entries) {
       const node = cy.getElementById(nodeId);
-      const current = node.position();
-      if (current.x !== position.x || current.y !== position.y) {
-        node.position({ x: position.x, y: position.y });
+      if (node.empty() || node.isParent() || node.isChild() || isLayoutAnchorNode(node)) {
+        continue;
       }
+      node.position({ x: position.x, y: position.y });
     }
   });
 
   redrawGraphSynchronously(cy);
+  syncLayoutAnchors(cy);
 }
 
 /**
@@ -673,7 +998,15 @@ export function dragCompoundParentTo(
   targetPosition: NodePosition,
   ancestorLock?: DragAncestorLock,
 ): void {
+  if (node.isParent()) {
+    node.unlock();
+  }
+
   moveCompoundParentRigidly(cy, node, startPositions, targetPosition);
+
+  if (node.isParent()) {
+    node.lock();
+  }
 
   if (node.isChild()) {
     cy.batch(() => {
@@ -704,9 +1037,11 @@ export function applyCompoundGrabPolicy(cy: Core, draggable: boolean): void {
   cy.nodes(":parent").forEach((parent) => {
     if (parent.children().length > 0) {
       parent.ungrabify();
+      parent.lock();
     }
   });
   cy.nodes(":child").ungrabify();
+  reparentScratchedOrphans(cy);
 }
 
 /**
@@ -802,28 +1137,11 @@ export function childLeafAtRenderedPoint(
   return best;
 }
 
-function setCompoundAbsolutePosition(
-  node: NodeSingular,
-  absolute: NodePosition,
-): void {
-  const parent = node.parent();
-  if (parent.empty()) {
-    node.position(absolute);
-    return;
-  }
-
-  const parentAbsolute = compoundAbsolutePosition(parent.first());
-  node.position({
-    x: absolute.x - parentAbsolute.x,
-    y: absolute.y - parentAbsolute.y,
-  });
-}
-
 /**
- * Captures absolute positions for every node in a composite except the dragged
- * node and its descendants.
+ * Captures parent-relative positions for every node in a composite except the
+ * dragged node and its descendants.
  * @param dragged - Node the user is repositioning inside its parent composite.
- * @returns Sibling absolute positions keyed by node id.
+ * @returns Sibling positions keyed by node id (parent-relative coordinates).
  */
 export function snapshotSiblingPositions(
   dragged: NodeSingular,
@@ -843,7 +1161,8 @@ export function snapshotSiblingPositions(
     if (excluded.has(target.id())) {
       return;
     }
-    positions.set(target.id(), compoundAbsolutePosition(target));
+    const position = target.position();
+    positions.set(target.id(), { x: position.x, y: position.y });
   };
 
   parent.first().children().forEach((child) => {
@@ -864,32 +1183,27 @@ export function snapshotCompoundAncestorLock(node: NodeSingular): DragAncestorLo
 }
 
 /**
- * Clamps a child drag and restores ancestor composite geometry so outer boxes stay
- * pinned while siblings keep their absolute positions.
- * @param cy - Cytoscape instance containing the graph nodes.
- * @param node - The dragged child or inner composite node.
- * @param lock - Ancestor snapshot from {@link snapshotCompoundAncestorLock}.
+ * Clamps a child drag while siblings keep their parent-relative positions.
+ * Used by integration tests; live pointer drags call the same restore/pin
+ * sequence inside {@link installDragOverlapConstraints}.
  */
 export function constrainCompoundChildDrag(
   cy: Core,
   node: NodeSingular,
-  lock: DragAncestorLock | undefined,
+  _lock: DragAncestorLock | undefined,
   childDrag?: ChildDragState,
-  targetAbsolute?: NodePosition,
+  targetRelative?: NodePosition,
 ): void {
   if (!node.isChild()) {
     return;
   }
 
-  const draggedAbsolute = targetAbsolute ?? compoundAbsolutePosition(node);
+  const target = targetRelative ?? node.position();
 
   cy.batch(() => {
-    restoreAncestorLockDuringChildDrag(cy, lock);
     restoreSiblingPositions(cy, childDrag);
-    setCompoundAbsolutePosition(node, draggedAbsolute);
+    node.position(target);
     constrainChildWithinParent(node);
-    restoreAncestorLockDuringChildDrag(cy, lock);
-    restoreSiblingPositions(cy, childDrag);
   });
 }
 
@@ -901,15 +1215,16 @@ function snapshotAncestorLocks(node: NodeSingular): DragAncestorLock {
     const parent = current.first();
     const width = parent.data("compoundWidth");
     const height = parent.data("compoundHeight");
-    if (width !== undefined && height !== undefined) {
-      const position = parent.position();
-      const box = parent.boundingBox({ includeLabels: false, includeOverlays: false });
-      ancestors.set(parent.id(), {
-        position: { x: position.x, y: position.y },
-        size: { w: Number(width), h: Number(height) },
-        topLeft: { x: box.x1, y: box.y1 },
-      });
-    }
+    const position = parent.position();
+    const box = parent.boundingBox({ includeLabels: false, includeOverlays: false });
+    ancestors.set(parent.id(), {
+      position: { x: position.x, y: position.y },
+      size: {
+        w: width !== undefined ? Number(width) : box.x2 - box.x1,
+        h: height !== undefined ? Number(height) : box.y2 - box.y1,
+      },
+      topLeft: { x: box.x1, y: box.y1 },
+    });
 
     current = parent.parent();
   }
@@ -917,7 +1232,7 @@ function snapshotAncestorLocks(node: NodeSingular): DragAncestorLock {
   return { ancestors };
 }
 
-function restoreSiblingPositions(
+export function restoreSiblingPositions(
   cy: Core,
   childDrag: ChildDragState | undefined,
 ): void {
@@ -925,83 +1240,252 @@ function restoreSiblingPositions(
     return;
   }
 
+  for (const [id, position] of childDrag.siblingPositions) {
+    const target = cy.getElementById(id);
+    if (!target.empty()) {
+      target.position(position);
+    }
+  }
+}
+
+function lockedParentCenter(
+  node: NodeSingular,
+  lock: DragAncestorLock | undefined,
+): NodePosition {
+  const parent = node.parent();
+  if (parent.empty()) {
+    return { x: 0, y: 0 };
+  }
+
+  const entry = lock?.ancestors.get(parent.first().id());
+  return entry?.position ?? parent.first().position();
+}
+
+function graphPointRelativeToParent(
+  graphPoint: NodePosition,
+  parentCenter: NodePosition,
+): NodePosition {
+  return {
+    x: graphPoint.x - parentCenter.x,
+    y: graphPoint.y - parentCenter.y,
+  };
+}
+
+export function restoreAncestorLock(cy: Core, lock: DragAncestorLock | undefined): void {
+  if (!lock) {
+    return;
+  }
+
   cy.batch(() => {
-    for (const [id, absolute] of childDrag.siblingPositions) {
-      const target = cy.getElementById(id);
-      if (!target.empty()) {
-        setCompoundAbsolutePosition(target, absolute);
+    for (const [nodeId, entry] of lock.ancestors) {
+      const parent = cy.getElementById(nodeId);
+      if (parent.empty()) {
+        continue;
+      }
+
+      parent.unlock();
+      pinCompoundFromLockEntry(parent, entry);
+    }
+  });
+}
+
+export function lockAncestorLock(cy: Core, lock: DragAncestorLock | undefined): void {
+  if (!lock) {
+    return;
+  }
+
+  for (const nodeId of lock.ancestors.keys()) {
+    const parent = cy.getElementById(nodeId);
+    if (!parent.empty()) {
+      parent.lock();
+    }
+  }
+}
+
+/** Whether the node is the only real child of its composite parent. */
+export function isSolitaryRealChildDrag(node: NodeSingular): boolean {
+  const parent = node.parent();
+  if (parent.empty()) {
+    return false;
+  }
+  return realChildCount(parent.first()) === 1;
+}
+
+/** Detaches a child to absolute coordinates while recording its parent for reparenting. */
+export function orphanDraggedChildForInteriorDrag(dragged: NodeSingular): void {
+  const parent = dragged.parent().first();
+  const absolute = compoundAbsolutePosition(dragged);
+  dragged.scratch(ORPHAN_PARENT_KEY, parent.id());
+  dragged.move({ parent: null });
+  dragged.position(absolute);
+  dragged.addClass(COMPOUND_CHILD_DRAG_CLASS);
+}
+
+/** Pins composite chrome at drag start for solitary-child interior drags. */
+export function freezeParentChromeForInteriorDrag(
+  cy: Core,
+  parentId: string,
+  lock: DragAncestorLock,
+): void {
+  const parent = cy.getElementById(parentId);
+  const entry = lock.ancestors.get(parentId);
+  if (parent.empty() || !entry) {
+    return;
+  }
+
+  cy.batch(() => {
+    parent.unlock();
+    pinCompoundFromLockEntry(parent, entry);
+    parent.lock();
+  });
+  parent.addClass(COMPOUND_INTERIOR_DRAG_CLASS);
+}
+
+export function clearCompoundInteriorDragClasses(cy: Core): void {
+  cy.nodes(`.${COMPOUND_INTERIOR_DRAG_CLASS}`).removeClass(COMPOUND_INTERIOR_DRAG_CLASS);
+  cy.nodes(`.${COMPOUND_CHILD_DRAG_CLASS}`).removeClass(COMPOUND_CHILD_DRAG_CLASS);
+}
+
+function pinCompoundFromLockEntry(parent: NodeSingular, entry: AncestorLockEntry): void {
+  parent.data("compoundWidth", entry.size.w);
+  parent.data("compoundHeight", entry.size.h);
+  parent.position(entry.position);
+
+  if (parent.children().length > 0) {
+    applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
+  }
+
+  const finalBox = parent.boundingBox({ includeLabels: false, includeOverlays: false });
+  moveNodeBy(parent, entry.topLeft.x - finalBox.x1, entry.topLeft.y - finalBox.y1);
+}
+
+/** Re-applies pinned composite size at the locked model center during drag frames. */
+export function pinAncestorChromeFromLock(cy: Core, lock: DragAncestorLock | undefined): void {
+  if (!lock) {
+    return;
+  }
+
+  cy.batch(() => {
+    for (const [nodeId, entry] of lock.ancestors) {
+      const parent = cy.getElementById(nodeId);
+      if (parent.empty()) {
+        continue;
+      }
+
+      parent.unlock();
+      pinCompoundFromLockEntry(parent, entry);
+      if (parent.isParent()) {
+        parent.lock();
       }
     }
   });
 }
 
-function lockParentCenter(
-  parent: NodeSingular,
-  entry: AncestorLockEntry,
-): void {
-  parent.position(entry.position);
-  applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
-}
-
-function finalizeChildDragComposite(
+/**
+ * Applies one frame of a parent-relative child drag and re-pins ancestor chrome.
+ */
+export function applyParentRelativeChildDragFrame(
   cy: Core,
-  grabbed: NodeSingular,
-  lock: DragAncestorLock | undefined,
-  childDrag: ChildDragState | undefined,
+  node: NodeSingular,
+  childDrag: ChildDragState,
+  lock: DragAncestorLock,
+  targetRelative: NodePosition,
 ): void {
-  if (!grabbed.isChild()) {
-    restoreSiblingPositions(cy, childDrag);
-    return;
-  }
-
   cy.batch(() => {
     restoreSiblingPositions(cy, childDrag);
-    restoreAncestorLockDuringChildDrag(cy, lock);
-    constrainChildWithinParent(grabbed);
-    restoreAncestorLockDuringChildDrag(cy, lock);
-    restoreSiblingPositions(cy, childDrag);
+    node.position(targetRelative);
+    constrainChildWithinParent(node);
   });
+  restoreAncestorLock(cy, lock);
   redrawGraphSynchronously(cy);
 }
 
-function restoreAncestorLockDuringChildDrag(
+/**
+ * Applies one frame of an orphan-absolute child drag and re-freezes ancestor chrome.
+ */
+export function applyOrphanAbsoluteChildDragFrame(
   cy: Core,
-  lock: DragAncestorLock | undefined,
+  node: NodeSingular,
+  lock: DragAncestorLock,
+  targetAbsolute: NodePosition,
 ): void {
-  if (!lock) {
-    return;
-  }
-
-  cy.batch(() => {
-    for (const [nodeId, entry] of lock.ancestors) {
-      const parent = cy.getElementById(nodeId);
-      if (parent.empty()) {
-        continue;
-      }
-      lockParentCenter(parent, entry);
-    }
-  });
+  node.position(targetAbsolute);
+  restoreAncestorLock(cy, lock);
+  redrawGraphSynchronously(cy);
 }
 
-function restoreAncestorLock(cy: Core, lock: DragAncestorLock | undefined): void {
-  if (!lock) {
+/** Reparents an orphan-dragged child and restores pinned composite chrome. */
+export function finalizeOrphanChildInteriorDrag(
+  cy: Core,
+  node: NodeSingular,
+  parentId: string,
+  lock: DragAncestorLock,
+  childDrag: ChildDragState,
+  endRelative: NodePosition,
+): void {
+  const parent = cy.getElementById(parentId);
+  if (parent.empty()) {
     return;
   }
 
+  const subtree = new Map(childDrag.siblingPositions);
+
   cy.batch(() => {
-    for (const [nodeId, entry] of lock.ancestors) {
-      const parent = cy.getElementById(nodeId);
-      if (parent.empty()) {
-        continue;
-      }
+    parent.removeClass(COMPOUND_INTERIOR_DRAG_CLASS);
+    parent.unlock();
 
-      parent.position(entry.position);
-      applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
+    node.removeScratch(ORPHAN_PARENT_KEY);
+    node.removeClass(COMPOUND_CHILD_DRAG_CLASS);
+    if (!node.isChild()) {
+      node.move({ parent: parentId });
+    }
 
-      const finalBox = parent.boundingBox({ includeLabels: false, includeOverlays: false });
-      moveNodeBy(parent, entry.topLeft.x - finalBox.x1, entry.topLeft.y - finalBox.y1);
+    node.position(endRelative);
+    constrainChildWithinParent(node);
+    subtree.set(node.id(), node.position());
+
+    for (const [childId, position] of subtree) {
+      cy.getElementById(childId).position(position);
     }
   });
+
+  restoreAncestorLock(cy, lock);
+  lockAncestorLock(cy, lock);
+}
+
+/** Finalizes a parent-relative child drag with pinned composite chrome. */
+export function finalizeParentRelativeChildDrag(
+  cy: Core,
+  node: NodeSingular,
+  parentId: string,
+  lock: DragAncestorLock,
+  childDrag: ChildDragState,
+  endRelative: NodePosition,
+): void {
+  const parent = cy.getElementById(parentId);
+  const entry = lock.ancestors.get(parentId);
+  if (parent.empty() || !entry) {
+    lockAncestorLock(cy, lock);
+    return;
+  }
+
+  const subtree = new Map(childDrag.siblingPositions);
+
+  cy.batch(() => {
+    parent.unlock();
+
+    restoreSiblingPositions(cy, childDrag);
+    node.position(endRelative);
+    constrainChildWithinParent(node);
+    subtree.set(node.id(), node.position());
+
+    for (const [childId, position] of subtree) {
+      cy.getElementById(childId).position(position);
+    }
+  });
+
+  restoreAncestorLock(cy, lock);
+  lockAncestorLock(cy, lock);
 }
 
 // Keeps a child node's (label-inclusive) footprint inside its parent's fixed
@@ -1014,10 +1498,18 @@ function constrainChildWithinParent(node: NodeSingular): void {
     return;
   }
 
-  const interior = compoundInteriorBox(parent.first());
-  const footprint = boundingBoxToVisual(
-    node.boundingBox({ includeLabels: true, includeOverlays: false }),
-  );
+  const parentNode = parent.first();
+  const interior = compoundInteriorRelativeToParent(parentNode);
+  const position = node.position();
+  const box = node.boundingBox({ includeLabels: true, includeOverlays: false });
+  const halfW = (box.x2 - box.x1) / 2;
+  const halfH = (box.y2 - box.y1) / 2;
+  const footprint: VisualBox = {
+    x1: position.x - halfW,
+    y1: position.y - halfH,
+    x2: position.x + halfW,
+    y2: position.y + halfH,
+  };
   const { dx, dy } = shiftBoxInside(footprint, interior);
   if (dx !== 0 || dy !== 0) {
     moveNodeBy(node, dx, dy);
@@ -1045,6 +1537,9 @@ export function collectDragPersistencePositions(
   const updates: Record<string, NodePosition> = {};
 
   const recordNode = (target: NodeSingular) => {
+    if (isLayoutAnchorNode(target)) {
+      return;
+    }
     const position = target.position();
     const entry: NodePosition = { x: position.x, y: position.y };
     if (target.isParent()) {
@@ -1132,11 +1627,234 @@ export function installDragOverlapConstraints(
 
   interface ActiveChildPointerDrag {
     node: NodeSingular;
+    parentId: string;
     startPosition: NodePosition;
-    grabOffset: NodePosition;
     lock: DragAncestorLock;
     childDrag: ChildDragState;
+    mode: "parent-relative" | "orphan-absolute";
+    grabOffset: NodePosition;
+    absoluteGrabOffset?: NodePosition;
   }
+
+  const clearCompoundDragClasses = (): void => {
+    cy.nodes(`.${COMPOUND_INTERIOR_DRAG_CLASS}`).removeClass(COMPOUND_INTERIOR_DRAG_CLASS);
+    cy.nodes(`.${COMPOUND_CHILD_DRAG_CLASS}`).removeClass(COMPOUND_CHILD_DRAG_CLASS);
+  };
+
+  const isSolitaryChildDrag = (node: NodeSingular): boolean => {
+    const parent = node.parent();
+    if (parent.empty()) {
+      return false;
+    }
+    return realChildCount(parent.first()) === 1;
+  };
+
+  const orphanDraggedChild = (dragged: NodeSingular): void => {
+    const parent = dragged.parent().first();
+    const absolute = compoundAbsolutePosition(dragged);
+    dragged.scratch(ORPHAN_PARENT_KEY, parent.id());
+    dragged.move({ parent: null });
+    dragged.position(absolute);
+  };
+
+  const freezeParentChromeForInteriorDrag = (
+    parentId: string,
+    lock: DragAncestorLock,
+  ): void => {
+    const parent = cy.getElementById(parentId);
+    const entry = lock.ancestors.get(parentId);
+    if (parent.empty() || !entry) {
+      return;
+    }
+
+    cy.batch(() => {
+      parent.unlock();
+      applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
+      parent.position(entry.position);
+      parent.lock();
+    });
+    parent.addClass(COMPOUND_INTERIOR_DRAG_CLASS);
+  };
+
+  const beginChildPointerDrag = (
+    pending: PendingChildPress,
+    cursor: NodePosition,
+  ): ActiveChildPointerDrag => {
+    const parent = pending.node.parent().first();
+    const parentId = parent.id();
+
+    if (!parent.empty()) {
+      removeLayoutAnchorForChildDrag(cy, parent);
+    }
+
+    const childDrag: ChildDragState = {
+      siblingPositions: snapshotSiblingPositions(pending.node),
+    };
+
+    cy.batch(() => {
+      restoreSiblingPositions(cy, childDrag);
+    });
+
+    if (isSolitaryChildDrag(pending.node)) {
+      const absoluteStart = compoundAbsolutePosition(pending.node);
+      orphanDraggedChild(pending.node);
+      pending.node.addClass(COMPOUND_CHILD_DRAG_CLASS);
+      freezeParentChromeForInteriorDrag(parentId, pending.lock);
+
+      return {
+        node: pending.node,
+        parentId,
+        startPosition: pending.startPosition,
+        lock: pending.lock,
+        childDrag,
+        mode: "orphan-absolute",
+        grabOffset: pending.grabOffset,
+        absoluteGrabOffset: {
+          x: absoluteStart.x - cursor.x,
+          y: absoluteStart.y - cursor.y,
+        },
+      };
+    }
+
+    return {
+      node: pending.node,
+      parentId,
+      startPosition: pending.startPosition,
+      lock: pending.lock,
+      childDrag,
+      mode: "parent-relative",
+      grabOffset: pending.grabOffset,
+    };
+  };
+
+  const reparentOrphanedChild = (
+    drag: ActiveChildPointerDrag,
+    endRelative: NodePosition,
+  ): void => {
+    const parent = cy.getElementById(drag.parentId);
+    if (parent.empty()) {
+      return;
+    }
+
+    const entry = drag.lock.ancestors.get(drag.parentId);
+    const parentCenter = entry?.position ?? parent.position();
+    const subtree = new Map(drag.childDrag.siblingPositions);
+
+    cy.batch(() => {
+      parent.removeClass(COMPOUND_INTERIOR_DRAG_CLASS);
+      parent.unlock();
+      parent.position(parentCenter);
+      if (entry) {
+        applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
+        parent.position(parentCenter);
+      }
+
+      drag.node.removeScratch(ORPHAN_PARENT_KEY);
+      drag.node.removeClass(COMPOUND_CHILD_DRAG_CLASS);
+      if (!drag.node.isChild()) {
+        drag.node.move({ parent: drag.parentId });
+      }
+
+      drag.node.position(endRelative);
+      constrainChildWithinParent(drag.node);
+      subtree.set(drag.node.id(), drag.node.position());
+
+      for (const [childId, position] of subtree) {
+        cy.getElementById(childId).position(position);
+      }
+      parent.position(parentCenter);
+      parent.lock();
+    });
+
+    lockAncestorLock(cy, drag.lock);
+  };
+
+  const finalizeChildDrag = (
+    drag: ActiveChildPointerDrag,
+    endRelative: NodePosition,
+  ): void => {
+    if (drag.mode === "orphan-absolute") {
+      reparentOrphanedChild(drag, endRelative);
+      clearCompoundDragClasses();
+      return;
+    }
+
+    const parent = cy.getElementById(drag.parentId);
+    const entry = drag.lock.ancestors.get(drag.parentId);
+    if (parent.empty() || !entry) {
+      clearCompoundDragClasses();
+      lockAncestorLock(cy, drag.lock);
+      return;
+    }
+
+    const subtree = new Map(drag.childDrag.siblingPositions);
+
+    cy.batch(() => {
+      parent.unlock();
+      parent.position(entry.position);
+      applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
+      parent.position(entry.position);
+
+      restoreSiblingPositions(cy, drag.childDrag);
+      drag.node.position(endRelative);
+      constrainChildWithinParent(drag.node);
+      subtree.set(drag.node.id(), drag.node.position());
+
+      for (const [childId, position] of subtree) {
+        cy.getElementById(childId).position(position);
+      }
+      parent.position(entry.position);
+      parent.lock();
+    });
+
+    clearCompoundDragClasses();
+    lockAncestorLock(cy, drag.lock);
+  };
+
+  const applyChildPointerDragMove = (
+    drag: ActiveChildPointerDrag,
+    clientX: number,
+    clientY: number,
+  ): void => {
+    const cursor = clientPointToModelPosition(cy, clientX, clientY);
+
+    if (drag.mode === "orphan-absolute" && drag.absoluteGrabOffset) {
+      const targetAbsolute = {
+        x: cursor.x + drag.absoluteGrabOffset.x,
+        y: cursor.y + drag.absoluteGrabOffset.y,
+      };
+
+      cy.batch(() => {
+        drag.node.position(targetAbsolute);
+        for (const [nodeId, entry] of drag.lock.ancestors) {
+          const parent = cy.getElementById(nodeId);
+          if (parent.empty()) {
+            continue;
+          }
+          parent.unlock();
+          parent.position(entry.position);
+          applyFrozenCompoundSize(parent, entry.size.w, entry.size.h);
+          parent.position(entry.position);
+        }
+      });
+      redrawGraphSynchronously(cy);
+      return;
+    }
+
+    const parentCenter = lockedParentCenter(drag.node, drag.lock);
+    const cursorRelative = graphPointRelativeToParent(cursor, parentCenter);
+    const target = {
+      x: cursorRelative.x + drag.grabOffset.x,
+      y: cursorRelative.y + drag.grabOffset.y,
+    };
+
+    cy.batch(() => {
+      restoreSiblingPositions(cy, drag.childDrag);
+      drag.node.position(target);
+      constrainChildWithinParent(drag.node);
+    });
+    redrawGraphSynchronously(cy);
+  };
 
   const CHILD_DRAG_THRESHOLD_PX = 4;
   let pendingChildPress: PendingChildPress | null = null;
@@ -1147,10 +1865,20 @@ export function installDragOverlapConstraints(
     window.removeEventListener("mouseup", onChildPointerUp, true);
   };
 
+  const cancelChildDrag = (drag: ActiveChildPointerDrag): void => {
+    finalizeChildDrag(drag, drag.startPosition);
+  };
+
   const cancelChildPointerInteraction = () => {
+    if (activeChildPointerDrag) {
+      cancelChildDrag(activeChildPointerDrag);
+      lockAncestorLock(cy, activeChildPointerDrag.lock);
+    }
     pendingChildPress = null;
     activeChildPointerDrag = null;
     clearChildPointerListeners();
+    reparentScratchedOrphans(cy);
+    clearCompoundDragClasses();
   };
 
   const applyChildPointerDrag = (clientX: number, clientY: number): void => {
@@ -1158,12 +1886,34 @@ export function installDragOverlapConstraints(
       return;
     }
 
-    const { node, grabOffset: offset, lock, childDrag } = activeChildPointerDrag;
-    const cursor = clientPointToModelPosition(cy, clientX, clientY);
-    constrainCompoundChildDrag(cy, node, lock, childDrag, {
-      x: cursor.x + offset.x,
-      y: cursor.y + offset.y,
-    });
+    applyChildPointerDragMove(activeChildPointerDrag, clientX, clientY);
+  };
+
+  const persistChildDragUpdates = (
+    drag: ActiveChildPointerDrag,
+    endRelative: NodePosition,
+  ): Record<string, NodePosition> => {
+    const updates: Record<string, NodePosition> = {
+      [drag.node.id()]: endRelative,
+    };
+
+    for (const [nodeId, position] of drag.childDrag.siblingPositions) {
+      const sibling = cy.getElementById(nodeId);
+      if (!sibling.empty() && !isLayoutAnchorNode(sibling)) {
+        updates[nodeId] = { x: position.x, y: position.y };
+      }
+    }
+
+    for (const [nodeId, entry] of drag.lock.ancestors) {
+      updates[nodeId] = {
+        x: entry.position.x,
+        y: entry.position.y,
+        w: entry.size.w,
+        h: entry.size.h,
+      };
+    }
+
+    return updates;
   };
 
   const finishChildPointerDrag = (): void => {
@@ -1171,29 +1921,34 @@ export function installDragOverlapConstraints(
       return;
     }
 
-    const { node, startPosition, lock, childDrag } = activeChildPointerDrag;
-    const endPosition = { ...node.position() };
-    const moved =
-      startPosition.x !== endPosition.x || startPosition.y !== endPosition.y;
+    const drag = activeChildPointerDrag;
 
     pendingChildPress = null;
     activeChildPointerDrag = null;
     clearChildPointerListeners();
 
-    if (!moved) {
-      return;
+    const entry = drag.lock.ancestors.get(drag.parentId);
+    const parentCenter = entry?.position ?? { x: 0, y: 0 };
+    const endRelative =
+      drag.mode === "orphan-absolute"
+        ? {
+            x: drag.node.position().x - parentCenter.x,
+            y: drag.node.position().y - parentCenter.y,
+          }
+        : { ...drag.node.position() };
+    const moved =
+      drag.startPosition.x !== endRelative.x ||
+      drag.startPosition.y !== endRelative.y;
+
+    finalizeChildDrag(drag, endRelative);
+
+    redrawGraphSynchronously(cy);
+
+    if (moved) {
+      onDragComplete?.(persistChildDragUpdates(drag, drag.node.position()));
+    } else {
+      lockAncestorLock(cy, drag.lock);
     }
-
-    const finalize = () => {
-      finalizeChildDragComposite(cy, node, lock, childDrag);
-    };
-
-    finalize();
-    window.requestAnimationFrame(() => {
-      finalize();
-      window.requestAnimationFrame(finalize);
-    });
-    onDragComplete?.(collectDragPersistencePositions(cy, node.id()));
   };
 
   const onChildPointerMove = (event: MouseEvent): void => {
@@ -1210,13 +1965,8 @@ export function installDragOverlapConstraints(
 
       const pending = pendingChildPress;
       pendingChildPress = null;
-      activeChildPointerDrag = {
-        node: pending.node,
-        startPosition: pending.startPosition,
-        grabOffset: pending.grabOffset,
-        lock: pending.lock,
-        childDrag: pending.childDrag,
-      };
+      const cursor = clientPointToModelPosition(cy, event.clientX, event.clientY);
+      activeChildPointerDrag = beginChildPointerDrag(pending, cursor);
     }
 
     if (!activeChildPointerDrag) {
@@ -1322,11 +2072,19 @@ export function installDragOverlapConstraints(
       node.select();
     }
 
+    const parent = node.parent().first();
+    if (!parent.empty()) {
+      removeLayoutAnchorForChildDrag(cy, parent);
+    }
+
     const ancestorLock = snapshotCompoundAncestorLock(node);
     const position = node.position();
-    const cursor = event.position ?? compoundAbsolutePosition(node);
-    const childAbsolute = compoundAbsolutePosition(node);
     const originalEvent = event.originalEvent as MouseEvent | undefined;
+    const cursor = originalEvent
+      ? clientPointToModelPosition(cy, originalEvent.clientX, originalEvent.clientY)
+      : event.position ?? compoundAbsolutePosition(node);
+    const parentCenter = lockedParentCenter(node, ancestorLock);
+    const cursorRelative = graphPointRelativeToParent(cursor, parentCenter);
 
     pendingChildPress = {
       node,
@@ -1334,17 +2092,14 @@ export function installDragOverlapConstraints(
       startClientY: originalEvent?.clientY ?? 0,
       startPosition: { x: position.x, y: position.y },
       grabOffset: {
-        x: childAbsolute.x - cursor.x,
-        y: childAbsolute.y - cursor.y,
+        x: position.x - cursorRelative.x,
+        y: position.y - cursorRelative.y,
       },
       lock: ancestorLock,
       childDrag: {
         siblingPositions: snapshotSiblingPositions(node),
       },
     };
-
-    window.addEventListener("mousemove", onChildPointerMove, true);
-    window.addEventListener("mouseup", onChildPointerUp, true);
 
     const testWindow = node.cy().container()?.ownerDocument?.defaultView as
       | (Window & {
@@ -1360,6 +2115,13 @@ export function installDragOverlapConstraints(
           };
         })
       | undefined;
+
+    originalEvent?.preventDefault();
+    event.stopPropagation();
+
+    window.addEventListener("mousemove", onChildPointerMove, true);
+    window.addEventListener("mouseup", onChildPointerUp, true);
+
     if (testWindow?.__TEST__) {
       const parent = node.parent().first();
       const position = parent.position();
@@ -1381,6 +2143,9 @@ export function installDragOverlapConstraints(
       testWindow.__TEST__.lastChildDragParentState = state;
     }
   };
+
+  reparentScratchedOrphans(cy);
+  clearCompoundDragClasses();
 
   cy.on("mousedown", "node", onChildMouseDown);
   cy.on("grab", "node", onGrab);
@@ -1596,10 +2361,11 @@ export function applyAutoLayout(
   };
 
   if (usesPresetLayout(nodePositions)) {
-    // Saved positions are applied when elements are added or via syncNodePositions.
-    // Re-running preset layout would reset nodes to stale add-time coordinates,
-    // which breaks compound parent/child relative positions.
-    applySavedNodePositions(cy, nodePositions);
+    // Flat compound graphs apply saved layout via CompoundGraphScene.initializeFromCy.
+    // Native applySavedNodePositions targets Cytoscape :parent/:child compounds only.
+    if (!hasCompoundNodes) {
+      applySavedNodePositions(cy, nodePositions);
+    }
     finishLayout();
     return;
   }

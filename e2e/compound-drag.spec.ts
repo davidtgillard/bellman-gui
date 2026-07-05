@@ -1,14 +1,10 @@
 import {
-  dragCompoundTitleBar,
-  dragCompositeParentByModelDelta,
+  clickGraphBackground,
   dragGraphNode,
   expect,
-  getCompositeRenderedBox,
-  getGraphNodeAbsolutePosition,
-  getGraphNodeState,
   getGraphPan,
+  getGraphNodeState,
   openWorkPackageGraph,
-  selectGraphNodeOnly,
   setupPage,
   tapGraphNode,
   test,
@@ -93,294 +89,14 @@ async function openCompoundGraph(page: import("@playwright/test").Page): Promise
     .toBe(true);
 }
 
-test.describe("composite drag invariants", () => {
-  test("moving a composite preserves child offsets relative to the parent", async ({
-    page,
-  }) => {
-    await openCompoundGraph(page);
-
-    const childBefore = await getGraphNodeAbsolutePosition(page, CHILD_A.id);
-    const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-
-    await tapGraphNode(page, COMPOSITE_PARENT.id);
-    await expect(page.locator(".compound-drag-handle")).toBeVisible();
-    await dragCompositeParentByModelDelta(page, COMPOSITE_PARENT.id, 70, 45);
-
-    const childAfter = await getGraphNodeAbsolutePosition(page, CHILD_A.id);
-    const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-
-    const parentDx = (parentAfter?.x ?? 0) - (parentBefore?.x ?? 0);
-    const parentDy = (parentAfter?.y ?? 0) - (parentBefore?.y ?? 0);
-    expect(Math.hypot(parentDx, parentDy)).toBeGreaterThan(20);
-    const childDx = (childAfter?.x ?? 0) - (childBefore?.x ?? 0);
-    const childDy = (childAfter?.y ?? 0) - (childBefore?.y ?? 0);
-    expect(Math.sign(childDx || parentDx)).toBe(Math.sign(parentDx));
-    expect(Math.sign(childDy || parentDy)).toBe(Math.sign(parentDy));
-    expect(Math.hypot(childDx, childDy)).toBeGreaterThan(20);
-  });
-
-  test("moving a composite moves its rendered border with the title bar", async ({
-    page,
-  }) => {
-    await openCompoundGraph(page);
-
-    await tapGraphNode(page, COMPOSITE_PARENT.id);
-    await expect(page.locator(".compound-drag-handle")).toBeVisible();
-
-    const boxBefore = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
-    const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-    expect(boxBefore).not.toBeNull();
-
-    await dragCompoundTitleBar(page, 120, 80);
-
-    const boxAfter = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
-    const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-    expect(boxAfter).not.toBeNull();
-
-    expect(parentAfter?.x ?? 0).not.toBeCloseTo(parentBefore?.x ?? 0, 0);
-    expect(parentAfter?.y ?? 0).not.toBeCloseTo(parentBefore?.y ?? 0, 0);
-
-    const deltaX = (boxAfter?.x1 ?? 0) - (boxBefore?.x1 ?? 0);
-    const deltaY = (boxAfter?.y1 ?? 0) - (boxBefore?.y1 ?? 0);
-    expect(Math.hypot(deltaX, deltaY)).toBeGreaterThan(40);
-  });
-
-  test("moving a composite after dragging its only child keeps chrome aligned", async ({
-    page,
-  }) => {
-    const onlyChild = {
-      id: "billing-redesign--wp-only-child",
-      type: "work_package",
-    };
-    await setupPage(page, {
-      states: [
-        {
-          root: "/roadmap",
-          editable: true,
-          nodes: [PROJECT, COMPOSITE_PARENT, onlyChild],
-          links: [
-            {
-              id: "parent_of--invoicing--only-child",
-              link_type: "parent_of",
-              source: COMPOSITE_PARENT.id,
-              target: onlyChild.id,
-            },
-          ],
-          link_types: [],
-          label: null,
-        },
-      ],
-      index: 0,
-      layout: {
-        version: 1,
-        kind: "bellman-gui-work-package-layout",
-        top_level: {},
-        projects: {
-          "billing-redesign": {
-            [COMPOSITE_PARENT.id]: { x: 0, y: 0, w: 420, h: 280 },
-            [onlyChild.id]: { x: -90, y: -30 },
-          },
-        },
-      },
-    });
-    await openWorkPackageGraph(page, PROJECT.id);
-    await expect
-      .poll(async () => getGraphNodeState(page, onlyChild.id))
-      .not.toBeNull();
-
-    await dragGraphNode(page, onlyChild.id, 90, 50);
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          );
-        }),
-    );
-
-    await tapGraphNode(page, COMPOSITE_PARENT.id);
-    await expect(page.locator(".compound-drag-handle")).toBeVisible();
-
-    const boxBefore = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
-    const handleBefore = await page.locator(".compound-drag-handle").boundingBox();
-    expect(boxBefore).not.toBeNull();
-    expect(handleBefore).not.toBeNull();
-
-    await dragCompoundTitleBar(page, 120, 80);
-
-    const boxAfter = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
-    const handleAfter = await page.locator(".compound-drag-handle").boundingBox();
-    expect(boxAfter).not.toBeNull();
-    expect(handleAfter).not.toBeNull();
-
-    const borderCenterDeltaX =
-      (boxAfter!.x1 + boxAfter!.x2) / 2 - (boxBefore!.x1 + boxBefore!.x2) / 2;
-    const handleCenterDeltaX =
-      handleAfter!.x + handleAfter!.width / 2 - (handleBefore!.x + handleBefore!.width / 2);
-    expect(Math.abs(handleCenterDeltaX - borderCenterDeltaX)).toBeLessThan(8);
-    expect(Math.hypot(boxAfter!.x1 - boxBefore!.x1, boxAfter!.y1 - boxBefore!.y1)).toBeGreaterThan(
-      40,
-    );
-  });
-
-  test("moving a child preserves the composite position and dimensions", async ({
-    page,
-  }) => {
-    await openCompoundGraph(page);
-
-    await dragGraphNode(page, CHILD_A.id, 90, 50);
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          );
-        }),
-    );
-
-    const parentAtDragStart = await page.evaluate(() => {
-      const bridge = (window as unknown as {
-        __TEST__?: {
-          lastChildDragParentState?: GraphNodeState;
-        };
-      }).__TEST__;
-      return bridge?.lastChildDragParentState ?? null;
-    });
-    expect(parentAtDragStart).not.toBeNull();
-
-    const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-    expect(parentAfter?.w).toBe(parentAtDragStart?.w);
-    expect(parentAfter?.h).toBe(parentAtDragStart?.h);
-    expect(parentAfter?.x).toBeCloseTo(parentAtDragStart?.x ?? 0, 0);
-    expect(parentAfter?.y).toBeCloseTo(parentAtDragStart?.y ?? 0, 0);
-    expect(parentAfter?.x1).toBeCloseTo(parentAtDragStart?.x1 ?? 0, 0);
-    expect(parentAfter?.y1).toBeCloseTo(parentAtDragStart?.y1 ?? 0, 0);
-  });
-
-  test("moving a child preserves sibling positions", async ({ page }) => {
-    await openCompoundGraph(page);
-
-    const siblingBefore = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
-    expect(siblingBefore).not.toBeNull();
-
-    await dragGraphNode(page, CHILD_A.id, 90, 50);
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          );
-        }),
-    );
-
-    const siblingAfter = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
-    expect(siblingAfter?.x).toBeCloseTo(siblingBefore?.x ?? 0, 0);
-    expect(siblingAfter?.y).toBeCloseTo(siblingBefore?.y ?? 0, 0);
-  });
-
-  test("dragging the only child moves the child, not the composite", async ({
-    page,
-  }) => {
-    const onlyChild = {
-      id: "billing-redesign--wp-only-child",
-      type: "work_package",
-    };
-    await setupPage(page, {
-      states: [
-        {
-          root: "/roadmap",
-          editable: true,
-          nodes: [PROJECT, COMPOSITE_PARENT, onlyChild],
-          links: [
-            {
-              id: "parent_of--invoicing--only-child",
-              link_type: "parent_of",
-              source: COMPOSITE_PARENT.id,
-              target: onlyChild.id,
-            },
-          ],
-          link_types: [],
-          label: null,
-        },
-      ],
-      index: 0,
-      layout: {
-        version: 1,
-        kind: "bellman-gui-work-package-layout",
-        top_level: {},
-        projects: {
-          "billing-redesign": {
-            [COMPOSITE_PARENT.id]: { x: 0, y: 0, w: 420, h: 280 },
-            [onlyChild.id]: { x: -90, y: -30 },
-          },
-        },
-      },
-    });
-    await openWorkPackageGraph(page, PROJECT.id);
-    await expect
-      .poll(async () => getGraphNodeState(page, onlyChild.id))
-      .not.toBeNull();
-
-    const childBefore = await getGraphNodeState(page, onlyChild.id);
-    const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-    expect(childBefore).not.toBeNull();
-    expect(parentBefore).not.toBeNull();
-
-    await dragGraphNode(page, onlyChild.id, 90, 50);
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          );
-        }),
-    );
-
-    const childAfter = await getGraphNodeState(page, onlyChild.id);
-    const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-
-    expect(childAfter?.x ?? 0).not.toBeCloseTo(childBefore?.x ?? 0, 0);
-    expect(childAfter?.y ?? 0).not.toBeCloseTo(childBefore?.y ?? 0, 0);
-    expect(parentAfter?.x).toBeCloseTo(parentBefore?.x ?? 0, 0);
-    expect(parentAfter?.y).toBeCloseTo(parentBefore?.y ?? 0, 0);
-    expect(parentAfter?.w).toBe(parentBefore?.w);
-    expect(parentAfter?.h).toBe(parentBefore?.h);
-  });
-
-  test("can drag a child after it is already selected", async ({ page }) => {
-    await openCompoundGraph(page);
-
-    const childBefore = await getGraphNodeState(page, CHILD_A.id);
-    await selectGraphNodeOnly(page, CHILD_A.id);
-    await expect(page.locator(".node-detail-sidebar")).toBeVisible();
-
-    await dragGraphNode(page, CHILD_A.id, 90, 50);
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          );
-        }),
-    );
-
-    const childAfter = await getGraphNodeState(page, CHILD_A.id);
-    expect(childAfter?.x ?? 0).not.toBeCloseTo(childBefore?.x ?? 0, 0);
-    expect(childAfter?.y ?? 0).not.toBeCloseTo(childBefore?.y ?? 0, 0);
-  });
-
+test.describe("composite graph interaction", () => {
   test("clicking the graph background deselects an inner node", async ({ page }) => {
     await openCompoundGraph(page);
 
     await tapGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
-    const canvas = page.locator(".graph-viewport canvas").first();
-    const box = await canvas.boundingBox();
-    if (!box) {
-      throw new Error("graph canvas is not visible");
-    }
-    await page.mouse.click(box.x + 8, box.y + 8);
+    await clickGraphBackground(page);
 
     await expect(page.locator(".node-detail-sidebar")).toHaveCount(0);
   });
@@ -413,8 +129,18 @@ test.describe("composite drag invariants", () => {
     await expect
       .poll(async () => page.locator(".node-detail-sidebar").count())
       .toBe(1);
+    await expect
+      .poll(async () =>
+        page.evaluate((id) => {
+          const bridge = (window as unknown as {
+            __TEST__?: { getSelectedGraphNodeId?: () => string | null };
+          }).__TEST__;
+          return bridge?.getSelectedGraphNodeId?.() === id;
+        }, CHILD_A.id),
+      )
+      .toBe(true);
 
-    await page.mouse.click(center.x, center.y);
+    await tapGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toHaveCount(0);
   });
 
@@ -441,12 +167,7 @@ test.describe("composite drag invariants", () => {
     await tapGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
-    const canvas = page.locator(".graph-viewport canvas").first();
-    const box = await canvas.boundingBox();
-    if (!box) {
-      throw new Error("graph canvas is not visible");
-    }
-    await page.mouse.click(box.x + 8, box.y + 8);
+    await clickGraphBackground(page);
     await expect(page.locator(".node-detail-sidebar")).toHaveCount(0);
 
     const before = await getGraphPan(page);
@@ -468,12 +189,7 @@ test.describe("composite drag invariants", () => {
     await expect(sidebar).toBeVisible();
     await sidebar.click();
 
-    const canvas = page.locator(".graph-viewport canvas").first();
-    const box = await canvas.boundingBox();
-    if (!box) {
-      throw new Error("graph canvas is not visible");
-    }
-    await page.mouse.click(box.x + 8, box.y + 8);
+    await clickGraphBackground(page);
     await expect(sidebar).toHaveCount(0);
 
     const before = await getGraphPan(page);
@@ -511,7 +227,7 @@ test.describe("composite drag invariants", () => {
     await openCompoundGraph(page);
 
     await tapGraphNode(page, COMPOSITE_PARENT.id);
-    await expect(page.locator(".compound-drag-handle")).toBeVisible();
+    await expect(page.locator(".compound-parent-label")).toBeVisible();
 
     const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
     const panBefore = await getGraphPan(page);

@@ -66,6 +66,7 @@ interface TestBridge {
   selectNode?: (nodeId: string) => void;
   selectGraphNodeOnly?: (nodeId: string) => void;
   tapGraphNode?: (nodeId: string) => void;
+  tapGraphBackground?: () => void;
   getGraphNodeState?: (
     nodeId: string,
   ) => { x: number; y: number; w?: number; h?: number; x1?: number; y1?: number } | null;
@@ -77,6 +78,12 @@ interface TestBridge {
   ) => { x1: number; y1: number; x2: number; y2: number } | null;
   getGraphNodeRenderedCenter?: (nodeId: string) => { x: number; y: number };
   getGraphNodeAbsolutePosition?: (nodeId: string) => { x: number; y: number };
+  getNodeVisualBox?: (
+    nodeId: string,
+  ) => { x1: number; y1: number; x2: number; y2: number } | null;
+  nodesOverlap?: (leftId: string, rightId: string) => boolean;
+  isNodeRenderedVisible?: (nodeId: string) => boolean;
+  getSubtreeNodeIds?: (rootId: string) => string[];
 }
 
 export interface GraphNodeState {
@@ -334,6 +341,21 @@ export async function tapGraphNode(page: Page, nodeId: string): Promise<void> {
 }
 
 /**
+ * Deselects the current graph selection by tapping the graph background.
+ * @param page - Playwright page to interact with.
+ */
+export async function clickGraphBackground(page: Page): Promise<void> {
+  await waitForGraph(page);
+  await page.evaluate(() => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.tapGraphBackground) {
+      throw new Error("tapGraphBackground test hook is unavailable");
+    }
+    bridge.tapGraphBackground();
+  });
+}
+
+/**
  * Returns the current model-space state for a graph node.
  * @param page - Playwright page to inspect.
  * @param nodeId - Roadmap node identifier.
@@ -499,13 +521,17 @@ export async function dragCompositeParentByModelDelta(
  * @param page - Playwright page to interact with.
  * @param deltaX - Horizontal drag distance in pixels.
  * @param deltaY - Vertical drag distance in pixels.
+ * @param steps - Optional pointer move steps for mid-drag assertions.
+ * @param onStep - Optional callback invoked after each intermediate step.
  */
 export async function dragCompoundTitleBar(
   page: Page,
   deltaX: number,
   deltaY: number,
+  steps = 12,
+  onStep?: () => Promise<void>,
 ): Promise<void> {
-  const handle = page.locator(".compound-drag-handle").first();
+  const handle = page.locator(".compound-parent-label").first();
   await expect(handle).toBeVisible();
   const box = await handle.boundingBox();
   if (!box) {
@@ -516,8 +542,120 @@ export async function dragCompoundTitleBar(
   const startY = box.y + box.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
+
+  const stepCount = Math.max(1, steps);
+  for (let step = 1; step <= stepCount; step += 1) {
+    await page.mouse.move(
+      startX + (deltaX * step) / stepCount,
+      startY + (deltaY * step) / stepCount,
+    );
+    if (onStep) {
+      await onStep();
+    }
+  }
+
+  await page.mouse.up();
+}
+
+/**
+ * Drags a composite resize handle by screen-space delta.
+ */
+export async function dragCompoundResizeHandle(
+  page: Page,
+  corner: "nw" | "ne" | "sw" | "se",
+  deltaX: number,
+  deltaY: number,
+): Promise<void> {
+  const handle = page.locator(`.compound-resize-handle[data-corner="${corner}"]`).first();
+  await expect(handle).toBeVisible();
+  const box = await handle.boundingBox();
+  if (!box) {
+    throw new Error(`compound resize handle ${corner} is not visible`);
+  }
+
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
   await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 12 });
   await page.mouse.up();
+}
+
+/**
+ * Drags a graph node in stepped increments for mid-gesture assertions.
+ */
+export async function dragGraphNodeWithSteps(
+  page: Page,
+  nodeId: string,
+  deltaX: number,
+  deltaY: number,
+  steps: number,
+  onStep?: () => Promise<void>,
+): Promise<void> {
+  await waitForGraph(page);
+  const start = await page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getGraphNodeRenderedCenter) {
+      throw new Error("graph node rendered center test hook is unavailable");
+    }
+    return bridge.getGraphNodeRenderedCenter(id);
+  }, nodeId);
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+
+  const stepCount = Math.max(1, steps);
+  for (let step = 1; step <= stepCount; step += 1) {
+    await page.mouse.move(
+      start.x + (deltaX * step) / stepCount,
+      start.y + (deltaY * step) / stepCount,
+    );
+    if (onStep) {
+      await onStep();
+    }
+  }
+
+  await page.mouse.up();
+}
+
+export async function nodesOverlap(
+  page: Page,
+  leftId: string,
+  rightId: string,
+): Promise<boolean> {
+  return page.evaluate(
+    ({ left, right }) => {
+      const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+      if (!bridge?.nodesOverlap) {
+        throw new Error("nodesOverlap test hook is unavailable");
+      }
+      return bridge.nodesOverlap(left, right);
+    },
+    { left: leftId, right: rightId },
+  );
+}
+
+export async function isNodeRenderedVisible(
+  page: Page,
+  nodeId: string,
+): Promise<boolean> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.isNodeRenderedVisible) {
+      throw new Error("isNodeRenderedVisible test hook is unavailable");
+    }
+    return bridge.isNodeRenderedVisible(id);
+  }, nodeId);
+}
+
+export async function getSubtreeNodeIds(page: Page, rootId: string): Promise<string[]> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getSubtreeNodeIds) {
+      throw new Error("getSubtreeNodeIds test hook is unavailable");
+    }
+    return bridge.getSubtreeNodeIds(id);
+  }, rootId);
 }
 
 export { test, expect };

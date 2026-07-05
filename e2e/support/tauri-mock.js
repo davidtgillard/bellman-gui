@@ -309,7 +309,7 @@
       case "save_top_level_node_position_command":
       case "remove_top_level_node_position_command":
         return (
-          scenario.layout || {
+          (window.__TEST_SCENARIO__ || scenario).layout || {
             version: 1,
             kind: "bellman-gui-work-package-layout",
             top_level: {},
