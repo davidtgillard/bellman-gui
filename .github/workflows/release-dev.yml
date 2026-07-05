@@ -28,6 +28,9 @@ jobs:
       - name: Install Linux dependencies
         run: bash packaging/install-linux-deps.sh
 
+      - name: Prepare cytoscape-compound-graph dependency
+        run: bash packaging/prepare-compound-graph.sh
+
       - run: npm ci
 
       - name: Prepare bellman sidecar

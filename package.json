@@ -5,6 +5,7 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
+    "preinstall": "bash packaging/prepare-compound-graph.sh",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
