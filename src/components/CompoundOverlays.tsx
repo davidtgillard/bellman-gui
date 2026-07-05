@@ -510,14 +510,18 @@ export function CompoundOverlays({
               className="child-drag-node is-selected"
               style={{
                 backgroundColor: childDragVisual.color,
-                width: childStyle.nodeWidth,
-                height: childStyle.nodeHeight,
-                transform: `scale(${ghostZoomScale})`,
+                transform: `translate(-50%, -50%) scale(${ghostZoomScale})`,
               }}
             />
             <div
               className="child-drag-label"
               style={{
+                top: `${
+                  ghostZoomScale *
+                  (childStyle.nodeHeight / 2 +
+                    childStyle.labelMarginY +
+                    childStyle.labelOutlineWidth)
+                }px`,
                 fontSize: childStyle.fontSize,
                 fontFamily: childStyle.fontFamily,
                 fontWeight: childStyle.fontWeight,
