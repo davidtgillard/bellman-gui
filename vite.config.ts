@@ -26,5 +26,6 @@ export default defineConfig(async () => ({
   test: {
     globals: false,
     environment: "node",
+    include: ["src/**/*.test.ts"],
   },
 }));
