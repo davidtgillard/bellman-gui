@@ -39,10 +39,58 @@ export function compoundGraphMaxZoom(
 export function redrawGraphSynchronously(cy: Core): void {
   const renderer = (
     cy as unknown as {
-      renderer?: () => { render?: (options?: unknown) => void } | undefined;
+      renderer?: () => { render?: (options?: { force?: boolean }) => void } | undefined;
     }
   ).renderer?.();
   renderer?.render?.();
+}
+
+export function isNodeObscuredOnRight(
+  box: { x2: number },
+  viewportWidth: number,
+): boolean {
+  return box.x2 > viewportWidth;
+}
+
+export function panDeltaToCenterNodeHorizontally(
+  nodeCenterX: number,
+  viewportWidth: number,
+): number {
+  return viewportWidth / 2 - nodeCenterX;
+}
+
+/**
+ * When a node detail sidebar shrinks the graph, pan horizontally so an obscured
+ * selected node is centred in the visible viewport. Zoom is unchanged.
+ */
+export function centerSelectedNodeInViewportIfObscured(
+  cy: Core,
+  container: HTMLElement,
+  nodeId: string,
+): boolean {
+  const node = cy.getElementById(nodeId);
+  if (node.empty()) {
+    return false;
+  }
+
+  const viewportWidth = container.clientWidth;
+  if (viewportWidth <= 0) {
+    return false;
+  }
+
+  redrawGraphSynchronously(cy);
+  const box = node.renderedBoundingBox({ includeLabels: true, includeOverlays: false });
+  if (!isNodeObscuredOnRight(box, viewportWidth)) {
+    return false;
+  }
+
+  const zoomBefore = cy.zoom();
+  const center = node.renderedPosition();
+  cy.panBy({ x: panDeltaToCenterNodeHorizontally(center.x, viewportWidth), y: 0 });
+  if (cy.zoom() !== zoomBefore) {
+    cy.zoom(zoomBefore);
+  }
+  return true;
 }
 
 /** Rendered box for HTML composite chrome, after flushing any pending canvas paint. */

@@ -22,6 +22,7 @@ import {
 import type { CompoundGraphScene } from "@dgillard/cytoscape-compound-graph";
 import { layoutModelFromCy } from "@dgillard/cytoscape-compound-graph";
 import {
+  centerSelectedNodeInViewportIfObscured,
   compoundGraphMaxZoom,
   graphNodeModelPosition,
   installWheelZoom,
@@ -614,7 +615,7 @@ export function RoadmapGraph({
     compoundGraphRef.current = compoundGraph;
   }, [compoundGraph]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
 
@@ -1339,31 +1340,13 @@ export function RoadmapGraph({
       0.2,
     );
 
-    let previousContainerWidth: number | null = null;
-    let previousWindowWidth: number | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      const containerWidth = container.clientWidth;
-      const windowWidth = window.innerWidth;
       cy.resize();
 
-      // The node detail sidebar shares the flex row with the graph, so opening,
-      // widening, or closing it changes the graph container width while the
-      // window stays the same. Pan the viewport by that sidebar-driven delta so
-      // the graph is visually pushed left when the panel expands and pulled back
-      // right when it retracts, instead of being clipped/covered on the right.
-      // Width changes that come from the window itself resizing (the sidebar
-      // unchanged) move the container and window by the same amount and cancel
-      // out, leaving the original frame of view untouched.
-      if (previousContainerWidth !== null && previousWindowWidth !== null) {
-        const containerDelta = containerWidth - previousContainerWidth;
-        const windowDelta = windowWidth - previousWindowWidth;
-        const sidebarShift = containerDelta - windowDelta;
-        if (sidebarShift !== 0) {
-          cy.panBy({ x: sidebarShift, y: 0 });
-        }
+      const selectedId = selectedNodeIdRef.current;
+      if (selectedId) {
+        centerSelectedNodeInViewportIfObscured(cy, container, selectedId);
       }
-      previousContainerWidth = containerWidth;
-      previousWindowWidth = windowWidth;
 
       // cy.resize() clears the canvas synchronously but defers the repaint to
       // the next animation frame, so a live drag (e.g. resizing the node detail
@@ -1593,6 +1576,15 @@ export function RoadmapGraph({
       cy.nodes().unselect();
       node.select();
     }
+  }, [selectedNodeId, cyReady]);
+
+  useLayoutEffect(() => {
+    const cy = cyRef.current;
+    const container = containerRef.current;
+    if (!cyReady || !cy || !container || !selectedNodeId) {
+      return;
+    }
+    centerSelectedNodeInViewportIfObscured(cy, container, selectedNodeId);
   }, [selectedNodeId, cyReady]);
 
   useEffect(() => {

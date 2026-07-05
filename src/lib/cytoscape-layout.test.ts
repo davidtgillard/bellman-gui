@@ -4,6 +4,8 @@ import {
   compoundGraphMaxZoom,
   compoundSizeForContent,
   graphLayoutSeed,
+  isNodeObscuredOnRight,
+  panDeltaToCenterNodeHorizontally,
   shiftBoxInside,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   TOP_LEVEL_NODE_DIAMETER,
@@ -102,5 +104,17 @@ describe("cytoscape-layout", () => {
 
     expect(maxZoom).toBe(TOP_LEVEL_GRAPH_MAX_ZOOM * referenceZoom);
     expect(leafMaxScreen).toBeCloseTo(topLevelMaxScreen);
+  });
+
+  it("detects when a node extends past the right edge of the viewport", () => {
+    expect(isNodeObscuredOnRight({ x2: 500 }, 480)).toBe(true);
+    expect(isNodeObscuredOnRight({ x2: 480 }, 480)).toBe(false);
+    expect(isNodeObscuredOnRight({ x2: 120 }, 480)).toBe(false);
+  });
+
+  it("computes horizontal pan to centre a node in the viewport", () => {
+    expect(panDeltaToCenterNodeHorizontally(400, 800)).toBe(0);
+    expect(panDeltaToCenterNodeHorizontally(700, 800)).toBe(-300);
+    expect(panDeltaToCenterNodeHorizontally(100, 800)).toBe(300);
   });
 });
