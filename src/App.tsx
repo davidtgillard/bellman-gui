@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphContextMenu } from "./components/GraphContextMenu";
@@ -707,6 +707,10 @@ function App() {
   );
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     invoke<RoadmapGraphDto | null>("load_initial_roadmap")
       .then((dto) => {
         if (dto) {
@@ -736,6 +740,10 @@ function App() {
   }, [editable, roadmapRoot, workPackageLayout.projects]);
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     let unlisten: (() => void) | undefined;
 
     void listen("open-roadmap", () => {
@@ -768,6 +776,10 @@ function App() {
   }, [handleRedo, handleUndo]);
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     let unlistenUndo: (() => void) | undefined;
     let unlistenRedo: (() => void) | undefined;
 

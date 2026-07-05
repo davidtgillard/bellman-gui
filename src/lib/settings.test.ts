@@ -4,6 +4,7 @@ import { loadSettings } from "./settings";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
+  isTauri: vi.fn(() => true),
 }));
 
 const invokeMock = vi.mocked(invoke);

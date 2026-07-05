@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export const DEFAULT_MAX_PAN_SPEED = 960;
 
@@ -23,6 +23,13 @@ function fromSettingsDto(dto: BellmanGuiSettingsDto): BellmanGuiSettings {
  * Loads global bellman-gui settings from the user's config directory.
  */
 export async function loadSettings(): Promise<BellmanGuiSettings> {
+  if (!isTauri()) {
+    return {
+      maxPanSpeed: DEFAULT_MAX_PAN_SPEED,
+      backgroundPanEnabled: false,
+    };
+  }
+
   const dto = await invoke<BellmanGuiSettingsDto>("load_settings_command");
   return fromSettingsDto(dto);
 }
