@@ -404,15 +404,29 @@ export function RoadmapGraph({
   const suppressLeafSelectionRef = useRef(false);
   const pendingLeafDeselectRef = useRef(false);
 
-  const useCompoundScene = useCallback(
+  const [cyReady, setCyReady] = useState(false);
+  const [cyInstance, setCyInstance] = useState<Core | null>(null);
+  const [compoundScene, setCompoundScene] = useState<CompoundGraphScene | null>(null);
+  const [graphSelectionRevision, setGraphSelectionRevision] = useState(0);
+  const [compoundReferenceZoom, setCompoundReferenceZoom] = useState(1);
+  const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
+  const [backgroundPanEnabled, setBackgroundPanEnabled] = useState(false);
+  const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
+    null,
+  );
+
+  const isCompoundSceneEnabled = useCallback(
     () => compoundGraphRef.current && isCompoundGraphNodes(nodesRef.current),
     [],
   );
 
   const rebuildScene = useCallback(
     (positions: Record<string, NodePosition> | undefined) => {
-      if (!useCompoundScene()) {
+      if (!isCompoundSceneEnabled()) {
         sceneRef.current = null;
+        queueMicrotask(() => {
+          setCompoundScene(null);
+        });
         return null;
       }
       const scene = buildCompoundGraphScene(
@@ -421,9 +435,12 @@ export function RoadmapGraph({
         positions ?? nodePositionsRef.current,
       );
       sceneRef.current = scene;
+      queueMicrotask(() => {
+        setCompoundScene(scene);
+      });
       return scene;
     },
-    [links, useCompoundScene],
+    [links, isCompoundSceneEnabled],
   );
 
   const persistSceneLayout = useCallback(() => {
@@ -531,13 +548,15 @@ export function RoadmapGraph({
 
   const syncCompoundReferenceZoom = useCallback((cy: Core) => {
     const referenceZoom = cy.zoom() > 0 ? cy.zoom() : 1;
-    setCompoundReferenceZoom(referenceZoom);
+    queueMicrotask(() => {
+      setCompoundReferenceZoom(referenceZoom);
+    });
     cy.maxZoom(compoundGraphMaxZoom(referenceZoom));
   }, []);
 
   const initializeCompoundScene = useCallback(
     (cy: Core) => {
-      if (!useCompoundScene()) {
+      if (!isCompoundSceneEnabled()) {
         return;
       }
       const scene = rebuildScene(nodePositionsRef.current);
@@ -554,7 +573,7 @@ export function RoadmapGraph({
       rebuildScene,
       reportNewCompoundSizes,
       syncCompoundReferenceZoom,
-      useCompoundScene,
+      isCompoundSceneEnabled,
     ],
   );
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
@@ -566,14 +585,6 @@ export function RoadmapGraph({
     }),
   );
   const keyboardPanFrameRef = useRef<number | null>(null);
-  const [cyReady, setCyReady] = useState(false);
-  const [graphSelectionRevision, setGraphSelectionRevision] = useState(0);
-  const [compoundReferenceZoom, setCompoundReferenceZoom] = useState(1);
-  const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
-  const [backgroundPanEnabled, setBackgroundPanEnabled] = useState(false);
-  const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
-    null,
-  );
 
   const closeContextMenu = useCallback(() => {
     setContextMenuState(null);
@@ -632,7 +643,7 @@ export function RoadmapGraph({
   }, [layoutReady]);
 
   useEffect(() => {
-    if (!cyReady || !useCompoundScene()) {
+    if (!cyReady || !isCompoundSceneEnabled()) {
       return;
     }
     const cy = cyRef.current;
@@ -655,7 +666,7 @@ export function RoadmapGraph({
     nodePositions,
     rebuildScene,
     syncCompoundReferenceZoom,
-    useCompoundScene,
+    isCompoundSceneEnabled,
   ]);
 
   useEffect(() => {
@@ -827,6 +838,7 @@ export function RoadmapGraph({
     if (existing) {
       existing.destroy();
       cyRef.current = null;
+      setCyInstance(null);
     }
 
     // Orphaned canvases can remain if init runs again before destroy completes.
@@ -834,7 +846,7 @@ export function RoadmapGraph({
 
     const cy = cytoscape({
       container,
-      style: compoundGraph ? workPackageGraphStylesheet() : CYTOSCAPE_STYLESHEET,
+      style: compoundGraphRef.current ? workPackageGraphStylesheet() : CYTOSCAPE_STYLESHEET,
       wheelSensitivity: 0.2,
       boxSelectionEnabled: false,
       userPanningEnabled: false,
@@ -843,6 +855,7 @@ export function RoadmapGraph({
     });
 
     cyRef.current = cy;
+    setCyInstance(cy);
     setCyReady(true);
 
     const testWindow = window as typeof window & {
@@ -914,7 +927,7 @@ export function RoadmapGraph({
         if (node.empty()) {
           throw new Error(`Graph node not found: ${nodeId}`);
         }
-        if (compoundGraph && node.data("kind") === "leaf") {
+        if (compoundGraphRef.current && node.data("kind") === "leaf") {
           if (node.selected()) {
             const cleared = onSelectionClearRef.current?.() ?? false;
             if (cleared) {
@@ -1157,7 +1170,7 @@ export function RoadmapGraph({
       const node = event.target;
       const nodeId = node.id();
 
-      if (compoundGraph && node.data("kind") === "leaf") {
+      if (compoundGraphRef.current && node.data("kind") === "leaf") {
         if (compoundLeafClickHandledRef.current) {
           compoundLeafClickHandledRef.current = false;
           return;
@@ -1209,7 +1222,7 @@ export function RoadmapGraph({
     cy.on("select", "node", (event) => {
       const node = event.target;
       if (
-        compoundGraph &&
+        compoundGraphRef.current &&
         node.data("kind") === "leaf" &&
         suppressLeafSelectionRef.current
       ) {
@@ -1217,7 +1230,7 @@ export function RoadmapGraph({
         node.unselect();
         return;
       }
-      if (compoundGraph && node.data("kind") === "leaf") {
+      if (compoundGraphRef.current && node.data("kind") === "leaf") {
         lastSelectedCompoundLeafRef.current = node.id();
       }
       onNodeClickRef.current?.(event.target.id());
@@ -1370,6 +1383,8 @@ export function RoadmapGraph({
       layoutCompletedRef.current = false;
       lastLayoutSyncTokenRef.current = 0;
       setCyReady(false);
+      setCyInstance(null);
+      setCompoundScene(null);
       compoundLeafTapRef.current = null;
       compoundLeafClearAfterDragRef.current = null;
       if (testWindow.__TEST__) {
@@ -1380,6 +1395,8 @@ export function RoadmapGraph({
       }
       cy.destroy();
       cyRef.current = null;
+      setCyInstance(null);
+      setCompoundScene(null);
       container.replaceChildren();
     };
   }, [closeContextMenu]);
@@ -1397,7 +1414,9 @@ export function RoadmapGraph({
     if (nodes.length === 0) {
       graphStructureKeyRef.current = "";
       layoutCompletedRef.current = false;
-      setGraphSelectionRevision((revision) => revision + 1);
+      queueMicrotask(() => {
+        setGraphSelectionRevision((revision) => revision + 1);
+      });
       cy.batch(() => {
         cy.elements().remove();
       });
@@ -1410,7 +1429,9 @@ export function RoadmapGraph({
     if (structureChanged) {
       graphStructureKeyRef.current = structureKey;
       layoutCompletedRef.current = false;
-      setGraphSelectionRevision((revision) => revision + 1);
+      queueMicrotask(() => {
+        setGraphSelectionRevision((revision) => revision + 1);
+      });
       cy.batch(() => {
         cy.elements().remove();
         if (compoundGraph && isCompoundGraphNodes(nodes)) {
@@ -1483,6 +1504,7 @@ export function RoadmapGraph({
     nodePositions,
     nodes,
     rebuildScene,
+    syncCompoundReferenceZoom,
   ]);
 
   useEffect(() => {
@@ -1611,9 +1633,10 @@ export function RoadmapGraph({
     visibleNodeIds !== undefined &&
     !nodes.some((node) => visibleNodeIds.has(node.id));
 
-  const resizeCy = cyReady ? cyRef.current : null;
-  const activeScene = sceneRef.current;
+  const resizeCy = cyReady ? cyInstance : null;
+  const activeScene = compoundScene;
   void graphSelectionRevision;
+  const childDragInProgress = activeScene?.isChildDragInProgress() ?? false;
   const compositeChromeId = compositeChromeTargetId(resizeCy, nodes);
   const compositeChromeNode = compositeChromeId
     ? nodes.find((node) => node.id === compositeChromeId)
@@ -1627,7 +1650,7 @@ export function RoadmapGraph({
   return (
     <div className="graph-container" ref={graphContainerRef} aria-label="Roadmap graph">
       <div
-        className={`graph-viewport${activeScene?.isChildDragInProgress() ? " graph-viewport-dragging" : ""}`}
+        className={`graph-viewport${childDragInProgress ? " graph-viewport-dragging" : ""}`}
         ref={containerRef}
       />
       {draggable && resizeCy && activeScene && compoundGraph ? (

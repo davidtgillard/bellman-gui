@@ -1,6 +1,5 @@
 import {
   clickGraphBackground,
-  dragGraphNode,
   expect,
   getGraphPan,
   getGraphNodeState,

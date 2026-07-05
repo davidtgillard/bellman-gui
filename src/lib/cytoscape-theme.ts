@@ -87,7 +87,10 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
   },
 ];
 
-/** Work-package graph stylesheet: base rules plus flat container/leaf compound rules. */
+/**
+ * Work-package graph stylesheet: base rules plus flat container/leaf compound rules.
+ * @returns Cytoscape stylesheet for work-package compound graphs.
+ */
 export function workPackageGraphStylesheet(): StylesheetStyle[] {
   return [
     ...mergeCompoundGraphStylesheet(CYTOSCAPE_BASE_STYLESHEET, BELLMAN_COMPOUND_GRAPH_THEME),

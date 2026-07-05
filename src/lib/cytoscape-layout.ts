@@ -22,6 +22,11 @@ export const TOP_LEVEL_NODE_DIAMETER = 36;
  *
  * Leaf nodes are sized as `cssDiameter / referenceZoom` in model space, so their
  * rendered diameter is `cssDiameter * (zoom / referenceZoom)`.
+ * @param referenceZoom
+ * @param leafNodeDiameter
+ * @param topLevelNodeDiameter
+ * @param topLevelMaxZoom
+ * @returns Maximum zoom for work-package compound graphs.
  */
 export function compoundGraphMaxZoom(
   referenceZoom: number,
@@ -35,7 +40,10 @@ export function compoundGraphMaxZoom(
   return topLevelMaxZoom * referenceZoom * (topLevelNodeDiameter / leafNodeDiameter);
 }
 
-/** Forces an immediate canvas repaint; use after programmatic position/size changes. */
+/**
+ * Forces an immediate canvas repaint; use after programmatic position/size changes.
+ * @param cy
+ */
 export function redrawGraphSynchronously(cy: Core): void {
   const renderer = (
     cy as unknown as {
@@ -45,6 +53,13 @@ export function redrawGraphSynchronously(cy: Core): void {
   renderer?.render?.();
 }
 
+/**
+ * Whether a node's rendered right edge extends past the viewport width.
+ * @param box
+ * @param box.x2
+ * @param viewportWidth
+ * @returns True when the node is clipped on the right.
+ */
 export function isNodeObscuredOnRight(
   box: { x2: number },
   viewportWidth: number,
@@ -52,6 +67,12 @@ export function isNodeObscuredOnRight(
   return box.x2 > viewportWidth;
 }
 
+/**
+ * Horizontal pan delta needed to centre a node in the viewport.
+ * @param nodeCenterX
+ * @param viewportWidth
+ * @returns Pan delta in rendered pixels.
+ */
 export function panDeltaToCenterNodeHorizontally(
   nodeCenterX: number,
   viewportWidth: number,
@@ -62,6 +83,10 @@ export function panDeltaToCenterNodeHorizontally(
 /**
  * When a node detail sidebar shrinks the graph, pan horizontally so an obscured
  * selected node is centred in the visible viewport. Zoom is unchanged.
+ * @param cy
+ * @param container
+ * @param nodeId
+ * @returns Whether the viewport was panned to reveal the node.
  */
 export function centerSelectedNodeInViewportIfObscured(
   cy: Core,
@@ -93,7 +118,11 @@ export function centerSelectedNodeInViewportIfObscured(
   return true;
 }
 
-/** Rendered box for HTML composite chrome, after flushing any pending canvas paint. */
+/**
+ * Rendered box for HTML composite chrome, after flushing any pending canvas paint.
+ * @param node
+ * @returns Rendered bounding box in container coordinates.
+ */
 export function compoundChromeRenderedBox(node: NodeSingular): {
   x1: number;
   y1: number;
@@ -629,7 +658,11 @@ const COMPOUND_CHILD_DRAG_CLASS = "compound-child-drag";
 /** Scratch key marking a node temporarily detached from its compound parent during drag. */
 export const orphanParentScratchKey = ORPHAN_PARENT_KEY;
 
-/** Returns the model position stored for persistence (parent-relative when compound-parented). */
+/**
+ * Returns the model position stored for persistence (parent-relative when compound-parented).
+ * @param node
+ * @returns Model position for layout persistence.
+ */
 export function graphNodeModelPosition(node: NodeSingular): NodePosition {
   const position = node.position();
   const orphanParentId = node.scratch(ORPHAN_PARENT_KEY) as string | undefined;
@@ -652,6 +685,7 @@ export function graphNodeModelPosition(node: NodeSingular): NodePosition {
 /**
  * Re-parents any nodes left detached after a compound drag so compounds keep
  * their border and pinned dimensions in the steady state.
+ * @param cy
  */
 function reparentScratchedOrphans(cy: Core): void {
   const orphans: NodeSingular[] = [];
@@ -711,6 +745,8 @@ function pinCompoundSubtree(
 /**
  * Applies persisted drag positions and re-establishes compound rigidity after
  * child drags that temporarily detach nodes from their parents.
+ * @param cy
+ * @param positions
  */
 export function applyDragPositionUpdates(
   cy: Core,
@@ -824,12 +860,20 @@ export function snapshotSubtreePositions(root: NodeSingular): Map<string, NodePo
 
 export const LAYOUT_ANCHOR_SUFFIX = "--layout-anchor";
 
-/** Returns the cytoscape-only anchor id used to stabilize single-child compounds. */
+/**
+ * Returns the cytoscape-only anchor id used to stabilize single-child compounds.
+ * @param parentId
+ * @returns Layout anchor node id.
+ */
 export function layoutAnchorId(parentId: string): string {
   return `${parentId}${LAYOUT_ANCHOR_SUFFIX}`;
 }
 
-/** Whether a node is an invisible layout anchor rather than a roadmap entity. */
+/**
+ * Whether a node is an invisible layout anchor rather than a roadmap entity.
+ * @param node
+ * @returns True for hidden layout anchor nodes.
+ */
 export function isLayoutAnchorNode(node: NodeSingular): boolean {
   return (
     Boolean(node.data("layoutAnchor")) || node.id().endsWith(LAYOUT_ANCHOR_SUFFIX)
@@ -851,7 +895,11 @@ function realChildCount(parent: NodeSingular): number {
   return count;
 }
 
-/** Removes the layout anchor so a solitary real child can move independently while locked. */
+/**
+ * Removes the layout anchor so a solitary real child can move independently while locked.
+ * @param cy
+ * @param parent
+ */
 export function removeLayoutAnchorForChildDrag(cy: Core, parent: NodeSingular): void {
   if (realChildCount(parent) !== 1) {
     return;
@@ -871,7 +919,12 @@ function layoutAnchorPosition(parent: NodeSingular): NodePosition {
   };
 }
 
-/** Ensures a single-child composite has a hidden anchor child to prevent re-centering. */
+/**
+ * Ensures a single-child composite has a hidden anchor child to prevent re-centering.
+ * @param cy
+ * @param parent
+ * @returns The anchor node, if one exists or was created.
+ */
 export function ensureLayoutAnchor(
   cy: Core,
   parent: NodeSingular,
@@ -924,7 +977,10 @@ export function ensureLayoutAnchor(
   return anchor as NodeSingular;
 }
 
-/** Adds or removes layout anchors so every single-child composite stays stable. */
+/**
+ * Adds or removes layout anchors so every single-child composite stays stable.
+ * @param cy
+ */
 export function syncLayoutAnchors(cy: Core): void {
   const parents = cy.nodes(":parent");
   if (typeof parents.forEach === "function") {
@@ -947,6 +1003,8 @@ export function syncLayoutAnchors(cy: Core): void {
 /**
  * Applies saved layout coordinates to graph nodes. Parent compounds are updated
  * before their children so compound relative positions stay coherent.
+ * @param cy
+ * @param nodePositions
  */
 export function applySavedNodePositions(
   cy: Core,
@@ -1042,6 +1100,10 @@ export function applySavedNodePositions(
  * Moves a composite by updating its parent centre, then restoring each child's
  * drag-start parent-relative position in the same batch. Pinned compounds need
  * both writes together so the border and children stay aligned.
+ * @param cy
+ * @param node
+ * @param startPositions
+ * @param targetPosition
  */
 function moveCompoundParentRigidly(
   cy: Core,
@@ -1126,6 +1188,8 @@ export function applyCompoundGrabPolicy(cy: Core, draggable: boolean): void {
  * Returns whether a child grab should move its composite parent instead.
  * Disabled: composite moves via the title bar when selected, or by grabbing
  * empty interior padding. Child grabs always reposition the child.
+ * @param _node
+ * @returns Always false; parent moves use the title bar instead.
  */
 export function shouldPromoteChildGrabToParent(_node: NodeSingular): boolean {
   return false;
@@ -1167,6 +1231,11 @@ function clearDragState(node: NodeSingular): void {
   node.removeScratch(CHILD_DRAG_KEY);
 }
 
+/**
+ * Absolute model position of a node, including compound parent offsets.
+ * @param node
+ * @returns Position in graph model coordinates.
+ */
 export function compoundAbsolutePosition(node: NodeSingular): NodePosition {
   const position = node.position();
   const parent = node.parent();
@@ -1186,6 +1255,7 @@ export function compoundAbsolutePosition(node: NodeSingular): NodePosition {
  * @param cy - Cytoscape instance containing the graph nodes.
  * @param x - Rendered x coordinate relative to the graph container.
  * @param y - Rendered y coordinate relative to the graph container.
+ * @returns Topmost leaf child at the point, if any.
  */
 export function childLeafAtRenderedPoint(
   cy: Core,
@@ -1264,6 +1334,11 @@ export function snapshotCompoundAncestorLock(node: NodeSingular): DragAncestorLo
  * Clamps a child drag while siblings keep their parent-relative positions.
  * Used by integration tests; live pointer drags call the same restore/pin
  * sequence inside {@link installDragOverlapConstraints}.
+ * @param cy
+ * @param node
+ * @param _lock
+ * @param childDrag
+ * @param targetRelative
  */
 export function constrainCompoundChildDrag(
   cy: Core,
@@ -1310,6 +1385,11 @@ function snapshotAncestorLocks(node: NodeSingular): DragAncestorLock {
   return { ancestors };
 }
 
+/**
+ *
+ * @param cy
+ * @param childDrag
+ */
 export function restoreSiblingPositions(
   cy: Core,
   childDrag: ChildDragState | undefined,
@@ -1349,6 +1429,11 @@ function graphPointRelativeToParent(
   };
 }
 
+/**
+ *
+ * @param cy
+ * @param lock
+ */
 export function restoreAncestorLock(cy: Core, lock: DragAncestorLock | undefined): void {
   if (!lock) {
     return;
@@ -1367,6 +1452,11 @@ export function restoreAncestorLock(cy: Core, lock: DragAncestorLock | undefined
   });
 }
 
+/**
+ *
+ * @param cy
+ * @param lock
+ */
 export function lockAncestorLock(cy: Core, lock: DragAncestorLock | undefined): void {
   if (!lock) {
     return;
@@ -1380,7 +1470,11 @@ export function lockAncestorLock(cy: Core, lock: DragAncestorLock | undefined): 
   }
 }
 
-/** Whether the node is the only real child of its composite parent. */
+/**
+ * Whether the node is the only real child of its composite parent.
+ * @param node
+ * @returns True for a solitary non-anchor child.
+ */
 export function isSolitaryRealChildDrag(node: NodeSingular): boolean {
   const parent = node.parent();
   if (parent.empty()) {
@@ -1389,7 +1483,10 @@ export function isSolitaryRealChildDrag(node: NodeSingular): boolean {
   return realChildCount(parent.first()) === 1;
 }
 
-/** Detaches a child to absolute coordinates while recording its parent for reparenting. */
+/**
+ * Detaches a child to absolute coordinates while recording its parent for reparenting.
+ * @param dragged
+ */
 export function orphanDraggedChildForInteriorDrag(dragged: NodeSingular): void {
   const parent = dragged.parent().first();
   const absolute = compoundAbsolutePosition(dragged);
@@ -1399,7 +1496,12 @@ export function orphanDraggedChildForInteriorDrag(dragged: NodeSingular): void {
   dragged.addClass(COMPOUND_CHILD_DRAG_CLASS);
 }
 
-/** Pins composite chrome at drag start for solitary-child interior drags. */
+/**
+ * Pins composite chrome at drag start for solitary-child interior drags.
+ * @param cy
+ * @param parentId
+ * @param lock
+ */
 export function freezeParentChromeForInteriorDrag(
   cy: Core,
   parentId: string,
@@ -1419,6 +1521,10 @@ export function freezeParentChromeForInteriorDrag(
   parent.addClass(COMPOUND_INTERIOR_DRAG_CLASS);
 }
 
+/**
+ *
+ * @param cy
+ */
 export function clearCompoundInteriorDragClasses(cy: Core): void {
   cy.nodes(`.${COMPOUND_INTERIOR_DRAG_CLASS}`).removeClass(COMPOUND_INTERIOR_DRAG_CLASS);
   cy.nodes(`.${COMPOUND_CHILD_DRAG_CLASS}`).removeClass(COMPOUND_CHILD_DRAG_CLASS);
@@ -1437,7 +1543,11 @@ function pinCompoundFromLockEntry(parent: NodeSingular, entry: AncestorLockEntry
   moveNodeBy(parent, entry.topLeft.x - finalBox.x1, entry.topLeft.y - finalBox.y1);
 }
 
-/** Re-applies pinned composite size at the locked model center during drag frames. */
+/**
+ * Re-applies pinned composite size at the locked model center during drag frames.
+ * @param cy
+ * @param lock
+ */
 export function pinAncestorChromeFromLock(cy: Core, lock: DragAncestorLock | undefined): void {
   if (!lock) {
     return;
@@ -1461,6 +1571,11 @@ export function pinAncestorChromeFromLock(cy: Core, lock: DragAncestorLock | und
 
 /**
  * Applies one frame of a parent-relative child drag and re-pins ancestor chrome.
+ * @param cy
+ * @param node
+ * @param childDrag
+ * @param lock
+ * @param targetRelative
  */
 export function applyParentRelativeChildDragFrame(
   cy: Core,
@@ -1480,6 +1595,10 @@ export function applyParentRelativeChildDragFrame(
 
 /**
  * Applies one frame of an orphan-absolute child drag and re-freezes ancestor chrome.
+ * @param cy
+ * @param node
+ * @param lock
+ * @param targetAbsolute
  */
 export function applyOrphanAbsoluteChildDragFrame(
   cy: Core,
@@ -1492,7 +1611,15 @@ export function applyOrphanAbsoluteChildDragFrame(
   redrawGraphSynchronously(cy);
 }
 
-/** Reparents an orphan-dragged child and restores pinned composite chrome. */
+/**
+ * Reparents an orphan-dragged child and restores pinned composite chrome.
+ * @param cy
+ * @param node
+ * @param parentId
+ * @param lock
+ * @param childDrag
+ * @param endRelative
+ */
 export function finalizeOrphanChildInteriorDrag(
   cy: Core,
   node: NodeSingular,
@@ -1531,7 +1658,15 @@ export function finalizeOrphanChildInteriorDrag(
   lockAncestorLock(cy, lock);
 }
 
-/** Finalizes a parent-relative child drag with pinned composite chrome. */
+/**
+ * Finalizes a parent-relative child drag with pinned composite chrome.
+ * @param cy
+ * @param node
+ * @param parentId
+ * @param lock
+ * @param childDrag
+ * @param endRelative
+ */
 export function finalizeParentRelativeChildDrag(
   cy: Core,
   node: NodeSingular,

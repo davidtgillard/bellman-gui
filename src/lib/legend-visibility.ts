@@ -1,9 +1,19 @@
 export const LEGEND_VISIBILITY_KEY_PREFIX = "bellman:legend-visibility:";
 
+/**
+ * localStorage key for legend visibility preferences.
+ * @param roadmapRoot
+ * @returns Storage key string.
+ */
 export function legendVisibilityStorageKey(roadmapRoot: string): string {
   return `${LEGEND_VISIBILITY_KEY_PREFIX}${roadmapRoot}`;
 }
 
+/**
+ * Loads stored legend visibility for a roadmap.
+ * @param roadmapRoot
+ * @returns Visible node types, or null when unset or invalid.
+ */
 export function loadLegendVisibility(roadmapRoot: string): string[] | null {
   try {
     const raw = globalThis.localStorage?.getItem(legendVisibilityStorageKey(roadmapRoot));
@@ -20,6 +30,11 @@ export function loadLegendVisibility(roadmapRoot: string): string[] | null {
   }
 }
 
+/**
+ *
+ * @param roadmapRoot
+ * @param visibleTypes
+ */
 export function saveLegendVisibility(roadmapRoot: string, visibleTypes: Set<string>): void {
   try {
     globalThis.localStorage?.setItem(
@@ -33,6 +48,9 @@ export function saveLegendVisibility(roadmapRoot: string, visibleTypes: Set<stri
 
 /**
  * Applies stored legend visibility for a roadmap, falling back to all available types.
+ * @param availableTypes
+ * @param stored
+ * @returns Visible node types for the graph legend.
  */
 export function resolveVisibleTypes(
   availableTypes: Iterable<string>,

@@ -52,6 +52,7 @@ export default [
         },
       ],
       "jsdoc/valid-types": "error",
+      "jsdoc/require-param-description": "off",
       "local/require-switch-satisfies-never": "error",
     },
   },

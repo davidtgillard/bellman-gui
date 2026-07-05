@@ -158,6 +158,8 @@ export function CompoundOverlays({
   const childSelectedNodeProbeRef = useRef<HTMLDivElement>(null);
   const childVisualStyleSignatureRef = useRef("");
   const childVisualStyleRef = useRef<ChildVisualStyle>(DEFAULT_CHILD_VISUAL_STYLE);
+  const [childVisualStyle, setChildVisualStyle] =
+    useState<ChildVisualStyle>(DEFAULT_CHILD_VISUAL_STYLE);
   const referenceZoomRef = useRef(referenceZoom);
   const resizeStartRef = useRef<{
     containerId: string;
@@ -218,6 +220,7 @@ export function CompoundOverlays({
     );
     const referenceZoom = referenceZoomRef.current > 0 ? referenceZoomRef.current : 1;
     childVisualStyleRef.current = childVisualStyle;
+    setChildVisualStyle(childVisualStyle);
     childVisualStyleSignatureRef.current = JSON.stringify(childVisualStyle);
     targetCy.batch(() => {
       targetCy.nodes("[kind = 'leaf']").forEach((node) => {
@@ -307,8 +310,10 @@ export function CompoundOverlays({
   useEffect(() => {
     referenceZoomRef.current = referenceZoom > 0 ? referenceZoom : 1;
     applyConfiguredChildVisualStyle(cy);
-    refreshOverlays();
-    recomputeHandles();
+    queueMicrotask(() => {
+      refreshOverlays();
+      recomputeHandles();
+    });
   }, [applyConfiguredChildVisualStyle, cy, referenceZoom, refreshOverlays, recomputeHandles]);
 
   useEffect(() => {
@@ -418,7 +423,6 @@ export function CompoundOverlays({
     [applyResize, finishResize],
   );
 
-  const childStyle = childVisualStyleRef.current;
   const ghostZoomScale = childDragVisual?.zoomScale ?? 1;
 
   return (
@@ -514,14 +518,14 @@ export function CompoundOverlays({
               style={{
                 top: `${
                   ghostZoomScale *
-                  (childStyle.nodeHeight / 2 +
-                    childStyle.labelMarginY +
-                    childStyle.labelOutlineWidth)
+                  (childVisualStyle.nodeHeight / 2 +
+                    childVisualStyle.labelMarginY +
+                    childVisualStyle.labelOutlineWidth)
                 }px`,
-                fontSize: childStyle.fontSize,
-                fontFamily: childStyle.fontFamily,
-                fontWeight: childStyle.fontWeight,
-                color: childStyle.color,
+                fontSize: childVisualStyle.fontSize,
+                fontFamily: childVisualStyle.fontFamily,
+                fontWeight: childVisualStyle.fontWeight,
+                color: childVisualStyle.color,
                 transform: `translateX(-50%) scale(${ghostZoomScale})`,
               }}
             >

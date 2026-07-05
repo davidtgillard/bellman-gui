@@ -734,9 +734,11 @@ function App() {
     if (!testLayout || Object.keys(workPackageLayout.projects).length > 0) {
       return;
     }
-    setWorkPackageLayout(testLayout);
-    setHydratedLayoutKey(`${roadmapRoot}:${editable}`);
-    setLayoutSyncToken((token) => token + 1);
+    queueMicrotask(() => {
+      setWorkPackageLayout(testLayout);
+      setHydratedLayoutKey(`${roadmapRoot}:${editable}`);
+      setLayoutSyncToken((token) => token + 1);
+    });
   }, [editable, roadmapRoot, workPackageLayout.projects]);
 
   useEffect(() => {

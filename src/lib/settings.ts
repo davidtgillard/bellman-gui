@@ -21,6 +21,7 @@ function fromSettingsDto(dto: BellmanGuiSettingsDto): BellmanGuiSettings {
 
 /**
  * Loads global bellman-gui settings from the user's config directory.
+ * @returns Resolved GUI settings.
  */
 export async function loadSettings(): Promise<BellmanGuiSettings> {
   if (!isTauri()) {

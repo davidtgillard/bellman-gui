@@ -131,6 +131,10 @@ function toSceneEdges(links: CompoundGraphViewLink[]): SceneEdgeSpec[] {
 
 /**
  * Builds a {@link CompoundGraphScene} from work-package graph view nodes and saved layout.
+ * @param nodes
+ * @param links
+ * @param nodePositions
+ * @returns Compound graph scene for the view.
  */
 export function buildCompoundGraphScene(
   nodes: CompoundGraphViewNode[],
@@ -149,6 +153,11 @@ export function buildCompoundGraphScene(
 
 /**
  * Builds a scene from a {@link CompoundWorkPackageView} and display node metadata.
+ * @param view
+ * @param displayNodes
+ * @param nodePositions
+ * @param labelForNode
+ * @returns Compound graph scene for the work-package view.
  */
 export function buildCompoundGraphSceneFromView(
   view: CompoundWorkPackageView,
@@ -172,10 +181,20 @@ export function buildCompoundGraphSceneFromView(
   return buildCompoundGraphScene(graphNodes, view.displayLinks, nodePositions);
 }
 
+/**
+ * Whether the node list uses compound parent/child layout.
+ * @param nodes
+ * @returns True when any node is compound or has a parent.
+ */
 export function isCompoundGraphNodes(nodes: CompoundGraphViewNode[]): boolean {
   return nodes.some((node) => Boolean(node.parent || node.data?.isCompound));
 }
 
+/**
+ * Layout model inputs derived from compound graph nodes.
+ * @param nodes
+ * @returns Layout inputs for the compound graph scene.
+ */
 export function sceneLayoutInputs(nodes: CompoundGraphViewNode[]) {
   return toLayoutInputs(nodes);
 }

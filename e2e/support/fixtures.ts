@@ -130,6 +130,8 @@ const PERSIST_KEY_PREFIX = "bellman:undo-history:";
  * @param page - Playwright page to configure.
  * @param root - Roadmap root used as the storage key suffix.
  * @param payload - Serialized undo stack `{ states, index }`.
+ * @param payload.states
+ * @param payload.index
  */
 export async function seedPersistedUndo(
   page: Page,
@@ -493,6 +495,10 @@ export async function openWorkPackageGraph(
 
 /**
  * Moves a composite parent by model-space delta via the same path as title-bar drag.
+ * @param page
+ * @param parentId
+ * @param dx
+ * @param dy
  */
 export async function dragCompositeParentByModelDelta(
   page: Page,
@@ -559,6 +565,10 @@ export async function dragCompoundTitleBar(
 
 /**
  * Drags a composite resize handle by screen-space delta.
+ * @param page
+ * @param corner
+ * @param deltaX
+ * @param deltaY
  */
 export async function dragCompoundResizeHandle(
   page: Page,
@@ -583,6 +593,12 @@ export async function dragCompoundResizeHandle(
 
 /**
  * Drags a graph node in stepped increments for mid-gesture assertions.
+ * @param page
+ * @param nodeId
+ * @param deltaX
+ * @param deltaY
+ * @param steps
+ * @param onStep
  */
 export async function dragGraphNodeWithSteps(
   page: Page,
