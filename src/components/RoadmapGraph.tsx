@@ -526,6 +526,11 @@ export function RoadmapGraph({
     }
   }, []);
 
+  const syncCompoundReferenceZoom = useCallback((cy: Core) => {
+    const zoom = cy.zoom();
+    setCompoundReferenceZoom(zoom > 0 ? zoom : 1);
+  }, []);
+
   const initializeCompoundScene = useCallback(
     (cy: Core) => {
       if (!useCompoundScene()) {
@@ -536,10 +541,17 @@ export function RoadmapGraph({
         return;
       }
       scene.initializeFromCy(cy);
+      syncCompoundReferenceZoom(cy);
       attachSceneHandlers(cy, scene);
       reportNewCompoundSizes(scene);
     },
-    [attachSceneHandlers, rebuildScene, reportNewCompoundSizes, useCompoundScene],
+    [
+      attachSceneHandlers,
+      rebuildScene,
+      reportNewCompoundSizes,
+      syncCompoundReferenceZoom,
+      useCompoundScene,
+    ],
   );
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
   const contextMenuRef = useRef(contextMenu);
@@ -552,6 +564,7 @@ export function RoadmapGraph({
   const keyboardPanFrameRef = useRef<number | null>(null);
   const [cyReady, setCyReady] = useState(false);
   const [graphSelectionRevision, setGraphSelectionRevision] = useState(0);
+  const [compoundReferenceZoom, setCompoundReferenceZoom] = useState(1);
   const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
   const [backgroundPanEnabled, setBackgroundPanEnabled] = useState(false);
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
@@ -627,6 +640,7 @@ export function RoadmapGraph({
       return;
     }
     scene.initializeFromCy(cy);
+    syncCompoundReferenceZoom(cy);
     if (layoutCompletedRef.current) {
       attachSceneHandlers(cy, scene);
     }
@@ -636,6 +650,7 @@ export function RoadmapGraph({
     layoutSyncToken,
     nodePositions,
     rebuildScene,
+    syncCompoundReferenceZoom,
     useCompoundScene,
   ]);
 
@@ -1418,6 +1433,7 @@ export function RoadmapGraph({
             cy.add(scene.buildElements());
             if (usesPresetLayout(nodePositions)) {
               scene.initializeFromCy(cy);
+              syncCompoundReferenceZoom(cy);
             }
           }
         } else {
@@ -1429,6 +1445,7 @@ export function RoadmapGraph({
         const scene = rebuildScene(nodePositions);
         if (scene && usesPresetLayout(nodePositions) && cy.nodes().length > 0) {
           scene.initializeFromCy(cy);
+          syncCompoundReferenceZoom(cy);
         }
       }
       lastLayoutSyncTokenRef.current = layoutSyncToken;
@@ -1610,6 +1627,7 @@ export function RoadmapGraph({
         <CompoundOverlays
           cy={resizeCy}
           scene={activeScene}
+          referenceZoom={compoundReferenceZoom}
           probeLabel={overlayProbeLabel}
           selectedContainerId={compositeChromeId}
           onResizeComplete={(nodeId, position) =>

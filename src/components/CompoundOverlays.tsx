@@ -136,6 +136,8 @@ function readComputedChildVisualStyle(
 interface CompoundOverlaysProps {
   cy: Core;
   scene: CompoundGraphScene;
+  /** Zoom after the graph viewport was last fitted; must match when the scene was initialized. */
+  referenceZoom: number;
   probeLabel: string;
   selectedContainerId: string | null;
   onResizeComplete: (nodeId: string, position: NodePosition) => void;
@@ -145,6 +147,7 @@ interface CompoundOverlaysProps {
 export function CompoundOverlays({
   cy,
   scene,
+  referenceZoom,
   probeLabel,
   selectedContainerId,
   onResizeComplete,
@@ -155,7 +158,7 @@ export function CompoundOverlays({
   const childSelectedNodeProbeRef = useRef<HTMLDivElement>(null);
   const childVisualStyleSignatureRef = useRef("");
   const childVisualStyleRef = useRef<ChildVisualStyle>(DEFAULT_CHILD_VISUAL_STYLE);
-  const referenceZoomRef = useRef(1);
+  const referenceZoomRef = useRef(referenceZoom);
   const resizeStartRef = useRef<{
     containerId: string;
     corner: ResizeCorner;
@@ -302,11 +305,13 @@ export function CompoundOverlays({
   ]);
 
   useEffect(() => {
-    referenceZoomRef.current = cy.zoom() > 0 ? cy.zoom() : 1;
+    referenceZoomRef.current = referenceZoom > 0 ? referenceZoom : 1;
     applyConfiguredChildVisualStyle(cy);
     refreshOverlays();
     recomputeHandles();
+  }, [applyConfiguredChildVisualStyle, cy, referenceZoom, refreshOverlays, recomputeHandles]);
 
+  useEffect(() => {
     const onRender = () => {
       syncConfiguredChildVisualStyle(cy);
       recomputeHandles();
@@ -319,13 +324,7 @@ export function CompoundOverlays({
       cy.removeListener("render zoom pan drag", onRender);
       cy.removeListener("select unselect", onRender);
     };
-  }, [
-    applyConfiguredChildVisualStyle,
-    cy,
-    recomputeHandles,
-    refreshOverlays,
-    syncConfiguredChildVisualStyle,
-  ]);
+  }, [cy, recomputeHandles, refreshOverlays, syncConfiguredChildVisualStyle]);
 
   const applyResize = useCallback(
     (clientX: number, clientY: number) => {
@@ -420,10 +419,7 @@ export function CompoundOverlays({
   );
 
   const childStyle = childVisualStyleRef.current;
-  const ghostZoomScale =
-    childDragVisual && childDragVisual.zoom > 0
-      ? childDragVisual.zoom / referenceZoomRef.current
-      : 1;
+  const ghostZoomScale = childDragVisual?.zoomScale ?? 1;
 
   return (
     <div className="compound-overlays-layer">
