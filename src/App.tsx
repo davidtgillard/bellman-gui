@@ -216,6 +216,14 @@ function App() {
       );
       setLayoutSyncToken((token) => token + 1);
     }
+
+    const testWindow = window as unknown as {
+      __TEST__?: { roadmapRoot?: string; editable?: boolean };
+    };
+    if (testWindow.__TEST__) {
+      testWindow.__TEST__.roadmapRoot = graph.root;
+      testWindow.__TEST__.editable = graph.editable;
+    }
   }, []);
 
   useEffect(() => {

@@ -4,6 +4,7 @@
 // `@tauri-apps/api/mocks` (invoke, transformCallback, runCallback, callbacks)
 // with event mocking enabled.
 (() => {
+  globalThis.isTauri = true;
   const internals = (window.__TAURI_INTERNALS__ = window.__TAURI_INTERNALS__ || {});
 
   const callbacks = new Map();

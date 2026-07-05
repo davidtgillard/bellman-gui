@@ -1,6 +1,7 @@
 import {
   expect,
   getGraphPan,
+  reloadApp,
   setupPage,
   test,
   type Scenario,
@@ -92,7 +93,7 @@ test.describe("keyboard pan", () => {
     await page.addInitScript((seed) => {
       (window as unknown as { __TEST_SCENARIO__: unknown }).__TEST_SCENARIO__ = seed;
     }, graphScenario({ max_pan_speed: 1800 }));
-    await page.reload();
+    await reloadApp(page, graphScenario({ max_pan_speed: 1800 }));
     await waitForGraphPan(page);
     await expect
       .poll(async () => {
@@ -102,7 +103,7 @@ test.describe("keyboard pan", () => {
           }).__TEST__;
           return bridge?.calls?.filter((call) => call.cmd === "load_settings_command").length ?? 0;
         });
-        return calls >= 2;
+        return calls >= 1;
       })
       .toBe(true);
 

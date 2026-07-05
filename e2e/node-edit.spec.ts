@@ -103,7 +103,7 @@ async function replaceEditorContent(
 test.describe("node content editing", () => {
   test("opens the markdown editor for an editable node", async ({ page }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
 
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.locator(".cm-content")).toBeVisible();
@@ -137,7 +137,7 @@ test.describe("node content editing", () => {
     page,
   }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     await replaceEditorContent(page, "Just body text without a heading");
@@ -155,7 +155,7 @@ test.describe("node content editing", () => {
 
   test("previews rendered markdown without leaving edit mode", async ({ page }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.locator(".cm-content")).toBeVisible();
 
@@ -174,7 +174,7 @@ test.describe("node content editing", () => {
 
   test("saves valid edits and returns to the rendered view", async ({ page }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -191,7 +191,7 @@ test.describe("node content editing", () => {
 
   test("allows saving despite non-blocking warnings", async ({ page }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     await replaceEditorContent(page, "# Different heading\n\nBody text.");
@@ -211,7 +211,7 @@ test.describe("node content editing", () => {
       page,
       goalScenario({ saveError: "bellman sync failed: boom" }),
     );
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -227,7 +227,7 @@ test.describe("node content editing", () => {
 
   test("prompts before discarding unsaved edits when closing", async ({ page }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -254,7 +254,7 @@ test.describe("node content editing", () => {
     await page.getByRole("button", { name: "Show work package graph" }).click();
     await expect(page.locator(".graph-view-breadcrumb")).toBeVisible();
 
-    await selectNode(page, WP_INVOICING.id);
+    await selectNode(page, WP_INVOICING.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const description = page.getByRole("textbox");
@@ -269,7 +269,7 @@ test.describe("node content editing", () => {
 
   test("undo after a content save issues an undo command", async ({ page }) => {
     await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id);
+    await selectNode(page, GOAL.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");

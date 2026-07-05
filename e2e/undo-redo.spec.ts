@@ -4,6 +4,7 @@ import {
   expect,
   setupPage,
   test,
+  waitForUndoReady,
   type Scenario,
 } from "./support/fixtures";
 
@@ -54,11 +55,12 @@ test.describe("undo/redo", () => {
 
     await expect(legend.getByText("Milestone")).toBeVisible();
 
+    await waitForUndoReady(page);
     await page.keyboard.press("Control+z");
 
+    expect(await countCalls(page, "undo_command")).toBe(1);
     await expect(legend.getByText("Milestone")).toHaveCount(0);
     await expect(legend.getByText("Goal")).toBeVisible();
-    expect(await countCalls(page, "undo_command")).toBe(1);
 
     await page.keyboard.press("Control+Shift+z");
 
@@ -73,9 +75,10 @@ test.describe("undo/redo", () => {
     const legend = page.getByRole("complementary", { name: "Node types" });
     await expect(legend.getByText("Milestone")).toBeVisible();
 
+    await waitForUndoReady(page);
     await page.keyboard.press("Control+z");
-    await expect(legend.getByText("Milestone")).toHaveCount(0);
     expect(await countCalls(page, "undo_command")).toBe(1);
+    await expect(legend.getByText("Milestone")).toHaveCount(0);
 
     await page.keyboard.press("Control+Shift+z");
     await expect(legend.getByText("Milestone")).toBeVisible();
@@ -88,9 +91,10 @@ test.describe("undo/redo", () => {
     const legend = page.getByRole("complementary", { name: "Node types" });
     await expect(legend.getByText("Milestone")).toBeVisible();
 
+    await waitForUndoReady(page);
     await emitEvent(page, "undo");
-    await expect(legend.getByText("Milestone")).toHaveCount(0);
     expect(await countCalls(page, "undo_command")).toBe(1);
+    await expect(legend.getByText("Milestone")).toHaveCount(0);
 
     await emitEvent(page, "redo");
     await expect(legend.getByText("Milestone")).toBeVisible();

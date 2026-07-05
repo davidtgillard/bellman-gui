@@ -7,6 +7,7 @@ import {
   setupPage,
   tapGraphNode,
   test,
+  waitForCompoundGraphReady,
   type Scenario,
 } from "./support/fixtures";
 
@@ -71,21 +72,7 @@ function compoundDragScenario(): Scenario {
 async function openCompoundGraph(page: import("@playwright/test").Page): Promise<void> {
   await setupPage(page, compoundDragScenario());
   await openWorkPackageGraph(page, PROJECT.id);
-
-  await expect
-    .poll(async () => {
-      const parent = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-      const childA = await getGraphNodeState(page, CHILD_A.id);
-      const childB = await getGraphNodeState(page, CHILD_B.id);
-      return (
-        parent !== null &&
-        parent.w !== undefined &&
-        parent.h !== undefined &&
-        childA !== null &&
-        childB !== null
-      );
-    })
-    .toBe(true);
+  await waitForCompoundGraphReady(page, COMPOSITE_PARENT.id, [CHILD_A.id, CHILD_B.id]);
 }
 
 test.describe("composite graph interaction", () => {

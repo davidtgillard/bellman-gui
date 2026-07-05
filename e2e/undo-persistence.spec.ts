@@ -4,6 +4,7 @@ import {
   seedPersistedUndo,
   setupPage,
   test,
+  waitForUndoReady,
   type RoadmapState,
   type Scenario,
 } from "./support/fixtures";
@@ -61,6 +62,7 @@ test.describe("undo persistence", () => {
 
     await expect(legend.getByText("Milestone")).toBeVisible();
 
+    await waitForUndoReady(page);
     await page.keyboard.press("Control+z");
     await expect(legend.getByText("Milestone")).toHaveCount(0);
     await expect(legend.getByText("Goal")).toBeVisible();

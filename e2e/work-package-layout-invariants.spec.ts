@@ -17,6 +17,7 @@ import {
   setupPage,
   tapGraphNode,
   test,
+  waitForCompoundGraphReady,
   type Scenario,
 } from "./support/fixtures";
 
@@ -129,12 +130,7 @@ function overlapScenario(): Scenario {
 async function openGraph(page: import("@playwright/test").Page, scenario: Scenario): Promise<void> {
   await setupPage(page, scenario);
   await openWorkPackageGraph(page, PROJECT.id);
-  await expect
-    .poll(async () => {
-      const parent = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-      return parent !== null && parent.w !== undefined && parent.h !== undefined;
-    })
-    .toBe(true);
+  await waitForCompoundGraphReady(page, COMPOSITE_PARENT.id, [CHILD_A.id, CHILD_B.id]);
 }
 
 test.describe("work package layout invariants", () => {
@@ -233,6 +229,7 @@ test.describe("work package layout invariants", () => {
   test.describe("req 4 overlap clamp", () => {
     test("composite drag does not overlap neighbor", async ({ page }) => {
       await openGraph(page, overlapScenario());
+      await waitForCompoundGraphReady(page, COMPOSITE_C.id, [COMPOSITE_C_CHILD.id]);
       await expect
         .poll(async () => getGraphNodeState(page, COMPOSITE_C.id))
         .not.toBeNull();

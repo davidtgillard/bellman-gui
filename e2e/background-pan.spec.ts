@@ -6,6 +6,7 @@ import {
   setupPage,
   test,
   waitForGraph,
+  waitForSettingsApplied,
   type Scenario,
 } from "./support/fixtures";
 
@@ -48,7 +49,7 @@ test.describe("background pan", () => {
       graphScenario({ background_pan_enabled: true }),
     );
     await waitForGraph(page);
-    await expect.poll(() => isGraphBackgroundPanEnabled(page)).toBe(true);
+    await waitForSettingsApplied(page, () => isGraphBackgroundPanEnabled(page));
 
     const before = await getGraphPan(page);
     await dragGraphBackground(page);

@@ -63,6 +63,14 @@ interface TestBridge {
   calls: RecordedCall[];
   reset(): void;
   emit(event: string, payload?: unknown): void;
+  roadmapRoot?: string;
+  editable?: boolean;
+  status?: () => {
+    can_undo: boolean;
+    can_redo: boolean;
+    undo_label: string | null;
+    redo_label: string | null;
+  };
   selectNode?: (nodeId: string) => void;
   selectGraphNodeOnly?: (nodeId: string) => void;
   tapGraphNode?: (nodeId: string) => void;
@@ -95,17 +103,114 @@ export interface GraphNodeState {
   y1?: number;
 }
 
+const PERSIST_KEY_PREFIX = "bellman:undo-history:";
+const LEGEND_VISIBILITY_KEY_PREFIX = "bellman:legend-visibility:";
+
+function scenarioState(scenario: Scenario): RoadmapState {
+  const index =
+    typeof scenario.index === "number"
+      ? scenario.index
+      : scenario.states.length - 1;
+  return scenario.states[index] ?? scenario.states[0];
+}
+
+/**
+ * Clears persisted legend visibility and undo history from localStorage.
+ * @param page - Playwright page to configure.
+ */
+export async function clearTestStorage(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < (globalThis.localStorage?.length ?? 0); i += 1) {
+      const key = globalThis.localStorage?.key(i);
+      if (
+        key &&
+        (key.startsWith(PERSIST_KEY_PREFIX) || key.startsWith(LEGEND_VISIBILITY_KEY_PREFIX))
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      globalThis.localStorage?.removeItem(key);
+    }
+  });
+}
+
+/**
+ * Waits until the mock scenario has been applied via load_initial_roadmap.
+ * @param page - Playwright page to inspect.
+ * @param scenario - Expected scenario seed.
+ */
+export async function waitForScenarioReady(page: Page, scenario: Scenario): Promise<void> {
+  const expected = scenarioState(scenario);
+  await expect
+    .poll(async () => {
+      return page.evaluate(
+        ({ root, editable }) => {
+          const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+          if (!bridge?.calls?.some((call) => call.cmd === "load_initial_roadmap")) {
+            return false;
+          }
+          return bridge.roadmapRoot === root && bridge.editable === editable;
+        },
+        { root: expected.root, editable: expected.editable },
+      );
+    }, { timeout: 15_000 })
+    .toBe(true);
+
+  if (expected.editable) {
+    await expect(page.locator(".info-banner")).toHaveCount(0);
+  }
+}
+
+/**
+ * Waits until undo is available in the mock backend.
+ * @param page - Playwright page to inspect.
+ */
+export async function waitForUndoReady(page: Page): Promise<void> {
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+        return bridge?.status?.().can_undo === true;
+      });
+    })
+    .toBe(true);
+}
+
+/**
+ * Waits until the node detail panel has finished loading and shows Edit.
+ * @param page - Playwright page to inspect.
+ */
+export async function waitForNodeDetailReady(page: Page): Promise<void> {
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+}
+
+/**
+ * Polls until a settings-related predicate returns true.
+ * @param page - Playwright page to inspect.
+ * @param predicate - Async check invoked in the browser context.
+ */
+export async function waitForSettingsApplied(
+  page: Page,
+  predicate: () => Promise<boolean>,
+): Promise<void> {
+  await expect.poll(predicate, { timeout: 10_000 }).toBe(true);
+}
+
 /**
  * Installs the fake Tauri IPC backend for the given scenario and loads the app.
  * @param page - Playwright page to configure.
  * @param scenario - Seed roadmap states and starting history index.
  */
 export async function setupPage(page: Page, scenario: Scenario): Promise<void> {
+  await clearTestStorage(page);
   await page.addInitScript((seed) => {
     (window as unknown as { __TEST_SCENARIO__: unknown }).__TEST_SCENARIO__ = seed;
   }, scenario);
   await page.addInitScript({ path: MOCK_PATH });
   await page.goto("/");
+  await waitForScenarioReady(page, scenario);
 }
 
 /**
@@ -121,9 +226,10 @@ export async function reloadApp(page: Page, scenario?: Scenario): Promise<void> 
   }
   await page.addInitScript({ path: MOCK_PATH });
   await page.reload();
+  if (scenario) {
+    await waitForScenarioReady(page, scenario);
+  }
 }
-
-const PERSIST_KEY_PREFIX = "bellman:undo-history:";
 
 /**
  * Seeds persisted undo history in localStorage before the app loads.
@@ -296,7 +402,11 @@ export async function selectGraphNodeOnly(page: Page, nodeId: string): Promise<v
   }, nodeId);
 }
 
-export async function selectNode(page: Page, nodeId: string): Promise<void> {
+export async function selectNode(
+  page: Page,
+  nodeId: string,
+  options: { waitForEdit?: boolean } = {},
+): Promise<void> {
   await waitForGraph(page);
   await expect
     .poll(async () => {
@@ -315,6 +425,9 @@ export async function selectNode(page: Page, nodeId: string): Promise<void> {
     })
     .toBe(true);
   await expect(page.getByRole("complementary", { name: "Node details" })).toBeVisible();
+  if (options.waitForEdit) {
+    await waitForNodeDetailReady(page);
+  }
 }
 
 /**
@@ -491,6 +604,29 @@ export async function openWorkPackageGraph(
   await page.getByRole("button", { name: "Show work package graph" }).click();
   await expect(page.locator(".graph-view-breadcrumb")).toBeVisible();
   await waitForGraph(page);
+}
+
+/**
+ * Waits until a compound work-package graph parent and its children are layout-ready.
+ * @param page - Playwright page to inspect.
+ * @param parentId - Composite parent node identifier.
+ * @param childIds - Expected child node identifiers.
+ */
+export async function waitForCompoundGraphReady(
+  page: Page,
+  parentId: string,
+  childIds: string[],
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const parent = await getGraphNodeState(page, parentId);
+      if (parent === null || parent.w === undefined || parent.h === undefined) {
+        return false;
+      }
+      const offsets = await getCompositeChildOffsets(page, parentId);
+      return childIds.every((id) => id in offsets);
+    }, { timeout: 15_000 })
+    .toBe(true);
 }
 
 /**
