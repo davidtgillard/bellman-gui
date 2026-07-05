@@ -33,6 +33,48 @@ const CORNER_CURSOR: Record<ResizeCorner, string> = {
 
 const THEME = BELLMAN_COMPOUND_GRAPH_THEME;
 
+function containerTitleLabel(rawLabel: string): string {
+  const firstLine = rawLabel.split("\n")[0]?.trim();
+  return firstLine || rawLabel;
+}
+
+function buildAllParentVisuals(
+  cy: Core,
+  scene: CompoundGraphScene,
+  selectedContainerId: string | null,
+  referenceZoom: number,
+): Map<string, ParentDragVisual> {
+  scene.ensureModelFromCy(cy);
+  const layout = scene.flatLayout();
+  const zoom = cy.zoom();
+  const pan = cy.pan();
+  const zoomScale = referenceZoom > 0 ? zoom / referenceZoom : 1;
+  const visuals = new Map<string, ParentDragVisual>();
+
+  for (const parent of cy.nodes("[kind = 'container']")) {
+    const containerId = parent.id();
+    const entry = layout[containerId];
+    if (entry?.w === undefined || entry?.h === undefined) {
+      continue;
+    }
+    const x1 = entry.x - entry.w / 2;
+    const y1 = entry.y - entry.h / 2;
+    const x2 = entry.x + entry.w / 2;
+    const y2 = entry.y + entry.h / 2;
+    visuals.set(containerId, {
+      left: x1 * zoom + pan.x,
+      top: y1 * zoom + pan.y,
+      width: (x2 - x1) * zoom,
+      height: (y2 - y1) * zoom,
+      label: containerTitleLabel(String(parent.data("label") ?? containerId)),
+      selected: containerId === selectedContainerId,
+      zoomScale,
+    });
+  }
+
+  return visuals;
+}
+
 function readCssLengthValue(value: string, fallback: number): number {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -136,7 +178,12 @@ export function CompoundOverlays({
   const refreshOverlays = useCallback(() => {
     scene.refreshFootprintsFromCy(cy);
     const nextChildDragVisual = scene.childDragVisual(cy);
-    const nextParentVisuals = scene.parentDragVisuals(cy);
+    const nextParentVisuals = buildAllParentVisuals(
+      cy,
+      scene,
+      selectedContainerId,
+      referenceZoomRef.current,
+    );
     setChildDragVisual((previous) =>
       overlayVisualEqual(previous, nextChildDragVisual) ? previous : nextChildDragVisual,
     );
@@ -149,7 +196,7 @@ export function CompoundOverlays({
       return same ? previous : nextParentVisuals;
     });
     onOverlayChange?.();
-  }, [cy, onOverlayChange, scene]);
+  }, [cy, onOverlayChange, scene, selectedContainerId]);
 
   const recomputeHandles = useCallback(() => {
     if (!selectedContainerId) {
@@ -379,7 +426,7 @@ export function CompoundOverlays({
       : 1;
 
   return (
-    <>
+    <div className="compound-overlays-layer">
       <div ref={childLabelProbeRef} className="child-drag-label style-probe">
         {probeLabel}
       </div>
@@ -483,6 +530,6 @@ export function CompoundOverlays({
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

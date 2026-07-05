@@ -31,7 +31,7 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    selector: "node:childless",
+    selector: "node:childless:not([kind = 'leaf'])",
     style: {
       "text-valign": "bottom",
       "text-halign": "center",
@@ -46,7 +46,7 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    selector: "node:selected:childless",
+    selector: "node:selected:childless:not([kind = 'leaf'])",
     style: {
       "border-width": 3,
       "border-color": "#38bdf8",
@@ -54,7 +54,7 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    selector: "node:active:childless",
+    selector: "node:active:childless:not([kind = 'leaf'])",
     style: {
       "overlay-opacity": 0.15,
       "overlay-color": "#38bdf8",
@@ -91,6 +91,22 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
 export function workPackageGraphStylesheet(): StylesheetStyle[] {
   return [
     ...mergeCompoundGraphStylesheet(CYTOSCAPE_BASE_STYLESHEET, BELLMAN_COMPOUND_GRAPH_THEME),
+    {
+      selector: "node[kind = 'leaf']",
+      style: {
+        "overlay-opacity": 0,
+        "overlay-padding": 0,
+        "border-width": 0,
+        "border-opacity": 0,
+      },
+    },
+    {
+      selector: "node[kind = 'leaf']:active",
+      style: {
+        "overlay-opacity": 0,
+        "overlay-padding": 0,
+      },
+    },
     {
       selector: "node[kind = 'leaf'].overflow, node[kind = 'leaf'][isOverflow]",
       style: {

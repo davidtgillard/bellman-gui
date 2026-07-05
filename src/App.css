@@ -417,6 +417,13 @@ body {
   pointer-events: none;
 }
 
+.compound-overlays-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
 .compound-parent-overlay {
   position: absolute;
   z-index: 1;
