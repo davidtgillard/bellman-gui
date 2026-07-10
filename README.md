@@ -128,10 +128,7 @@ The AppImage includes the GUI and a bundled `bellman` CLI sidecar. The updater r
 
 ### Signing secrets (maintainers)
 
-Release builds require GitHub Actions secrets:
-
-- `TAURI_SIGNING_PRIVATE_KEY` — contents of the minisign/updater private key
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — password if the key has one (empty string is fine for an unpassworded key)
+Release builds require the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY` (contents of the updater private key). The committed keypair was generated without a password; the release workflow sets `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to an empty string. Do not create a password secret unless you regenerate a password-protected key.
 
 The matching public key is committed in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
 

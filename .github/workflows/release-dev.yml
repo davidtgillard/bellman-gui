@@ -42,7 +42,9 @@ jobs:
       - name: Build AppImage
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Key was generated without a password. GitHub rejects empty secrets, so
+          # do not wire TAURI_SIGNING_PRIVATE_KEY_PASSWORD from secrets.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm run tauri build
 
       - name: Stage release artifacts
