@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 pub const DEFAULT_MAX_PAN_SPEED: f64 = 960.0;
+pub const DEFAULT_UPDATE_CHECK_INTERVAL_HOURS: f64 = 24.0;
 const MIN_MAX_PAN_SPEED: f64 = 60.0;
 const MAX_MAX_PAN_SPEED: f64 = 10_000.0;
 
@@ -12,10 +13,16 @@ pub struct BellmanGuiSettingsDto {
     pub max_pan_speed: f64,
     #[serde(default)]
     pub background_pan_enabled: bool,
+    #[serde(default = "default_update_check_interval_hours")]
+    pub update_check_interval_hours: f64,
 }
 
 fn default_max_pan_speed() -> f64 {
     DEFAULT_MAX_PAN_SPEED
+}
+
+fn default_update_check_interval_hours() -> f64 {
+    DEFAULT_UPDATE_CHECK_INTERVAL_HOURS
 }
 
 impl Default for BellmanGuiSettingsDto {
@@ -23,6 +30,7 @@ impl Default for BellmanGuiSettingsDto {
         Self {
             max_pan_speed: DEFAULT_MAX_PAN_SPEED,
             background_pan_enabled: false,
+            update_check_interval_hours: DEFAULT_UPDATE_CHECK_INTERVAL_HOURS,
         }
     }
 }
@@ -51,6 +59,13 @@ fn clamp_max_pan_speed(value: f64) -> f64 {
     value.clamp(MIN_MAX_PAN_SPEED, MAX_MAX_PAN_SPEED)
 }
 
+fn clamp_update_check_interval_hours(value: f64) -> f64 {
+    if !value.is_finite() || value <= 0.0 {
+        return DEFAULT_UPDATE_CHECK_INTERVAL_HOURS;
+    }
+    value
+}
+
 pub fn load_settings() -> BellmanGuiSettingsDto {
     let path = settings_path();
     let Ok(raw) = fs::read_to_string(&path) else {
@@ -71,6 +86,9 @@ pub fn load_settings() -> BellmanGuiSettingsDto {
     BellmanGuiSettingsDto {
         max_pan_speed: clamp_max_pan_speed(parsed.max_pan_speed),
         background_pan_enabled: parsed.background_pan_enabled,
+        update_check_interval_hours: clamp_update_check_interval_hours(
+            parsed.update_check_interval_hours,
+        ),
     }
 }
 
@@ -107,6 +125,10 @@ mod tests {
 
         let settings = load_settings();
         assert_eq!(settings.max_pan_speed, 420.0);
+        assert_eq!(
+            settings.update_check_interval_hours,
+            DEFAULT_UPDATE_CHECK_INTERVAL_HOURS
+        );
 
         if let Some(value) = previous {
             env::set_var("XDG_CONFIG_HOME", value);
@@ -131,6 +153,30 @@ mod tests {
 
         let settings = load_settings();
         assert!(settings.background_pan_enabled);
+
+        if let Some(value) = previous {
+            env::set_var("XDG_CONFIG_HOME", value);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
+
+    #[test]
+    fn reads_update_check_interval_from_settings_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let config_dir = temp.path().join("bellman-gui");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::write(
+            config_dir.join("settings.json"),
+            r#"{ "update_check_interval_hours": 12 }"#,
+        )
+        .expect("write settings");
+
+        let previous = env::var("XDG_CONFIG_HOME").ok();
+        env::set_var("XDG_CONFIG_HOME", temp.path());
+
+        let settings = load_settings();
+        assert_eq!(settings.update_check_interval_hours, 12.0);
 
         if let Some(value) = previous {
             env::set_var("XDG_CONFIG_HOME", value);

@@ -323,9 +323,18 @@
           liveScenario.settings || {
             max_pan_speed: 960,
             background_pan_enabled: false,
+            update_check_interval_hours: 24,
           }
         );
       }
+      case "update_check_status_command":
+        return {
+          should_check: false,
+          check_interval_hours: 24,
+          last_update_check: null,
+        };
+      case "touch_update_check_command":
+        return { last_update_check: new Date().toISOString() };
       case "bellman_version":
         return "test";
       default:

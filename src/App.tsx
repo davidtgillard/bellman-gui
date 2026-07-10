@@ -83,6 +83,14 @@ import {
   resolveVisibleTypes,
   saveLegendVisibility,
 } from "./lib/legend-visibility";
+import {
+  checkForAppUpdate,
+  installAppUpdate,
+  loadAppVersion,
+  loadUpdateCheckStatus,
+  type UpdateCheckOutcome,
+} from "./lib/updater";
+import type { Update } from "@tauri-apps/plugin-updater";
 import "./App.css";
 
 const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
@@ -109,6 +117,15 @@ function App() {
   const [nodes, setNodes] = useState<GraphNode[]>(exampleGraph.nodes);
   const [links, setLinks] = useState<GraphLink[]>(exampleGraph.links);
   const [error, setError] = useState<string | null>(null);
+  const [updateBanner, setUpdateBanner] = useState<{
+    version: string;
+    update: Update;
+  } | null>(null);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [updateFeedback, setUpdateFeedback] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutVersion, setAboutVersion] = useState<string | null>(null);
+  const [aboutBellmanVersion, setAboutBellmanVersion] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -522,6 +539,70 @@ function App() {
     }
   }, [applyGraph, refreshUndoState]);
 
+  const applyUpdateOutcome = useCallback(
+    (outcome: UpdateCheckOutcome, options: { interactive: boolean }) => {
+      if (outcome.kind === "available") {
+        setUpdateBanner({ version: outcome.update.version, update: outcome.update });
+        setUpdateFeedback(null);
+        return;
+      }
+      if (!options.interactive) {
+        return;
+      }
+      if (outcome.kind === "up_to_date") {
+        setUpdateFeedback(`Bellman GUI ${outcome.currentVersion} is up to date.`);
+        return;
+      }
+      setUpdateFeedback(outcome.message);
+    },
+    [],
+  );
+
+  const handleCheckForUpdates = useCallback(
+    async (interactive: boolean) => {
+      if (!isTauri()) {
+        if (interactive) {
+          setUpdateFeedback("Updates are only available in the packaged AppImage.");
+        }
+        return;
+      }
+      if (interactive) {
+        setUpdateFeedback("Checking for updates…");
+      }
+      const outcome = await checkForAppUpdate();
+      applyUpdateOutcome(outcome, { interactive });
+    },
+    [applyUpdateOutcome],
+  );
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (!updateBanner) {
+      return;
+    }
+    setUpdateInstalling(true);
+    setUpdateFeedback(`Downloading update ${updateBanner.version}…`);
+    try {
+      await installAppUpdate(updateBanner.update);
+    } catch (caught) {
+      setUpdateInstalling(false);
+      setUpdateFeedback(String(caught));
+    }
+  }, [updateBanner]);
+
+  const handleAbout = useCallback(async () => {
+    setAboutOpen(true);
+    setAboutVersion(await loadAppVersion());
+    if (!isTauri()) {
+      setAboutBellmanVersion(null);
+      return;
+    }
+    try {
+      setAboutBellmanVersion(await invoke<string>("bellman_version"));
+    } catch {
+      setAboutBellmanVersion(null);
+    }
+  }, []);
+
   const handleCreateNode = useCallback(
     async (input: {
       nodeKind: NodeKind;
@@ -792,6 +873,8 @@ function App() {
 
     let unlistenUndo: (() => void) | undefined;
     let unlistenRedo: (() => void) | undefined;
+    let unlistenCheck: (() => void) | undefined;
+    let unlistenAbout: (() => void) | undefined;
 
     void listen("undo", () => void handleUndo()).then((dispose) => {
       unlistenUndo = dispose;
@@ -799,12 +882,47 @@ function App() {
     void listen("redo", () => void handleRedo()).then((dispose) => {
       unlistenRedo = dispose;
     });
+    void listen("check-for-updates", () => void handleCheckForUpdates(true)).then(
+      (dispose) => {
+        unlistenCheck = dispose;
+      },
+    );
+    void listen("about", () => void handleAbout()).then((dispose) => {
+      unlistenAbout = dispose;
+    });
 
     return () => {
       unlistenUndo?.();
       unlistenRedo?.();
+      unlistenCheck?.();
+      unlistenAbout?.();
     };
-  }, [handleRedo, handleUndo]);
+  }, [handleAbout, handleCheckForUpdates, handleRedo, handleUndo]);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await loadUpdateCheckStatus();
+        if (cancelled || !status.shouldCheck) {
+          return;
+        }
+        const outcome = await checkForAppUpdate();
+        if (cancelled) {
+          return;
+        }
+        applyUpdateOutcome(outcome, { interactive: false });
+      } catch {
+        // Background checks must never interrupt the main UI.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyUpdateOutcome]);
 
   const activeProjectId = useMemo(
     () => currentProjectId(graphViewStack),
@@ -1329,10 +1447,80 @@ function App() {
           </button>
         </div>
       ) : null}
+      {updateBanner ? (
+        <div className="info-banner update-banner" role="status">
+          <span className="info-banner-message">
+            Update available: Bellman GUI {updateBanner.version}.
+          </span>
+          <div className="update-banner-actions">
+            <button
+              type="button"
+              className="update-banner-action"
+              onClick={() => void handleInstallUpdate()}
+              disabled={updateInstalling}
+            >
+              {updateInstalling ? "Updating…" : "Update now"}
+            </button>
+            <button
+              type="button"
+              className="error-banner-dismiss"
+              onClick={() => setUpdateBanner(null)}
+              aria-label="Dismiss update"
+              disabled={updateInstalling}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {updateFeedback ? (
+        <div className="info-banner" role="status">
+          <span className="info-banner-message">{updateFeedback}</span>
+          <button
+            type="button"
+            className="error-banner-dismiss"
+            onClick={() => setUpdateFeedback(null)}
+            aria-label="Dismiss update message"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       {!editable ? (
         <div className="info-banner">
           The bundled example graph is read-only. Open a roadmap folder, then right-click the
           graph to create nodes and right-click a node to create links.
+        </div>
+      ) : null}
+      {aboutOpen ? (
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onClick={() => setAboutOpen(false)}
+        >
+          <dialog className="edit-dialog about-dialog" open onClick={(event) => event.stopPropagation()}>
+            <header className="edit-dialog-header">
+              <h2>About Bellman GUI</h2>
+              <button
+                type="button"
+                className="dialog-close"
+                onClick={() => setAboutOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="about-dialog-body">
+              <p>Version {aboutVersion ?? "…"}</p>
+              {aboutBellmanVersion ? <p>Bundled bellman {aboutBellmanVersion}</p> : null}
+              <p>Markdown-first roadmap planning for developers.</p>
+            </div>
+            <footer className="edit-dialog-actions">
+              <button type="button" onClick={() => setAboutOpen(false)}>
+                Close
+              </button>
+            </footer>
+          </dialog>
         </div>
       ) : null}
       <div className="graph-area">

@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build portable bundle
+    name: Build AppImage
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,15 +36,49 @@ jobs:
       - name: Prepare bellman sidecar
         run: bash packaging/prepare-sidecar.sh
 
-      - run: npm run tauri build -- --no-bundle
+      - name: Stamp release version
+        run: bash packaging/stamp-version.sh "0.1.${{ github.run_number }}"
 
-      - name: Package portable release
-        run: bash packaging/bundle-portable.sh
+      - name: Build AppImage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build
+
+      - name: Stage release artifacts
+        env:
+          VERSION: "0.1.${{ github.run_number }}"
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          APPIMAGE_DIR="src-tauri/target/release/bundle/appimage"
+          mapfile -t APPIMAGES < <(find "${APPIMAGE_DIR}" -maxdepth 1 -type f -name '*.AppImage' | sort)
+          if [[ "${#APPIMAGES[@]}" -ne 1 ]]; then
+            echo "Expected exactly one AppImage in ${APPIMAGE_DIR}, found ${#APPIMAGES[@]}" >&2
+            ls -la "${APPIMAGE_DIR}" >&2 || true
+            exit 1
+          fi
+          APPIMAGE="${APPIMAGES[0]}"
+          SIG="${APPIMAGE}.sig"
+          if [[ ! -f "${SIG}" ]]; then
+            echo "Missing signature: ${SIG}" >&2
+            exit 1
+          fi
+          cp "${APPIMAGE}" dist/release/
+          cp "${SIG}" dist/release/
+          bash packaging/write-latest-json.sh \
+            --version "${VERSION}" \
+            --appimage "${APPIMAGE}" \
+            --sig "${SIG}" \
+            --repo "${REPO}" \
+            --out dist/release/latest.json
+          ls -la dist/release
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bellman-gui-portable
+          name: bellman-gui-appimage
           path: dist/release/*
 
   publish-dev-release:
@@ -57,7 +91,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bellman-gui-portable
+          name: bellman-gui-appimage
           path: release
 
       - name: Ensure dev release exists
@@ -67,8 +101,8 @@ jobs:
           gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
           gh release create dev \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Development bundles" \
-            --notes "Rolling development portable bundles for bellman-gui (linux-x86_64)." \
+            --title "Development AppImage" \
+            --notes "Rolling development AppImage for bellman-gui (linux-x86_64)." \
             --prerelease
 
       - name: Remove existing dev assets

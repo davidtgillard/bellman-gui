@@ -6,6 +6,7 @@ mod node_detail;
 mod roadmap_edit;
 mod settings;
 mod undo;
+mod update_state;
 
 use bellman_cmd::run_bellman;
 use cli::CliOptions;
@@ -23,6 +24,7 @@ use roadmap_edit::{
 };
 use settings::load_settings_command;
 use crate::undo::{Snapshot, UndoState, UndoStateDto};
+use update_state::{touch_update_check_command, update_check_status_command};
 use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter};
@@ -285,6 +287,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cli::cli_options_from_env())
         .manage(UndoState::default())
         .setup(|app| {
@@ -301,7 +305,17 @@ pub fn run() {
             let redo_item =
                 MenuItem::with_id(app, "redo", "Redo", true, Some("CmdOrCtrl+Shift+Z"))?;
             let edit_menu = Submenu::with_items(app, "Edit", true, &[&undo_item, &redo_item])?;
-            let menu = Menu::with_items(app, &[&file_menu, &edit_menu])?;
+            let check_for_updates = MenuItem::with_id(
+                app,
+                "check-for-updates",
+                "Check for Updates…",
+                true,
+                None::<&str>,
+            )?;
+            let about = MenuItem::with_id(app, "about", "About Bellman GUI", true, None::<&str>)?;
+            let help_menu =
+                Submenu::with_items(app, "Help", true, &[&check_for_updates, &about])?;
+            let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &help_menu])?;
             app.set_menu(menu)?;
             Ok(())
         })
@@ -314,6 +328,12 @@ pub fn run() {
             }
             "redo" => {
                 let _ = app.emit("redo", ());
+            }
+            "check-for-updates" => {
+                let _ = app.emit("check-for-updates", ());
+            }
+            "about" => {
+                let _ = app.emit("about", ());
             }
             _ => {}
         })
@@ -339,6 +359,8 @@ pub fn run() {
             save_graph_layout_command,
             save_top_level_node_position_command,
             remove_top_level_node_position_command,
+            update_check_status_command,
+            touch_update_check_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

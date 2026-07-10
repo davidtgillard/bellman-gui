@@ -85,4 +85,6 @@ jobs:
       - name: Prepare bellman sidecar
         run: bash packaging/prepare-sidecar.sh
 
+      # Compile the release binary without AppImage packaging (faster CI).
+      # The release-dev workflow builds and publishes the signed AppImage.
       - run: npm run tauri build -- --no-bundle

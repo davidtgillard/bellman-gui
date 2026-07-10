@@ -20,6 +20,7 @@ describe("settings", () => {
     await expect(loadSettings()).resolves.toEqual({
       maxPanSpeed: 640,
       backgroundPanEnabled: false,
+      updateCheckIntervalHours: 24,
     });
     expect(invokeMock).toHaveBeenCalledWith("load_settings_command");
   });
@@ -33,6 +34,20 @@ describe("settings", () => {
     await expect(loadSettings()).resolves.toEqual({
       maxPanSpeed: 960,
       backgroundPanEnabled: true,
+      updateCheckIntervalHours: 24,
+    });
+  });
+
+  it("loads update check interval from the backend settings command", async () => {
+    invokeMock.mockResolvedValueOnce({
+      max_pan_speed: 960,
+      update_check_interval_hours: 12,
+    });
+
+    await expect(loadSettings()).resolves.toEqual({
+      maxPanSpeed: 960,
+      backgroundPanEnabled: false,
+      updateCheckIntervalHours: 12,
     });
   });
 });

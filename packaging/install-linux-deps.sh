@@ -11,4 +11,6 @@ sudo apt-get install -y \
   libglib2.0-dev \
   libgtk-3-dev \
   pkg-config \
-  patchelf
+  patchelf \
+  libfuse2 \
+  file

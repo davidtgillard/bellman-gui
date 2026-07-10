@@ -14,10 +14,10 @@ On first launch the app shows a bundled example roadmap. Pass a roadmap root on 
 - [Rust](https://rustup.rs/)
 - Tauri system dependencies — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, etc.)
 
-**Running a release bundle** (Linux):
+**Running a release AppImage** (Linux):
 
-- WebKitGTK (usually preinstalled on desktop distros)
-- Extract the portable tarball; no separate bellman install required (the CLI is bundled as a sidecar)
+- FUSE / AppImage runtime support (most desktop distros; install `libfuse2` on Ubuntu if needed)
+- No separate bellman install required (the CLI is bundled as a sidecar inside the AppImage)
 
 ## Development
 
@@ -35,26 +35,29 @@ Other commands:
 ```bash
 npm run test          # Vitest unit tests
 npm run lint          # ESLint
-npm run tauri build   # Production build
+npm run tauri build   # Production AppImage build
 ```
 
-To build with the bundled bellman CLI sidecar:
+To build a signed AppImage locally (requires the updater signing private key):
 
 ```bash
 bash packaging/prepare-sidecar.sh
+export TAURI_SIGNING_PRIVATE_KEY="$(cat humans-only/tauri-updater.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 npm run tauri build
-bash packaging/bundle-portable.sh
 ```
+
+The AppImage and `.sig` land under `src-tauri/target/release/bundle/appimage/`.
 
 ## Using the app
 
-1. Start the app (`npm run tauri dev` or the release binary).
+1. Start the app (`npm run tauri dev` or the release AppImage).
 2. The example roadmap graph loads automatically, unless you pass an initial roadmap root:
 
 ```bash
-# release binary
-./bellman-gui /path/to/roadmap
-./bellman-gui --roadmap /path/to/roadmap
+# release AppImage
+./bellman-gui_*.AppImage /path/to/roadmap
+./bellman-gui_*.AppImage --roadmap /path/to/roadmap
 
 # development (npm, tauri, and cargo each consume a `--` separator)
 npm run tauri dev -- -- -- /path/to/roadmap
@@ -104,19 +107,33 @@ To inspect undo/redo stack activity while developing:
 - **Backend** — set `BELLMAN_GUI_TRACE_UNDO` in the environment before starting the app; stack events are logged to stderr.
 - **Frontend** — in dev builds, undo/redo calls are logged to the browser devtools console. In any build, set `localStorage["bellman:trace-undo"]` (any value) and reload to enable the same logging.
 
+### Self-update
+
+Release AppImages check for updates in the background (at most once per 24 hours by default) and show a banner when a newer build is available. Use **Help → Check for Updates…** to check immediately, and **Update now** on the banner to download, install, and relaunch.
+
+Update settings live in `$XDG_CONFIG_HOME/bellman-gui/settings.json` (`update_check_interval_hours`, default `24`). Last-check state is stored in `update-state.json` next to that file.
+
 ## Releases
 
-Rolling **linux-x86_64** portable bundles are published to the [`dev` release](https://github.com/davidtgillard/bellman-gui/releases/tag/dev):
+Rolling **linux-x86_64** AppImages are published to the [`dev` release](https://github.com/davidtgillard/bellman-gui/releases/tag/dev). Each CI run stamps version `0.1.<run_number>` so the in-app updater can detect newer builds.
 
 ```bash
-curl -fsSL -o bellman-gui.tar.gz \
-  "https://github.com/davidtgillard/bellman-gui/releases/download/dev/bellman-gui-VERSION-linux-x86_64.tar.gz"
-tar xzf bellman-gui.tar.gz
-cd bellman-gui-VERSION-linux-x86_64
-./bellman-gui
+curl -fsSL -o bellman-gui.AppImage \
+  "https://github.com/davidtgillard/bellman-gui/releases/download/dev/bellman-gui_0.1.VERSION_amd64.AppImage"
+chmod +x bellman-gui.AppImage
+./bellman-gui.AppImage
 ```
 
-The archive contains `bellman-gui` and a bundled `bellman` CLI sidecar.
+The AppImage includes the GUI and a bundled `bellman` CLI sidecar. The updater reads `latest.json` from the same `dev` release.
+
+### Signing secrets (maintainers)
+
+Release builds require GitHub Actions secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY` — contents of the minisign/updater private key
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — password if the key has one (empty string is fine for an unpassworded key)
+
+The matching public key is committed in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
 
 ## License
 
