@@ -8,10 +8,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import type { WorkPackageLayoutModel } from "@dgillard/cytoscape-compound-graph";
 import {
   CYTOSCAPE_STYLESHEET,
+  GRAPH_NODE_LABEL_TYPOGRAPHY,
   workPackageGraphStylesheet,
 } from "../lib/cytoscape-theme";
 import {
@@ -22,6 +23,7 @@ import {
 import type { CompoundGraphScene } from "@dgillard/cytoscape-compound-graph";
 import { layoutModelFromCy } from "@dgillard/cytoscape-compound-graph";
 import {
+  applySavedNodePositions,
   centerSelectedNodeInViewportIfObscured,
   compoundGraphMaxZoom,
   graphNodeModelPosition,
@@ -33,7 +35,9 @@ import {
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
 import { defaultNodePosition, type NodePosition, type NodeSize } from "../lib/graph-layout";
-import { graphNodeDisplayLabel } from "../lib/graph";
+import { graphNodeDisplayLabel, isRenameableNodeType, nodeLabel } from "../lib/graph";
+import { slugify } from "../lib/node-content-validation";
+import { isOverflowNodeId } from "../lib/work-package-view";
 import {
   ARROW_KEY_DIRECTIONS,
   isArrowPanKey,
@@ -100,6 +104,162 @@ interface RoadmapGraphProps {
   layoutReady?: boolean;
   layoutSyncToken?: number;
   compoundGraph?: boolean;
+  editable?: boolean;
+  onNodeRename?: (nodeId: string, nodeType: string, newName: string) => Promise<void>;
+  renameSaving?: boolean;
+}
+
+interface ModelLabelRect {
+  x1: number;
+  y1: number;
+  w: number;
+  h: number;
+}
+
+interface TitleEditState {
+  nodeId: string;
+  nodeType: string;
+  /** Same string Cytoscape renders (`data(label)`), including soft newlines. */
+  value: string;
+  /** Canvas label when editing began; restored on cancel. */
+  originalLabel: string;
+  /** Label box in model coordinates, captured while the canvas label was visible. */
+  modelLabel: ModelLabelRect;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  /** Canvas text-outline inset, scaled by zoom. */
+  outlinePx: number;
+}
+
+interface RenderedRect {
+  x1: number;
+  x2: number;
+  y1: number;
+  y2: number;
+}
+
+const LABEL_ONLY_BB = {
+  includeNodes: false,
+  includeLabels: true,
+  includeOverlays: false,
+} as const;
+
+/**
+ * Exact rendered bounds of a node's canvas label (excludes the node body).
+ * @param node - Cytoscape node.
+ * @returns Label rectangle in rendered coordinates, or null when empty.
+ */
+function nodeLabelRenderedRect(node: cytoscape.NodeSingular): RenderedRect | null {
+  const labelBb = node.renderedBoundingBox(LABEL_ONLY_BB);
+  if (labelBb.w <= 0.5 || labelBb.h <= 0.5) {
+    return null;
+  }
+
+  return {
+    x1: labelBb.x1,
+    x2: labelBb.x2,
+    y1: labelBb.y1,
+    y2: labelBb.y2,
+  };
+}
+
+/**
+ * Returns whether a rendered pointer position lies on a node's label.
+ * @param node - Cytoscape node.
+ * @param x - Rendered x coordinate.
+ * @param y - Rendered y coordinate.
+ * @returns True when the point is within the label bounds.
+ */
+function isRenderedPointOnNodeLabel(
+  node: cytoscape.NodeSingular,
+  x: number,
+  y: number,
+): boolean {
+  const label = nodeLabelRenderedRect(node);
+  if (!label) {
+    return false;
+  }
+
+  const pad = 4;
+  return (
+    x >= label.x1 - pad &&
+    x <= label.x2 + pad &&
+    y >= label.y1 - pad &&
+    y <= label.y2 + pad
+  );
+}
+
+/**
+ * Finds the top-level node whose label contains a rendered point.
+ * Labels are not Cytoscape hit targets, so callers must scan nodes themselves.
+ * @param cy - Cytoscape core.
+ * @param x - Rendered x coordinate.
+ * @param y - Rendered y coordinate.
+ * @returns Matching node, or null.
+ */
+function findNodeByRenderedLabelPoint(
+  cy: Core,
+  x: number,
+  y: number,
+): cytoscape.NodeSingular | null {
+  const nodes = cy.nodes().filter((node) => {
+    if (node.isParent()) {
+      return false;
+    }
+    return isRenderedPointOnNodeLabel(node, x, y);
+  });
+  return nodes.length > 0 ? nodes[0] : null;
+}
+
+/**
+ * Screen geometry for an inline title editor that matches the canvas label.
+ * Uses model-space label bounds projected through the current pan/zoom so the
+ * overlay stays aligned while editing (including after the canvas label is hidden).
+ * @param modelLabel - Label bounding box in model coordinates.
+ * @param cy - Cytoscape core (for pan/zoom).
+ * @param graphContainer - Graph container element for viewport offset.
+ * @returns Fixed-position box, zoom-scaled font size, and outline inset.
+ */
+function titleEditorScreenBoxFromModel(
+  modelLabel: ModelLabelRect,
+  cy: Core,
+  graphContainer: HTMLElement,
+): Pick<
+  TitleEditState,
+  "left" | "top" | "width" | "height" | "fontSize" | "outlinePx"
+> {
+  const rect = graphContainer.getBoundingClientRect();
+  const zoom = cy.zoom();
+  const pan = cy.pan();
+  return {
+    left: rect.left + modelLabel.x1 * zoom + pan.x,
+    top: rect.top + modelLabel.y1 * zoom + pan.y,
+    width: Math.max(modelLabel.w * zoom, 1),
+    height: Math.max(modelLabel.h * zoom, 1),
+    fontSize: GRAPH_NODE_LABEL_TYPOGRAPHY.fontSizePx * zoom,
+    outlinePx: GRAPH_NODE_LABEL_TYPOGRAPHY.outlineWidthPx * zoom,
+  };
+}
+
+/**
+ * Captures a node's label box in model coordinates while the label is still visible.
+ * @param node - Cytoscape node.
+ * @returns Model-space label bounds, or null when empty.
+ */
+function nodeLabelModelRect(node: cytoscape.NodeSingular): ModelLabelRect | null {
+  const labelBb = node.boundingBox(LABEL_ONLY_BB);
+  if (labelBb.w <= 0.5 || labelBb.h <= 0.5) {
+    return null;
+  }
+  return {
+    x1: labelBb.x1,
+    y1: labelBb.y1,
+    w: labelBb.w,
+    h: labelBb.h,
+  };
 }
 
 const FOCUS_DELAY_MS = 450;
@@ -372,6 +532,9 @@ export function RoadmapGraph({
   layoutReady = true,
   layoutSyncToken = 0,
   compoundGraph = false,
+  editable = false,
+  onNodeRename,
+  renameSaving = false,
 }: RoadmapGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
@@ -414,6 +577,15 @@ export function RoadmapGraph({
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
     null,
   );
+  const [titleEdit, setTitleEdit] = useState<TitleEditState | null>(null);
+  const titleInputRef = useRef<HTMLDivElement>(null);
+  const titleEditRef = useRef<TitleEditState | null>(null);
+  const titleEditIgnoreBlurUntilRef = useRef(0);
+  const titleCommitScheduledRef = useRef(false);
+  const editableRef = useRef(editable);
+  const onNodeRenameRef = useRef(onNodeRename);
+  const suppressNextTapRef = useRef(false);
+  const openTitleEditRef = useRef<(state: TitleEditState) => void>(() => {});
 
   const isCompoundSceneEnabled = useCallback(
     () => compoundGraphRef.current && isCompoundGraphNodes(nodesRef.current),
@@ -590,6 +762,49 @@ export function RoadmapGraph({
     setContextMenuState(null);
   }, []);
 
+  const closeTitleEdit = useCallback(() => {
+    setTitleEdit(null);
+  }, []);
+
+  const cancelTitleEdit = useCallback(() => {
+    const edit = titleEditRef.current;
+    if (edit) {
+      const cyNode = cyRef.current?.getElementById(edit.nodeId);
+      if (cyNode && !cyNode.empty()) {
+        cyNode.data("label", edit.originalLabel);
+      }
+    }
+    setTitleEdit(null);
+  }, []);
+
+  const commitTitleEdit = useCallback(async () => {
+    if (!titleEdit || renameSaving || !onNodeRenameRef.current) {
+      cancelTitleEdit();
+      return;
+    }
+
+    const trimmed = titleEdit.value.trim();
+    if (!trimmed) {
+      cancelTitleEdit();
+      return;
+    }
+
+    const slug = slugify(trimmed.replace(/\n/g, ""));
+    if (!slug || slug === nodeLabel(titleEdit.nodeId)) {
+      cancelTitleEdit();
+      return;
+    }
+
+    const { nodeId, nodeType } = titleEdit;
+    const displayLabel = graphNodeDisplayLabel(slug);
+    const cyNode = cyRef.current?.getElementById(nodeId);
+    if (cyNode && !cyNode.empty()) {
+      cyNode.data("label", displayLabel);
+    }
+    closeTitleEdit();
+    await onNodeRenameRef.current(nodeId, nodeType, slug);
+  }, [cancelTitleEdit, closeTitleEdit, renameSaving, titleEdit]);
+
   const applyGraphVisibility = useCallback((cy: Core, preserveViewport: boolean) => {
     const viewport = preserveViewport ? { pan: cy.pan(), zoom: cy.zoom() } : null;
     syncGraphVisibility(cy, visibleNodeIdsRef.current);
@@ -613,6 +828,85 @@ export function RoadmapGraph({
   useEffect(() => {
     onSelectionClearRef.current = onSelectionClear;
   }, [onSelectionClear]);
+
+  useEffect(() => {
+    editableRef.current = editable;
+  }, [editable]);
+
+  useEffect(() => {
+    onNodeRenameRef.current = onNodeRename;
+  }, [onNodeRename]);
+
+  useEffect(() => {
+    titleEditRef.current = titleEdit;
+  }, [titleEdit]);
+
+  useEffect(() => {
+    openTitleEditRef.current = (state: TitleEditState) => {
+      titleEditIgnoreBlurUntilRef.current = performance.now() + 500;
+      flushSync(() => {
+        setTitleEdit(state);
+      });
+      const el = titleInputRef.current;
+      if (el) {
+        el.textContent = state.value;
+        el.focus({ preventScroll: true });
+        const selection = window.getSelection();
+        if (selection) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const nodeId = titleEdit?.nodeId;
+    const el = titleInputRef.current;
+    if (!nodeId || !el || !titleEdit) {
+      return;
+    }
+    // Seed editor text only when a rename session starts (not on each keystroke).
+    el.textContent = titleEdit.value;
+    el.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per edit session
+  }, [titleEdit?.nodeId]);
+
+  useEffect(() => {
+    const nodeId = titleEdit?.nodeId;
+    const modelLabel = titleEdit?.modelLabel;
+    if (!nodeId || !modelLabel) {
+      return;
+    }
+
+    const cy = cyRef.current;
+    const container = graphContainerRef.current;
+    if (!cy || !container) {
+      return;
+    }
+
+    const project = () => {
+      const box = titleEditorScreenBoxFromModel(modelLabel, cy, container);
+      setTitleEdit((current) =>
+        current?.nodeId === nodeId ? { ...current, ...box } : current,
+      );
+    };
+
+    cy.on("pan zoom resize", project);
+
+    return () => {
+      cy.off("pan zoom resize", project);
+    };
+  }, [titleEdit?.modelLabel, titleEdit?.nodeId]);
 
   useEffect(() => {
     onNodePositionChangeRef.current = onNodePositionChange;
@@ -1167,6 +1461,10 @@ export function RoadmapGraph({
 
     cy.on("tap", "node", (event) => {
       closeContextMenu();
+      if (suppressNextTapRef.current) {
+        suppressNextTapRef.current = false;
+        return;
+      }
       const node = event.target;
       const nodeId = node.id();
 
@@ -1205,6 +1503,13 @@ export function RoadmapGraph({
 
       if (selectedNodeIdAtPointerDown === nodeId) {
         selectedNodeIdAtPointerDown = null;
+        const renderedPosition = event.renderedPosition;
+        if (
+          renderedPosition &&
+          isRenderedPointOnNodeLabel(node, renderedPosition.x, renderedPosition.y)
+        ) {
+          return;
+        }
         clearGraphSelectionIfAllowed();
         return;
       }
@@ -1221,6 +1526,9 @@ export function RoadmapGraph({
     };
     cy.on("select", "node", (event) => {
       const node = event.target;
+      if (suppressNextTapRef.current) {
+        return;
+      }
       if (
         compoundGraphRef.current &&
         node.data("kind") === "leaf" &&
@@ -1245,6 +1553,9 @@ export function RoadmapGraph({
 
     cy.on("tap", (event) => {
       if (event.target === cy) {
+        if (titleEditRef.current) {
+          return;
+        }
         closeContextMenu();
         clearGraphSelectionIfAllowed();
       }
@@ -1258,7 +1569,11 @@ export function RoadmapGraph({
         return { x: originalEvent.clientX, y: originalEvent.clientY };
       }
       cy.center(node);
-      const bb = node.renderedBoundingBox();
+      const bb = node.renderedBoundingBox({
+        includeNodes: true,
+        includeLabels: false,
+        includeOverlays: false,
+      });
       const rect = container.getBoundingClientRect();
       return {
         x: rect.left + (bb.x1 + bb.x2) / 2,
@@ -1427,8 +1742,9 @@ export function RoadmapGraph({
     const structureChanged = structureKey !== graphStructureKeyRef.current;
 
     if (structureChanged) {
+      const preservedViewport = { pan: cy.pan(), zoom: cy.zoom() };
+      const hadCompletedLayout = layoutCompletedRef.current;
       graphStructureKeyRef.current = structureKey;
-      layoutCompletedRef.current = false;
       queueMicrotask(() => {
         setGraphSelectionRevision((revision) => revision + 1);
       });
@@ -1447,6 +1763,27 @@ export function RoadmapGraph({
           cy.add(toElementDefinitions(nodes, links, nodePositions));
         }
       });
+
+      const hasCompoundNodesAfter =
+        compoundGraph && nodes.some((node) => Boolean(node.parent || node.data?.isCompound));
+
+      // Id renames rebuild elements. Keep the current camera when we already had
+      // a laid-out graph instead of fitting / re-running auto-layout.
+      if (hadCompletedLayout || usesPresetLayout(nodePositions)) {
+        if (usesPresetLayout(nodePositions) && !hasCompoundNodesAfter) {
+          applySavedNodePositions(cy, nodePositions);
+        }
+        cy.viewport(preservedViewport);
+        layoutCompletedRef.current = true;
+        applyGraphVisibility(cy, true);
+        if (hasCompoundNodesAfter && usesPresetLayout(nodePositions)) {
+          initializeCompoundScene(cy);
+        }
+        lastLayoutSyncTokenRef.current = layoutSyncToken;
+        return;
+      }
+
+      layoutCompletedRef.current = false;
     } else if (layoutSyncToken > lastLayoutSyncTokenRef.current) {
       if (compoundGraph && isCompoundGraphNodes(nodes)) {
         const scene = rebuildScene(nodePositions);
@@ -1558,14 +1895,94 @@ export function RoadmapGraph({
 
   useEffect(() => {
     const shell = graphContainerRef.current;
+    const cy = cyRef.current;
+    if (!cyReady || !shell || !cy) {
+      return;
+    }
+
+    const onLabelDblClick = (event: MouseEvent) => {
+      if (!editableRef.current || !onNodeRenameRef.current || compoundGraphRef.current) {
+        return;
+      }
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".graph-node-title-editor-wrap")
+      ) {
+        return;
+      }
+
+      const viewport = containerRef.current;
+      if (!viewport) {
+        return;
+      }
+
+      const rect = viewport.getBoundingClientRect();
+      const renderedX = event.clientX - rect.left;
+      const renderedY = event.clientY - rect.top;
+      const node = findNodeByRenderedLabelPoint(cy, renderedX, renderedY);
+      if (!node) {
+        return;
+      }
+
+      const nodeId = node.id();
+      if (isOverflowNodeId(nodeId)) {
+        return;
+      }
+      const nodeType = String(node.data("type") ?? "");
+      if (!isRenameableNodeType(nodeType)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      closeContextMenu();
+
+      const modelLabel = nodeLabelModelRect(node);
+      if (!modelLabel) {
+        return;
+      }
+      const box = titleEditorScreenBoxFromModel(modelLabel, cy, shell);
+      const canvasLabel = String(
+        node.data("label") ?? graphNodeDisplayLabel(nodeLabel(nodeId)),
+      );
+      // Keep the Cytoscape label visible as the only painted text; the overlay
+      // is a transparent caret/input layer so glyphs never jump to DOM text.
+      openTitleEditRef.current({
+        nodeId,
+        nodeType,
+        value: canvasLabel,
+        originalLabel: canvasLabel,
+        modelLabel,
+        ...box,
+      });
+      suppressNextTapRef.current = true;
+    };
+
+    // Labels are drawn on the canvas but are not Cytoscape hit targets, so
+    // node dbltap never fires for a true label click. Native dblclick + scan.
+    shell.addEventListener("dblclick", onLabelDblClick, true);
+    return () => shell.removeEventListener("dblclick", onLabelDblClick, true);
+  }, [closeContextMenu, cyReady]);
+
+  useEffect(() => {
+    const shell = graphContainerRef.current;
     if (!shell) {
       return;
     }
 
     shell.tabIndex = -1;
     const focusGraph = (event: PointerEvent) => {
+      if (titleEditRef.current) {
+        return;
+      }
+      if (performance.now() < titleEditIgnoreBlurUntilRef.current) {
+        return;
+      }
       const target = event.target;
       if (target instanceof Element && target.closest(".node-detail-sidebar")) {
+        return;
+      }
+      if (target instanceof Element && target.closest(".graph-node-title-editor-wrap")) {
         return;
       }
       shell.focus({ preventScroll: true });
@@ -1579,7 +1996,7 @@ export function RoadmapGraph({
   useLayoutEffect(() => {
     const previous = previousSelectedNodeIdRef.current;
     previousSelectedNodeIdRef.current = selectedNodeId;
-    if (previous && !selectedNodeId) {
+    if (previous && !selectedNodeId && !titleEditRef.current) {
       graphContainerRef.current?.focus({ preventScroll: true });
     }
   }, [selectedNodeId]);
@@ -1683,6 +2100,90 @@ export function RoadmapGraph({
               }}
             >
               {contextMenu(contextMenuState.event)}
+            </div>,
+            document.body,
+          )
+        : null}
+      {titleEdit
+        ? createPortal(
+            <div
+              className="graph-node-title-editor-wrap"
+              style={{
+                position: "fixed",
+                left: titleEdit.left,
+                top: titleEdit.top,
+                width: titleEdit.width,
+                height: titleEdit.height,
+                fontSize: titleEdit.fontSize,
+                padding: titleEdit.outlinePx,
+                zIndex: 1001,
+              }}
+            >
+              <div
+                ref={titleInputRef}
+                className="graph-node-title-editor"
+                contentEditable={!renameSaving}
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Rename node"
+                suppressContentEditableWarning
+                spellCheck={false}
+                onInput={(event) => {
+                  const text = event.currentTarget.textContent ?? "";
+                  const cyNode = cyRef.current?.getElementById(titleEdit.nodeId);
+                  if (cyNode && !cyNode.empty()) {
+                    cyNode.data("label", text);
+                    const container = graphContainerRef.current;
+                    const cy = cyRef.current;
+                    const nextModel = nodeLabelModelRect(cyNode);
+                    if (container && cy && nextModel) {
+                      const box = titleEditorScreenBoxFromModel(
+                        nextModel,
+                        cy,
+                        container,
+                      );
+                      setTitleEdit((current) =>
+                        current
+                          ? {
+                              ...current,
+                              value: text,
+                              modelLabel: nextModel,
+                              ...box,
+                            }
+                          : current,
+                      );
+                      return;
+                    }
+                  }
+                  setTitleEdit((current) =>
+                    current ? { ...current, value: text } : current,
+                  );
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    titleCommitScheduledRef.current = true;
+                    void commitTitleEdit();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelTitleEdit();
+                  }
+                }}
+                onBlur={() => {
+                  if (performance.now() < titleEditIgnoreBlurUntilRef.current) {
+                    requestAnimationFrame(() => {
+                      titleInputRef.current?.focus({ preventScroll: true });
+                    });
+                    return;
+                  }
+                  if (titleCommitScheduledRef.current) {
+                    titleCommitScheduledRef.current = false;
+                    return;
+                  }
+                  void commitTitleEdit();
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+              />
             </div>,
             document.body,
           )

@@ -19,8 +19,9 @@ use graph_layout::{
 };
 use node_detail::load_node_detail_command;
 use roadmap_edit::{
-    create_link, create_node, remove_link, remove_node, update_work_package, CreateLinkRequest,
-    CreateNodeRequest, RemoveLinkRequest, RemoveNodeRequest, UpdateWorkPackageRequest,
+    create_link, create_node, remove_link, remove_node, rename_node, update_work_package,
+    CreateLinkRequest, CreateNodeRequest, RemoveLinkRequest, RemoveNodeRequest, RenameNodeRequest,
+    RenameNodeResponse, UpdateWorkPackageRequest,
 };
 use settings::load_settings_command;
 use crate::undo::{Snapshot, UndoState, UndoStateDto};
@@ -141,6 +142,28 @@ async fn remove_node_command(
     remove_node(&app, request).await?;
     record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+}
+
+#[tauri::command]
+async fn rename_node_command(
+    app: tauri::AppHandle,
+    request: RenameNodeRequest,
+    state: tauri::State<'_, UndoState>,
+) -> Result<RenameNodeResponse, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    let node_type = request.node_type.clone();
+    let node_id = request.node_id.clone();
+    let new_name = request.new_name.trim().to_string();
+    let old_name = roadmap_edit::bellman_entity_name(&node_id, &node_type);
+    let label = format!("rename {node_type} {old_name} -> {new_name}");
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
+    let new_node_id = rename_node(&app, request).await?;
+    record_edit(&state, &roadmap_root, label, before);
+    let graph = load_roadmap_graph(PathBuf::from(&roadmap_root).as_path())?;
+    Ok(RenameNodeResponse {
+        graph,
+        new_node_id,
+    })
 }
 
 #[tauri::command]
@@ -347,6 +370,7 @@ pub fn run() {
             create_link_command,
             remove_link_command,
             remove_node_command,
+            rename_node_command,
             save_node_markdown_command,
             update_work_package_command,
             undo_command,

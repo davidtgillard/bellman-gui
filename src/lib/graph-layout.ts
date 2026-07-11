@@ -220,6 +220,48 @@ export function withoutTopLevelNodePosition(
 }
 
 /**
+ * Migrates saved layout data when a top-level node is renamed.
+ * @param layout - Current layout document.
+ * @param oldNodeId - Previous node identifier.
+ * @param newNodeId - Renamed node identifier.
+ * @returns Layout with positions moved to the new id.
+ */
+export function renameTopLevelNodeInLayout(
+  layout: WorkPackageLayout,
+  oldNodeId: string,
+  newNodeId: string,
+): WorkPackageLayout {
+  if (oldNodeId === newNodeId) {
+    return layout;
+  }
+
+  let nextLayout = layout;
+  const position = layout.topLevel[oldNodeId];
+  if (position) {
+    nextLayout = withoutTopLevelNodePosition(nextLayout, oldNodeId);
+    nextLayout = withTopLevelNodePosition(nextLayout, newNodeId, position);
+  }
+
+  const oldProjectKey = projectLayoutKey(oldNodeId);
+  const newProjectKey = projectLayoutKey(newNodeId);
+  if (oldProjectKey !== newProjectKey) {
+    const bucket = resolveProjectLayoutBucket(nextLayout, oldNodeId);
+    if (bucket && bucket in nextLayout.projects) {
+      const projectPositions = nextLayout.projects[bucket];
+      const nextProjects = { ...nextLayout.projects };
+      delete nextProjects[bucket];
+      nextProjects[newProjectKey] = projectPositions;
+      nextLayout = {
+        ...nextLayout,
+        projects: nextProjects,
+      };
+    }
+  }
+
+  return nextLayout;
+}
+
+/**
  * Picks a node position near the preferred point, nudging away from nearby nodes.
  * @param preferred - Desired placement in graph coordinates.
  * @param existing - Positions of nodes that should not be overlapped.

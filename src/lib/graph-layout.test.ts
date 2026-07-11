@@ -8,6 +8,7 @@ import {
   projectNodePositions,
   resolvePlacedNodePosition,
   normalizeTopLevelPositions,
+  renameTopLevelNodeInLayout,
   topLevelNodePositions,
   withNodePosition,
   withScopePositions,
@@ -192,5 +193,35 @@ describe("graph-layout", () => {
       "project--usv-lars-p2": { x: 3, y: 4 },
       "goal--partner-integrations": { x: 5, y: 6 },
     });
+  });
+
+  it("moves top-level layout positions when a node is renamed", () => {
+    const layout = {
+      version: 1,
+      kind: "bellman-gui-work-package-layout",
+      topLevel: {
+        "project--billing-redesign": { x: 10, y: 20, w: 100, h: 80 },
+      },
+      projects: {
+        "billing-redesign": {
+          "billing-redesign--wp-invoicing": { x: 1, y: 2 },
+        },
+      },
+    };
+
+    const renamed = renameTopLevelNodeInLayout(
+      layout,
+      "project--billing-redesign",
+      "project--invoice-v2",
+    );
+
+    expect(renamed.topLevel).toEqual({
+      "project--invoice-v2": { x: 10, y: 20, w: 100, h: 80 },
+    });
+    expect(renamed.topLevel["project--billing-redesign"]).toBeUndefined();
+    expect(renamed.projects["invoice-v2"]).toEqual({
+      "billing-redesign--wp-invoicing": { x: 1, y: 2 },
+    });
+    expect(renamed.projects["billing-redesign"]).toBeUndefined();
   });
 });

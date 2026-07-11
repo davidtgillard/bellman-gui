@@ -5,6 +5,9 @@ import {
   type CreateNodeRequest,
   type RemoveLinkRequest,
   type RemoveNodeRequest,
+  type RenameNodeRequest,
+  type RenameNodeResponse,
+  type RenameNodeResponseDto,
   type RoadmapGraphDto,
 } from "./graph";
 
@@ -46,6 +49,19 @@ export async function removeLink(request: RemoveLinkRequest) {
 export async function removeNode(request: RemoveNodeRequest) {
   const dto = await invoke<RoadmapGraphDto>("remove_node_command", { request });
   return fromRoadmapGraphDto(dto);
+}
+
+/**
+ * Renames a roadmap node via the bellman sidecar and returns the updated graph.
+ * @param request - Node rename payload for the backend.
+ * @returns Updated roadmap graph and the new node id after rename.
+ */
+export async function renameNode(request: RenameNodeRequest): Promise<RenameNodeResponse> {
+  const dto = await invoke<RenameNodeResponseDto>("rename_node_command", { request });
+  return {
+    graph: fromRoadmapGraphDto(dto.graph),
+    newNodeId: dto.new_node_id,
+  };
 }
 
 export interface UpdateWorkPackageRequest {

@@ -34,6 +34,7 @@ import {
   createNode,
   removeLink,
   removeNode,
+  renameNode,
   updateWorkPackage,
 } from "./lib/roadmap-api";
 import { redo, undo, undoState, type UndoStatus } from "./lib/undo-api";
@@ -47,6 +48,7 @@ import {
   normalizeTopLevelPositions,
   projectLayoutKey,
   projectNodePositions,
+  renameTopLevelNodeInLayout,
   removeTopLevelNodePosition,
   removeWorkPackageNodePosition,
   saveGraphLayout,
@@ -78,6 +80,7 @@ import {
   workPackageHasChildren,
 } from "./lib/work-package-view";
 import { loadNodeDetail, saveNodeMarkdown, type NodeDetail } from "./lib/node-detail";
+import { slugify } from "./lib/node-content-validation";
 import {
   loadLegendVisibility,
   resolveVisibleTypes,
@@ -694,6 +697,88 @@ function App() {
       }
     },
     [applyGraph, refreshUndoState, roadmapRoot],
+  );
+
+  const handleRenameNode = useCallback(
+    async (nodeId: string, nodeType: string, rawName: string) => {
+      const newName = slugify(rawName);
+      if (!newName) {
+        setError("Node name cannot be empty.");
+        return;
+      }
+
+      setSaving(true);
+      setError(null);
+
+      try {
+        const { graph, newNodeId } = await renameNode({
+          roadmap_root: roadmapRoot,
+          node_id: nodeId,
+          node_type: nodeType,
+          new_name: newName,
+        });
+
+        let savedLayout: WorkPackageLayout | undefined;
+        if (
+          roadmapLayoutPersistable(roadmapRoot, graph.editable) &&
+          nodeId !== newNodeId
+        ) {
+          const nextLayout = renameTopLevelNodeInLayout(
+            workPackageLayout,
+            nodeId,
+            newNodeId,
+          );
+          savedLayout = await saveGraphLayout(roadmapRoot, nextLayout);
+        }
+
+        if (selectedNodeId === nodeId) {
+          setSelectedNodeId(newNodeId);
+          const node = graph.nodes.find((item) => item.id === newNodeId);
+          setNodeDetail(null);
+          setNodeDetailError(null);
+          if (node) {
+            setNodeDetailLoading(true);
+            void loadNodeDetail(roadmapRoot, newNodeId, node.type)
+              .then((detail) => {
+                setNodeDetail(detail);
+                setNodeDetailError(null);
+              })
+              .catch((caught) => setNodeDetailError(String(caught)))
+              .finally(() => setNodeDetailLoading(false));
+          } else {
+            setNodeDetailLoading(false);
+          }
+        }
+
+        setGraphViewStack((current) =>
+          current.map((frame) => {
+            if (frame.kind === "project" && frame.projectId === nodeId) {
+              return { ...frame, projectId: newNodeId };
+            }
+            if (frame.kind === "work_package" && frame.projectId === nodeId) {
+              return { ...frame, projectId: newNodeId };
+            }
+            return frame;
+          }),
+        );
+
+        applyGraph(graph, {
+          ...(savedLayout ? { layout: savedLayout } : {}),
+        });
+        void refreshUndoState(graph.root, graph.editable);
+      } catch (caught) {
+        setError(String(caught));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [
+      applyGraph,
+      refreshUndoState,
+      roadmapRoot,
+      selectedNodeId,
+      workPackageLayout,
+    ],
   );
 
   const handleRemoveNode = useCallback(
@@ -1540,6 +1625,13 @@ function App() {
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
             draggable
+            editable={editable && roadmapRoot !== "example" && !inWorkPackageGraph}
+            onNodeRename={
+              editable && roadmapRoot !== "example" && !inWorkPackageGraph
+                ? handleRenameNode
+                : undefined
+            }
+            renameSaving={saving}
             layoutReady={layoutReady}
             layoutSyncToken={layoutSyncToken}
             nodePositions={innerGraphNodePositions}

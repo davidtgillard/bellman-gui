@@ -259,6 +259,28 @@
         pushState(next);
         return currentGraph();
       }
+      case "rename_node_command": {
+        const next = clone(states[index]);
+        const nodeType = request.node_type || "goal";
+        const oldId = request.node_id;
+        const newName = (request.new_name || "").trim();
+        const prefix = `${nodeType}--`;
+        const newId = oldId.startsWith(prefix) ? `${prefix}${newName}` : newName;
+        next.nodes = next.nodes.map((node) =>
+          node.id === oldId ? { ...node, id: newId } : node,
+        );
+        next.links = next.links.map((link) => ({
+          ...link,
+          source: link.source === oldId ? newId : link.source,
+          target: link.target === oldId ? newId : link.target,
+        }));
+        next.label = `rename ${nodeType} ${oldId} -> ${newId}`;
+        pushState(next);
+        return {
+          graph: currentGraph(),
+          new_node_id: newId,
+        };
+      }
       case "load_node_detail_command":
         return currentNodeDetail(request.node_id);
       case "save_node_markdown_command": {

@@ -497,11 +497,56 @@ body {
   font-size: 11px;
   color: #e2e8f0;
   text-shadow:
-    0 0 1px #0f172a,
-    0 0 1px #0f172a,
-    0 0 1px #0f172a,
-    0 0 1px #0f172a;
+    0 0 2px #0f172a,
+    0 0 2px #0f172a,
+    0 0 2px #0f172a;
   white-space: nowrap;
+}
+
+.graph-node-title-editor-wrap {
+  box-sizing: border-box;
+  margin: 0;
+  overflow: hidden;
+}
+
+.graph-node-title-editor {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
+  /* Invisible ink: Cytoscape keeps painting the real label; this layer is caret + keys. */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: inherit;
+  font-weight: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-align: center;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: break-word;
+  text-shadow: none;
+  outline: none;
+  caret-color: #e2e8f0;
+  box-shadow: none;
+  user-select: text;
+  cursor: text;
+}
+
+.graph-node-title-editor:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.graph-node-title-editor:disabled {
+  opacity: 0.7;
 }
 
 .child-drag-layer {

@@ -87,6 +87,39 @@ export interface RemoveNodeRequest {
   node_type: string;
 }
 
+export interface RenameNodeRequest {
+  roadmap_root: string;
+  node_id: string;
+  node_type: string;
+  new_name: string;
+}
+
+export interface RenameNodeResponseDto {
+  graph: RoadmapGraphDto;
+  new_node_id: string;
+}
+
+export interface RenameNodeResponse {
+  graph: RoadmapGraph;
+  newNodeId: string;
+}
+
+export const RENAMEABLE_NODE_TYPES = new Set([
+  "initiative",
+  "project",
+  "milestone",
+  "goal",
+]);
+
+/**
+ * Returns whether a node type supports bellman rename.
+ * @param type - Registry node type.
+ * @returns True when the type can be renamed via bellman CLI.
+ */
+export function isRenameableNodeType(type: string): boolean {
+  return RENAMEABLE_NODE_TYPES.has(type);
+}
+
 export interface RoadmapGraphDto {
   root: string;
   editable: boolean;

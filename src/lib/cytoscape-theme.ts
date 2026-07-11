@@ -19,15 +19,26 @@ export const BELLMAN_COMPOUND_GRAPH_THEME = {
   childEdgeClearancePx: -5,
 };
 
+/** Typography shared by top-level graph node labels and the inline rename editor. */
+export const GRAPH_NODE_LABEL_TYPOGRAPHY = {
+  fontSizePx: 11,
+  color: "#e2e8f0",
+  outlineColor: "#0f172a",
+  /** Matches Cytoscape `text-outline-width`; label bounds include this inset. */
+  outlineWidthPx: 2,
+  textMaxWidthPx: 120,
+} as const;
+
 export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
   {
     selector: "node",
     style: {
       label: "data(label)",
-      "font-size": 11,
-      color: "#e2e8f0",
-      "text-outline-color": "#0f172a",
-      "text-outline-width": 2,
+      "font-family": "Helvetica",
+      "font-size": GRAPH_NODE_LABEL_TYPOGRAPHY.fontSizePx,
+      color: GRAPH_NODE_LABEL_TYPOGRAPHY.color,
+      "text-outline-color": GRAPH_NODE_LABEL_TYPOGRAPHY.outlineColor,
+      "text-outline-width": GRAPH_NODE_LABEL_TYPOGRAPHY.outlineWidthPx,
     },
   },
   {
@@ -37,7 +48,7 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
       "text-halign": "center",
       "text-margin-y": 6,
       "text-wrap": "wrap",
-      "text-max-width": "120px",
+      "text-max-width": `${GRAPH_NODE_LABEL_TYPOGRAPHY.textMaxWidthPx}px`,
       "background-color": "data(color)",
       width: 36,
       height: 36,
@@ -51,6 +62,12 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
       "border-width": 3,
       "border-color": "#38bdf8",
       "border-opacity": 1,
+    },
+  },
+  {
+    selector: "node.title-editing",
+    style: {
+      "text-opacity": 0,
     },
   },
   {

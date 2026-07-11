@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use serde_yaml::{Mapping, Value as YamlValue};
 use std::fs;
@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 use crate::bellman_cmd::run_bellman;
+use crate::graph::RoadmapGraphDto;
 
 const LINKS_TEMPLATE: &str = r#"{
   "description": "Directed links between issued object ids. Edit by hand or via fits CLI; validate with fits validate.",
@@ -482,7 +483,7 @@ fn remove_registry_only_node(root: &Path, node_id: &str) -> Result<(), String> {
     remove_registry_node_record(root, node_id, &removed_link_ids)
 }
 
-fn bellman_entity_name(node_id: &str, node_type: &str) -> String {
+pub(crate) fn bellman_entity_name(node_id: &str, node_type: &str) -> String {
     let prefix = format!("{node_type}--");
     if node_id.starts_with(&prefix) {
         node_id[prefix.len()..].to_string()
@@ -705,6 +706,91 @@ pub struct UpdateWorkPackageRequest {
     pub node_id: String,
     pub description: String,
     pub dependencies: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameNodeRequest {
+    pub roadmap_root: String,
+    pub node_id: String,
+    pub node_type: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenameNodeResponse {
+    pub graph: RoadmapGraphDto,
+    pub new_node_id: String,
+}
+
+fn find_node_id_by_type_and_name(
+    registry: &RegistryDocument,
+    node_type: &str,
+    name: &str,
+) -> Result<String, String> {
+    let matches: Vec<&RegistryInstance> = registry
+        .instances
+        .iter()
+        .filter(|instance| {
+            instance.kind == "node"
+                && instance.type_name == node_type
+                && bellman_entity_name(&instance.id, node_type) == name
+        })
+        .collect();
+
+    match matches.len() {
+        0 => Err(format!(
+            "no node found with type {node_type} and name {name:?}"
+        )),
+        1 => Ok(matches[0].id.clone()),
+        _ => Err(format!(
+            "ambiguous node match for type {node_type} and name {name:?}"
+        )),
+    }
+}
+
+pub async fn rename_node(app: &AppHandle, request: RenameNodeRequest) -> Result<String, String> {
+    let root = PathBuf::from(&request.roadmap_root);
+    if !registry_path(&root).is_file() {
+        return Err(format!(
+            "roadmap root is not editable: {}",
+            request.roadmap_root
+        ));
+    }
+
+    let node_type = request.node_type.as_str();
+    match node_type {
+        "initiative" | "project" | "milestone" | "goal" => {}
+        other => return Err(format!("cannot rename node type {other:?}")),
+    }
+
+    let new_name = request.new_name.trim().to_string();
+    if new_name.is_empty() {
+        return Err("new name cannot be empty".to_string());
+    }
+
+    let registry = read_registry(&root)?;
+    find_node(&registry, &request.node_id)?;
+
+    let old_name = bellman_entity_name(&request.node_id, node_type);
+    if old_name == new_name {
+        return Err("new name is the same as the current name".to_string());
+    }
+
+    run_bellman_for_request(
+        app,
+        &[
+            "rename",
+            node_type,
+            "--path",
+            &request.roadmap_root,
+            &old_name,
+            &new_name,
+        ],
+    )
+    .await?;
+
+    let updated_registry = read_registry(&root)?;
+    find_node_id_by_type_and_name(&updated_registry, node_type, &new_name)
 }
 
 pub async fn update_work_package(
