@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
@@ -24,6 +24,12 @@ import { nodeLabel } from "../lib/graph";
 
 const HISTORY_DEPTH = 50;
 
+/** Options for saving node markdown from the editor. */
+export interface SaveMarkdownOptions {
+  /** When true, persist without leaving edit mode (e.g. Ctrl/Cmd+S). */
+  keepOpen?: boolean;
+}
+
 interface NodeMarkdownEditorProps {
   roadmapRoot: string;
   nodeId: string;
@@ -31,7 +37,7 @@ interface NodeMarkdownEditorProps {
   initialMarkdown: string;
   saving: boolean;
   backendError: string | null;
-  onSave: (markdown: string) => void;
+  onSave: (markdown: string, options?: SaveMarkdownOptions) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
 }
@@ -117,6 +123,7 @@ export function NodeMarkdownEditor({
 
   const dirty = value !== initialMarkdown;
   const blocked = hasBlockingErrors(diagnostics);
+  const canSave = !saving && !blocked && dirty;
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -147,6 +154,44 @@ export function NodeMarkdownEditor({
       setActiveMarkdownEditor(null);
       viewRef.current = null;
     };
+  }, []);
+
+  const handleSave = useCallback(
+    (options?: SaveMarkdownOptions) => {
+      if (saving || blocked || !dirty) {
+        return;
+      }
+      const view = viewRef.current ?? editorRef.current?.view ?? null;
+      void (async () => {
+        if (view) {
+          try {
+            await persistNodeEditorHistory(roadmapRoot, nodeId, view.state);
+          } catch (error) {
+            console.error("[node-editor-history] failed to persist:", error);
+          }
+        }
+        onSave(value, options);
+      })();
+    },
+    [blocked, dirty, nodeId, onSave, roadmapRoot, saving, value],
+  );
+
+  // handle saving markdown via shortcut
+  const onSaveShortcut = useEffectEvent(() => {
+    handleSave({ keepOpen: true });
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onSaveShortcut();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
   const lintExtension = useMemo(
@@ -197,23 +242,6 @@ export function NodeMarkdownEditor({
     () => initialStateFromHistory(restoredHistory),
     [restoredHistory],
   );
-
-  const handleSave = () => {
-    if (saving || blocked || !dirty) {
-      return;
-    }
-    const view = viewRef.current ?? editorRef.current?.view ?? null;
-    void (async () => {
-      if (view) {
-        try {
-          await persistNodeEditorHistory(roadmapRoot, nodeId, view.state);
-        } catch (error) {
-          console.error("[node-editor-history] failed to persist:", error);
-        }
-      }
-      onSave(value);
-    })();
-  };
 
   return (
     <div className="node-markdown-editor">
@@ -292,8 +320,8 @@ export function NodeMarkdownEditor({
         <button
           type="button"
           className="node-editor-save"
-          onClick={handleSave}
-          disabled={saving || blocked || !dirty}
+          onClick={() => handleSave()}
+          disabled={!canSave}
         >
           {saving ? "Saving…" : "Save"}
         </button>

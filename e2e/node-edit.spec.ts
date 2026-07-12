@@ -191,6 +191,24 @@ test.describe("node content editing", () => {
     expect(await countCalls(page, "save_node_markdown_command")).toBe(1);
   });
 
+  test("ctrl+s saves markdown while keeping the editor open", async ({ page }) => {
+    await setupPage(page, goalScenario());
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const content = page.locator(".cm-content");
+    await content.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" via shortcut");
+
+    await page.keyboard.press("Control+s");
+
+    await expect(content).toBeVisible();
+    await expect(content).toContainText("via shortcut");
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(await countCalls(page, "save_node_markdown_command")).toBe(1);
+  });
+
   test("allows saving despite non-blocking warnings", async ({ page }) => {
     await setupPage(page, goalScenario());
     await selectNode(page, GOAL.id, { waitForEdit: true });

@@ -2,7 +2,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { nodeTypeLabel } from "../lib/graph";
 import type { NodeDetail } from "../lib/node-detail";
-import { NodeMarkdownEditor } from "./NodeMarkdownEditor";
+import {
+  NodeMarkdownEditor,
+  type SaveMarkdownOptions,
+} from "./NodeMarkdownEditor";
 import { WorkPackageEditor } from "./WorkPackageEditor";
 
 interface NodeDetailPanelProps {
@@ -16,7 +19,7 @@ interface NodeDetailPanelProps {
   roadmapRoot: string;
   onStartEdit: () => void;
   onCancelEdit: () => void;
-  onSaveMarkdown: (markdown: string) => void;
+  onSaveMarkdown: (markdown: string, options?: SaveMarkdownOptions) => void;
   onSaveWorkPackage: (input: { description: string; dependencies: string[] }) => void;
   onDirtyChange: (dirty: boolean) => void;
 }

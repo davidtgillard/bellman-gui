@@ -1490,7 +1490,7 @@ function App() {
   }, []);
 
   const handleSaveNodeMarkdown = useCallback(
-    async (markdown: string) => {
+    async (markdown: string, options?: { keepOpen?: boolean }) => {
       if (!nodeDetail) {
         return;
       }
@@ -1501,7 +1501,8 @@ function App() {
         const detail = await saveNodeMarkdown(roadmapRoot, nodeId, markdown);
         setNodeDetail(detail);
         nodeEditDirtyRef.current = false;
-        setNodeEditing(false);
+        // ensure that the editor is open if the user wants to continue editing
+        setNodeEditing(options?.keepOpen ?? false);
         void refreshUndoState(roadmapRoot, editable);
       } catch (caught) {
         setNodeEditError(String(caught));
@@ -1724,7 +1725,9 @@ function App() {
               roadmapRoot={roadmapRoot}
               onStartEdit={handleStartNodeEdit}
               onCancelEdit={handleCancelNodeEdit}
-              onSaveMarkdown={(markdown) => void handleSaveNodeMarkdown(markdown)}
+              onSaveMarkdown={(markdown, options) =>
+                void handleSaveNodeMarkdown(markdown, options)
+              }
               onSaveWorkPackage={(input) => void handleSaveWorkPackage(input)}
               onDirtyChange={handleNodeEditDirtyChange}
             />
