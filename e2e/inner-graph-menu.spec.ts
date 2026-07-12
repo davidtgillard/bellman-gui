@@ -6,17 +6,17 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const PROJECT_EMPTY = { id: "project--empty", type: "project" };
+const PROJECT_EMPTY = { id: "project/empty", type: "project" };
 const PROJECT_WITH_WORK_PACKAGES = {
-  id: "project--billing-redesign",
+  id: "project/billing-redesign",
   type: "project",
 };
 const WORK_PACKAGE_PARENT = {
-  id: "billing-redesign--wp-invoicing",
+  id: "project/billing-redesign/wp-invoicing",
   type: "work_package",
 };
 const WORK_PACKAGE_LEAF = {
-  id: "billing-redesign--wp-pdf-export",
+  id: "project/billing-redesign/wp-pdf-export",
   type: "work_package",
 };
 const PARENT_LINK = {

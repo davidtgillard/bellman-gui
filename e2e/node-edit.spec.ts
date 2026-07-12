@@ -9,10 +9,10 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const PROJECT = { id: "project--billing-redesign", type: "project" };
-const GOAL = { id: "goal--reduce-churn", type: "goal" };
-const WP_INVOICING = { id: "billing-redesign--wp-invoicing", type: "work_package" };
-const WP_PDF = { id: "billing-redesign--wp-pdf-export", type: "work_package" };
+const PROJECT = { id: "project/billing-redesign", type: "project" };
+const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const WP_INVOICING = { id: "project/billing-redesign/wp-invoicing", type: "work_package" };
+const WP_PDF = { id: "project/billing-redesign/wp-pdf-export", type: "work_package" };
 const PARENT_LINK = {
   id: "parent_of--invoicing--pdf",
   link_type: "parent_of",

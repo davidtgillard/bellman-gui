@@ -9,9 +9,9 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const PROJECT = { id: "project--billing", type: "project" };
-const GOAL = { id: "goal--reduce-churn", type: "goal" };
-const MILESTONE = { id: "milestone--ga", type: "milestone" };
+const PROJECT = { id: "project/billing", type: "project" };
+const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const MILESTONE = { id: "milestone/ga", type: "milestone" };
 const ROADMAP_ROOT = "/roadmap";
 
 /** Scenario with one undoable edit: adding a milestone on top of a base graph. */

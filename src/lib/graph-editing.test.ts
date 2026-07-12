@@ -15,10 +15,10 @@ const linkTypes: LinkTypeMeta[] = [
 ];
 
 const nodes: GraphNode[] = [
-  { id: "initiative--alpha", type: "initiative" },
-  { id: "project--beta", type: "project" },
-  { id: "work_package--gamma", type: "work_package" },
-  { id: "goal--delta", type: "goal" },
+  { id: "initiative/alpha", type: "initiative" },
+  { id: "project/beta", type: "project" },
+  { id: "project/beta/wp-gamma", type: "work_package" },
+  { id: "goal/delta", type: "goal" },
 ];
 
 describe("link type compatibility", () => {
@@ -48,11 +48,11 @@ describe("link type compatibility", () => {
     }
 
     expect(compatibleSourceNodes(nodes, supports).map((node) => node.id)).toEqual([
-      "initiative--alpha",
-      "project--beta",
+      "initiative/alpha",
+      "project/beta",
     ]);
     expect(compatibleTargetNodes(nodes, supports).map((node) => node.id)).toEqual([
-      "goal--delta",
+      "goal/delta",
     ]);
 
     const parentOf = linkTypes.find((item) => item.link_type === "parent_of");
@@ -62,10 +62,10 @@ describe("link type compatibility", () => {
     }
 
     expect(compatibleSourceNodes(nodes, parentOf).map((node) => node.id)).toEqual([
-      "work_package--gamma",
+      "project/beta/wp-gamma",
     ]);
     expect(compatibleTargetNodes(nodes, parentOf).map((node) => node.id)).toEqual([
-      "work_package--gamma",
+      "project/beta/wp-gamma",
     ]);
   });
 });

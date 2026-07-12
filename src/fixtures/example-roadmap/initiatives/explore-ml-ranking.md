@@ -1,13 +1,16 @@
-# Explore ML ranking
+# Explore ML Ranking
 
-Investigate whether machine-learning rankers can improve search relevance without increasing latency beyond our p95 budget.
+## Introduction
 
-## Goals
+Evaluate ML-based ranking for search results.
 
-- Benchmark current lexical search against two ML baselines
-- Document infrastructure requirements for online inference
-- Recommend go/no-go for a production pilot
+## Motivation
 
-## Status
+Improve relevance metrics before GA.
 
-Exploration phase — no committed delivery date.
+## Detailed Description
+
+Spike ranking models and measure offline NDCG.
+
+## Dependencies
+

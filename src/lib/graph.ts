@@ -1,12 +1,16 @@
 export interface RegistryInstance {
-  id: string;
+  guid: string;
+  name: string;
   type: string;
   kind: string;
+  scope?: string;
+  parent_guid?: string | null;
 }
 
 export interface RegistryDocument {
   instances: RegistryInstance[];
   link_types?: LinkTypeMeta[];
+  nested_link_types?: LinkTypeMeta[];
 }
 
 export interface LinkTypeMeta {
@@ -16,7 +20,8 @@ export interface LinkTypeMeta {
 }
 
 export interface LinkRecord {
-  id: string;
+  guid?: string;
+  id?: string;
   link_type: string;
   in: string;
   out: string;
@@ -190,29 +195,46 @@ export function nodeTypeLabel(type: string): string {
     .join(" ");
 }
 
-const QUALIFIED_PREFIXES = [
-  "initiative--",
-  "project--",
-  "milestone--",
-  "goal--",
-] as const;
-
 /**
- * Derives a short display label from a bellman qualified node id.
+ * Derives a short display label from a bellman slash-qualified node id.
  * @param nodeId - Fully qualified node identifier from the registry.
- * @returns Human-readable label with type prefix removed when present.
+ * @returns Human-readable label (final path segment).
  */
 export function nodeLabel(nodeId: string): string {
-  for (const prefix of QUALIFIED_PREFIXES) {
-    if (nodeId.startsWith(prefix)) {
-      return nodeId.slice(prefix.length);
-    }
-  }
-  const slash = nodeId.indexOf("--");
+  const slash = nodeId.lastIndexOf("/");
   if (slash >= 0) {
-    return nodeId.slice(slash + 2);
+    return nodeId.slice(slash + 1);
   }
   return nodeId;
+}
+
+/**
+ * Builds a slash-qualified logical path from registry parent links.
+ * @param instance - Live registry node instance.
+ * @param byGuid - Map of node GUID to instance.
+ * @returns Logical path such as `project/billing-redesign/wp-invoicing`.
+ */
+export function logicalPathForInstance(
+  instance: RegistryInstance,
+  byGuid: Map<string, RegistryInstance>,
+): string {
+  const segments: string[] = [instance.name];
+  let parentGuid = instance.parent_guid ?? null;
+  const seen = new Set<string>([instance.guid]);
+  while (parentGuid) {
+    if (seen.has(parentGuid)) {
+      break;
+    }
+    seen.add(parentGuid);
+    const parent = byGuid.get(parentGuid);
+    if (!parent) {
+      break;
+    }
+    segments.push(parent.name);
+    parentGuid = parent.parent_guid ?? null;
+  }
+  segments.reverse();
+  return segments.join("/");
 }
 
 export const MAX_NODE_LABEL_LINE_LENGTH = 20;
@@ -262,10 +284,10 @@ export function graphNodeDisplayLabel(label: string): string {
 /**
  * Returns whether a node id uses the registry's type-qualified prefix.
  * @param node - Graph node to inspect.
- * @returns Whether the id starts with `{type}--`.
+ * @returns Whether the id starts with `{type}/`.
  */
 export function hasTypedNodePrefix(node: GraphNode): boolean {
-  return node.id.startsWith(`${node.type}--`);
+  return node.id.startsWith(`${node.type}/`);
 }
 
 /**
@@ -291,7 +313,7 @@ function preferredDuplicateNode(left: GraphNode, right: GraphNode): GraphNode {
 
 /**
  * Collapses registry aliases that share a type and display label.
- * Prefers type-qualified ids such as `project--billing` over `billing`.
+ * Prefers type-qualified ids such as `project/billing` over `billing`.
  * @param nodes - Raw graph nodes from the registry.
  * @returns Canonical nodes and a map from alias id to canonical id.
  */
@@ -349,7 +371,7 @@ export function normalizeRoadmapGraphData(
  * Builds a roadmap graph from bellman registry and link documents.
  * @param root - Roadmap root path or display name.
  * @param registry - Parsed `.fits/registry.json` contents.
- * @param links - Parsed `links/links.jsonc` contents.
+ * @param links - Parsed link rows (root links and/or nested subgraph links).
  * @returns Graph containing node instances and directed links.
  */
 export function parseRoadmapGraph(
@@ -357,20 +379,32 @@ export function parseRoadmapGraph(
   registry: RegistryDocument,
   links: LinksDocument,
 ): RoadmapGraph {
+  const byGuid = new Map(
+    registry.instances
+      .filter((instance) => instance.kind === "node")
+      .map((instance) => [instance.guid, instance]),
+  );
+
   const rawNodes = registry.instances
-    .filter((instance) => instance.kind === "node")
+    .filter((instance) => instance.kind === "node" && instance.type !== "kind")
     .map((instance) => ({
-      id: instance.id,
+      id: logicalPathForInstance(instance, byGuid),
       type: instance.type,
     }));
 
   const uniqueNodes = [...new Map(rawNodes.map((node) => [node.id, node])).values()];
 
+  const guidToLogical = new Map(
+    registry.instances
+      .filter((instance) => instance.kind === "node")
+      .map((instance) => [instance.guid, logicalPathForInstance(instance, byGuid)]),
+  );
+
   const graphLinks = links.links.map((link) => ({
-    id: link.id,
+    id: link.guid ?? link.id ?? `${link.link_type}:${link.in}->${link.out}`,
     linkType: link.link_type,
-    source: link.in,
-    target: link.out,
+    source: guidToLogical.get(link.in) ?? link.in,
+    target: guidToLogical.get(link.out) ?? link.out,
   }));
 
   const { nodes, links: normalizedLinks } = normalizeRoadmapGraphData(
@@ -378,12 +412,22 @@ export function parseRoadmapGraph(
     graphLinks,
   );
 
+  const linkTypes = [
+    ...(registry.link_types ?? []),
+    ...(registry.nested_link_types ?? []).filter(
+      (nested) =>
+        !(registry.link_types ?? []).some(
+          (existing) => existing.link_type === nested.link_type,
+        ),
+    ),
+  ];
+
   return {
     root,
     editable: false,
     nodes,
     links: normalizedLinks,
-    linkTypes: registry.link_types ?? [],
+    linkTypes,
   };
 }
 
@@ -525,15 +569,15 @@ export function projectNames(nodes: GraphNode[]): string[] {
 
 /**
  * Returns the project scope name embedded in a work package id.
- * @param workPackageId - Fully qualified work package identifier.
- * @returns Project scope prefix before the first `--`, or null when absent.
+ * @param workPackageId - Fully qualified work package identifier (`project/{name}/…`).
+ * @returns Project name, or null when the id is not a project-scoped path.
  */
 export function workPackageProjectName(workPackageId: string): string | null {
-  const separator = workPackageId.indexOf("--");
-  if (separator <= 0) {
+  const parts = workPackageId.split("/");
+  if (parts.length < 3 || parts[0] !== "project" || !parts[1]) {
     return null;
   }
-  return workPackageId.slice(0, separator);
+  return parts[1];
 }
 
 /**
@@ -547,7 +591,10 @@ export function workPackageBelongsToProject(
   projectId: string,
 ): boolean {
   const projectName = nodeLabel(projectId);
-  return workPackageProjectName(workPackageId) === projectName;
+  return (
+    workPackageId.startsWith(`project/${projectName}/`) ||
+    workPackageProjectName(workPackageId) === projectName
+  );
 }
 
 /**

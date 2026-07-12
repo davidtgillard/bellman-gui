@@ -1,13 +1,20 @@
-# Billing redesign
+# Billing Redesign
 
-Modernize invoicing, payment capture, and PDF export for enterprise customers.
+## Introduction
 
-## Scope
+Replace legacy billing UI and APIs.
 
-This project covers customer-facing billing flows and the internal tooling support team uses to resolve invoice disputes.
+## Motivation
 
-## Outcomes
+Reduce support tickets and enable new pricing models.
 
-- Self-service invoice corrections
-- Branded PDF exports
-- Clear audit trail for billing adjustments
+## Detailed Description
+
+End-to-end redesign of invoicing and payment flows.
+
+### Criteria for Success
+
+- 30% reduction in billing-related tickets
+- All regions on new stack
+
+## Dependencies

@@ -10,8 +10,8 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const PROJECT = { id: "project--billing", type: "project" };
-const GOAL = { id: "goal--reduce-churn", type: "goal" };
+const PROJECT = { id: "project/billing", type: "project" };
+const GOAL = { id: "goal/reduce-churn", type: "goal" };
 
 function graphScenario(settings?: Scenario["settings"]): Scenario {
   return {

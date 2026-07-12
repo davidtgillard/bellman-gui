@@ -33,7 +33,7 @@ describe("parseRoadmapGraph", () => {
 
   it("detects which endpoints a node type can use when creating links", () => {
     const workPackage = graph.nodes.find(
-      (node) => node.id === "billing-redesign--wp-invoicing",
+      (node) => node.id === "project/billing-redesign/wp-invoicing",
     );
     const goal = graph.nodes.find((node) => node.type === "goal");
     const milestone = graph.nodes.find((node) => node.type === "milestone");
@@ -62,15 +62,15 @@ describe("parseRoadmapGraph", () => {
       (item) => item.linkType === "precedes_FS_Mandatory",
     );
     expect(link).toBeDefined();
-    expect(link?.source).toBe("billing-redesign--wp-invoicing");
-    expect(link?.target).toBe("billing-redesign--wp-pdf-export");
+    expect(link?.source).toBe("project/billing-redesign/wp-invoicing");
+    expect(link?.target).toBe("project/billing-redesign/wp-pdf-export");
   });
 
   it("maps node labels from qualified ids", () => {
-    expect(nodeLabel("initiative--explore-ml-ranking")).toBe(
+    expect(nodeLabel("initiative/explore-ml-ranking")).toBe(
       "explore-ml-ranking",
     );
-    expect(nodeLabel("billing-redesign--wp-invoicing")).toBe("wp-invoicing");
+    expect(nodeLabel("project/billing-redesign/wp-invoicing")).toBe("wp-invoicing");
   });
 
   it("wraps long hyphenated labels onto multiple lines", () => {
@@ -114,16 +114,16 @@ describe("parseRoadmapGraph", () => {
   it("finds a single added node id", () => {
     const added = findAddedNodeId(graph.nodes, [
       ...graph.nodes,
-      { id: "goal--new-item", type: "goal" },
+      { id: "goal/new-item", type: "goal" },
     ]);
-    expect(added).toBe("goal--new-item");
+    expect(added).toBe("goal/new-item");
   });
 
   it("removes a node and incident links from graph data", () => {
     const withoutNode = graphWithoutNode(
       graph.nodes,
       graph.links,
-      "billing-redesign--wp-invoicing",
+      "project/billing-redesign/wp-invoicing",
     );
     expect(withoutNode.nodes).toHaveLength(5);
     expect(withoutNode.links).toHaveLength(0);
@@ -138,19 +138,19 @@ describe("parseRoadmapGraph", () => {
   });
 
   it("derives work package project scope from ids", () => {
-    expect(workPackageProjectName("billing-redesign--wp-invoicing")).toBe(
+    expect(workPackageProjectName("project/billing-redesign/wp-invoicing")).toBe(
       "billing-redesign",
     );
     expect(
       workPackageBelongsToProject(
-        "billing-redesign--wp-invoicing",
-        "project--billing-redesign",
+        "project/billing-redesign/wp-invoicing",
+        "project/billing-redesign",
       ),
     ).toBe(true);
     expect(
       workPackageBelongsToProject(
-        "billing-redesign--wp-invoicing",
-        "project--other-project",
+        "project/billing-redesign/wp-invoicing",
+        "project/other-project",
       ),
     ).toBe(false);
   });
@@ -159,7 +159,7 @@ describe("parseRoadmapGraph", () => {
     const inner = innerGraphForProject(
       graph.nodes,
       graph.links,
-      "project--billing-redesign",
+      "project/billing-redesign",
     );
     expect(inner.nodes).toHaveLength(2);
     expect(inner.links).toHaveLength(2);
@@ -169,36 +169,36 @@ describe("parseRoadmapGraph", () => {
   it("collapses registry aliases that share a type and label", () => {
     const { nodes, idAliases } = deduplicateGraphNodes([
       { id: "usv-lars-p2", type: "project" },
-      { id: "project--usv-lars-p2", type: "project" },
+      { id: "project/usv-lars-p2", type: "project" },
       { id: "settings-manager", type: "initiative" },
-      { id: "initiative--settings-manager", type: "initiative" },
+      { id: "initiative/settings-manager", type: "initiative" },
     ]);
 
     expect(nodes.map((node) => node.id).sort()).toEqual([
-      "initiative--settings-manager",
-      "project--usv-lars-p2",
+      "initiative/settings-manager",
+      "project/usv-lars-p2",
     ]);
-    expect(idAliases.get("usv-lars-p2")).toBe("project--usv-lars-p2");
-    expect(idAliases.get("settings-manager")).toBe("initiative--settings-manager");
+    expect(idAliases.get("usv-lars-p2")).toBe("project/usv-lars-p2");
+    expect(idAliases.get("settings-manager")).toBe("initiative/settings-manager");
   });
 
   it("remaps links when collapsing duplicate node ids", () => {
     const { nodes, links } = normalizeRoadmapGraphData(
       [
         { id: "usv-lars-p2", type: "project" },
-        { id: "project--usv-lars-p2", type: "project" },
+        { id: "project/usv-lars-p2", type: "project" },
       ],
       [
         {
-          id: "supports--usv-lars-p2--goal--x",
+          id: "supports--usv-lars-p2--goal/x",
           linkType: "supports",
           source: "usv-lars-p2",
-          target: "goal--x",
+          target: "goal/x",
         },
       ],
     );
 
     expect(nodes).toHaveLength(1);
-    expect(links[0].source).toBe("project--usv-lars-p2");
+    expect(links[0].source).toBe("project/usv-lars-p2");
   });
 });

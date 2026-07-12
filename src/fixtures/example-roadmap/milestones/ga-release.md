@@ -1,13 +1,9 @@
-# GA release
+# GA Release
 
-General availability for the billing redesign rollout.
+## Date
 
-## Success criteria
+2026-09-30
 
-- All P0 work packages complete
-- Error budget held for two consecutive release windows
-- Support runbook published and staffed
+## Description
 
-## Target
-
-End of Q3, pending pilot feedback.
+General availability for the redesigned billing experience.

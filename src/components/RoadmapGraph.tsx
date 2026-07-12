@@ -546,6 +546,7 @@ export function RoadmapGraph({
   const graphStructureKeyRef = useRef("");
   const sceneRef = useRef<CompoundGraphScene | null>(null);
   const layoutCompletedRef = useRef(false);
+  const previousCompoundGraphForLayoutRef = useRef(compoundGraph);
   const lastLayoutSyncTokenRef = useRef(0);
   const visibleNodeIdsRef = useRef(visibleNodeIds);
   const onNodeClickRef = useRef(onNodeClick);
@@ -1744,6 +1745,8 @@ export function RoadmapGraph({
     if (structureChanged) {
       const preservedViewport = { pan: cy.pan(), zoom: cy.zoom() };
       const hadCompletedLayout = layoutCompletedRef.current;
+      const compoundModeChanged =
+        previousCompoundGraphForLayoutRef.current !== compoundGraph;
       graphStructureKeyRef.current = structureKey;
       queueMicrotask(() => {
         setGraphSelectionRevision((revision) => revision + 1);
@@ -1767,9 +1770,12 @@ export function RoadmapGraph({
       const hasCompoundNodesAfter =
         compoundGraph && nodes.some((node) => Boolean(node.parent || node.data?.isCompound));
 
-      // Id renames rebuild elements. Keep the current camera when we already had
-      // a laid-out graph instead of fitting / re-running auto-layout.
-      if (hadCompletedLayout || usesPresetLayout(nodePositions)) {
+      // Renames rebuild elements in the same view. Keep the camera then.
+      // Entering/leaving the work-package graph must still fit / re-layout.
+      if (
+        !compoundModeChanged &&
+        (hadCompletedLayout || usesPresetLayout(nodePositions))
+      ) {
         if (usesPresetLayout(nodePositions) && !hasCompoundNodesAfter) {
           applySavedNodePositions(cy, nodePositions);
         }
@@ -1780,6 +1786,7 @@ export function RoadmapGraph({
           initializeCompoundScene(cy);
         }
         lastLayoutSyncTokenRef.current = layoutSyncToken;
+        previousCompoundGraphForLayoutRef.current = compoundGraph;
         return;
       }
 
@@ -1794,6 +1801,8 @@ export function RoadmapGraph({
       }
       lastLayoutSyncTokenRef.current = layoutSyncToken;
     }
+
+    previousCompoundGraphForLayoutRef.current = compoundGraph;
 
     const hasCompoundNodes =
       compoundGraph && nodes.some((node) => Boolean(node.parent || node.data?.isCompound));

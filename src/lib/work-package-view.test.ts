@@ -14,7 +14,7 @@ import {
 
 describe("work-package-view", () => {
   const graph = parseRoadmapGraph("/example", registry, links);
-  const projectId = "project--billing-redesign";
+  const projectId = "project/billing-redesign";
 
   it("identifies parent_of links", () => {
     const parentLink = graph.links.find((link) => link.linkType === "parent_of");
@@ -36,65 +36,65 @@ describe("work-package-view", () => {
     );
 
     const invoicing = view.displayNodes.find(
-      (node) => node.id === "billing-redesign--wp-invoicing",
+      (node) => node.id === "project/billing-redesign/wp-invoicing",
     );
     const pdfExport = view.displayNodes.find(
-      (node) => node.id === "billing-redesign--wp-pdf-export",
+      (node) => node.id === "project/billing-redesign/wp-pdf-export",
     );
 
     expect(invoicing?.isCompound).toBe(true);
-    expect(pdfExport?.parent).toBe("billing-redesign--wp-invoicing");
+    expect(pdfExport?.parent).toBe("project/billing-redesign/wp-invoicing");
   });
 
   it("caps visible children and adds an overflow node", () => {
     const childIds = ["a", "b", "c", "d", "e", "f"].map(
-      (name) => `billing-redesign--wp-${name}`,
+      (name) => `project/billing-redesign/wp-${name}`,
     );
     const nodes = [
-      { id: "billing-redesign--wp-parent", type: "work_package" },
+      { id: "project/billing-redesign/wp-parent", type: "work_package" },
       ...childIds.map((id) => ({ id, type: "work_package" })),
     ];
     const parentLinks = childIds.map((childId, index) => ({
       id: `parent_of--parent--${index}`,
       linkType: "parent_of",
-      source: "billing-redesign--wp-parent",
+      source: "project/billing-redesign/wp-parent",
       target: childId,
     }));
 
     const view = buildCompoundWorkPackageView({
       nodes,
       links: parentLinks,
-      projectId: "project--billing-redesign",
+      projectId: "project/billing-redesign",
       maxVisibleChildren: 5,
     });
 
-    expect(view.displayNodes.filter((node) => node.parent === "billing-redesign--wp-parent")).toHaveLength(
+    expect(view.displayNodes.filter((node) => node.parent === "project/billing-redesign/wp-parent")).toHaveLength(
       6,
     );
-    expect(view.overflowByParent.get("billing-redesign--wp-parent")).toBe(1);
-    expect(view.displayNodes.some((node) => node.id === overflowNodeId("billing-redesign--wp-parent"))).toBe(
+    expect(view.overflowByParent.get("project/billing-redesign/wp-parent")).toBe(1);
+    expect(view.displayNodes.some((node) => node.id === overflowNodeId("project/billing-redesign/wp-parent"))).toBe(
       true,
     );
   });
 
   it("shows sub-packages badge instead of nested compounds at project root", () => {
     const nodes = [
-      { id: "billing-redesign--wp-root", type: "work_package" },
-      { id: "billing-redesign--wp-middle", type: "work_package" },
-      { id: "billing-redesign--wp-leaf", type: "work_package" },
+      { id: "project/billing-redesign/wp-root", type: "work_package" },
+      { id: "project/billing-redesign/wp-middle", type: "work_package" },
+      { id: "project/billing-redesign/wp-leaf", type: "work_package" },
     ];
     const scopedLinks = [
       {
         id: "parent_of--root--middle",
         linkType: "parent_of",
-        source: "billing-redesign--wp-root",
-        target: "billing-redesign--wp-middle",
+        source: "project/billing-redesign/wp-root",
+        target: "project/billing-redesign/wp-middle",
       },
       {
         id: "parent_of--middle--leaf",
         linkType: "parent_of",
-        source: "billing-redesign--wp-middle",
-        target: "billing-redesign--wp-leaf",
+        source: "project/billing-redesign/wp-middle",
+        target: "project/billing-redesign/wp-leaf",
       },
     ];
 
@@ -104,30 +104,30 @@ describe("work-package-view", () => {
       projectId,
     });
 
-    const middle = view.displayNodes.find((node) => node.id === "billing-redesign--wp-middle");
-    expect(middle?.parent).toBe("billing-redesign--wp-root");
+    const middle = view.displayNodes.find((node) => node.id === "project/billing-redesign/wp-middle");
+    expect(middle?.parent).toBe("project/billing-redesign/wp-root");
     expect(middle?.subLabel).toBe("has sub-packages");
-    expect(view.displayNodes.some((node) => node.id === "billing-redesign--wp-leaf")).toBe(false);
+    expect(view.displayNodes.some((node) => node.id === "project/billing-redesign/wp-leaf")).toBe(false);
   });
 
   it("allows nested compounds when drilled into a work package", () => {
     const nodes = [
-      { id: "billing-redesign--wp-root", type: "work_package" },
-      { id: "billing-redesign--wp-middle", type: "work_package" },
-      { id: "billing-redesign--wp-leaf", type: "work_package" },
+      { id: "project/billing-redesign/wp-root", type: "work_package" },
+      { id: "project/billing-redesign/wp-middle", type: "work_package" },
+      { id: "project/billing-redesign/wp-leaf", type: "work_package" },
     ];
     const scopedLinks = [
       {
         id: "parent_of--root--middle",
         linkType: "parent_of",
-        source: "billing-redesign--wp-root",
-        target: "billing-redesign--wp-middle",
+        source: "project/billing-redesign/wp-root",
+        target: "project/billing-redesign/wp-middle",
       },
       {
         id: "parent_of--middle--leaf",
         linkType: "parent_of",
-        source: "billing-redesign--wp-middle",
-        target: "billing-redesign--wp-leaf",
+        source: "project/billing-redesign/wp-middle",
+        target: "project/billing-redesign/wp-leaf",
       },
     ];
 
@@ -135,14 +135,14 @@ describe("work-package-view", () => {
       nodes,
       links: scopedLinks,
       projectId,
-      focusParentId: "billing-redesign--wp-root",
+      focusParentId: "project/billing-redesign/wp-root",
     });
 
-    const middle = view.displayNodes.find((node) => node.id === "billing-redesign--wp-middle");
-    const leaf = view.displayNodes.find((node) => node.id === "billing-redesign--wp-leaf");
+    const middle = view.displayNodes.find((node) => node.id === "project/billing-redesign/wp-middle");
+    const leaf = view.displayNodes.find((node) => node.id === "project/billing-redesign/wp-leaf");
 
     expect(middle?.isCompound).toBe(true);
-    expect(leaf?.parent).toBe("billing-redesign--wp-middle");
+    expect(leaf?.parent).toBe("project/billing-redesign/wp-middle");
   });
 
   it("reports work package child relationships", () => {
@@ -150,11 +150,11 @@ describe("work-package-view", () => {
     const { childrenByParent } = buildParentRelations(graph.links, nodeIds);
 
     expect(
-      workPackageHasChildren("billing-redesign--wp-invoicing", childrenByParent),
+      workPackageHasChildren("project/billing-redesign/wp-invoicing", childrenByParent),
     ).toBe(true);
-    expect(isOverflowNodeId(overflowNodeId("billing-redesign--wp-invoicing"))).toBe(true);
-    expect(overflowParentId(overflowNodeId("billing-redesign--wp-invoicing"))).toBe(
-      "billing-redesign--wp-invoicing",
+    expect(isOverflowNodeId(overflowNodeId("project/billing-redesign/wp-invoicing"))).toBe(true);
+    expect(overflowParentId(overflowNodeId("project/billing-redesign/wp-invoicing"))).toBe(
+      "project/billing-redesign/wp-invoicing",
     );
   });
 });

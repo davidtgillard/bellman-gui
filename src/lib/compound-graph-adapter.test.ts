@@ -7,11 +7,11 @@ import {
 } from "./compound-graph-adapter";
 import { isOverflowNodeId, OVERFLOW_NODE_PREFIX } from "@dgillard/cytoscape-compound-graph";
 
-const PROJECT = "project--billing";
-const PARENT_A = "billing--wp-a";
-const PARENT_B = "billing--wp-b";
-const CHILD_A1 = "billing--wp-a-1";
-const CHILD_B1 = "billing--wp-b-1";
+const PROJECT = "project/billing";
+const PARENT_A = "project/billing/wp-a";
+const PARENT_B = "project/billing/wp-b";
+const CHILD_A1 = "project/billing/wp-a-1";
+const CHILD_B1 = "project/billing/wp-b-1";
 
 function multiRootCompoundView() {
   return buildCompoundWorkPackageView({

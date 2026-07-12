@@ -23,6 +23,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 undo = { version = "0.52", features = ["serde"] }
 base64 = "0.22"
+uuid = { version = "1.23.4", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"

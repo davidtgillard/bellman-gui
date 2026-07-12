@@ -72,10 +72,15 @@ cargo run --manifest-path src-tauri/Cargo.toml -- /path/to/roadmap
 
 Roadmap data is read from:
 
-- `.fits/registry.json` — node instances and types
-- `links/links.jsonc` — directed links between nodes
+- `.fits/registry.json` — node instances (local `name` + `guid`, nested via `parent_guid`) and link type metadata
+- `links/links.jsonc` — root-scoped directed links (GUID endpoints)
+- `nodes/**/.fits/subgraph.jsonc` — nested nodes and links under kind/project containers
+
+Node ids in the UI are slash-qualified logical paths (for example `project/billing-redesign/wp-invoicing`).
 
 Run `bellman init` and `bellman sync` in your roadmap repo before opening it here if the graph artifacts are missing.
+
+After upgrading to a bellman release that uses libfits GUID wire ids (protocol v2), re-initialize each roadmap's pyfits tree: remove `.fits/`, `nodes/`, and `links/`, then run `bellman init .` and `bellman sync .`. Markdown remains the source of truth.
 
 ## Features
 

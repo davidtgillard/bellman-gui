@@ -12,19 +12,19 @@ import {
 } from "./support/fixtures";
 
 const PROJECT = {
-  id: "project--billing-redesign",
+  id: "project/billing-redesign",
   type: "project",
 };
 const COMPOSITE_PARENT = {
-  id: "billing-redesign--wp-invoicing",
+  id: "project/billing-redesign/wp-invoicing",
   type: "work_package",
 };
 const CHILD_A = {
-  id: "billing-redesign--wp-child-a",
+  id: "project/billing-redesign/wp-child-a",
   type: "work_package",
 };
 const CHILD_B = {
-  id: "billing-redesign--wp-child-b",
+  id: "project/billing-redesign/wp-child-b",
   type: "work_package",
 };
 

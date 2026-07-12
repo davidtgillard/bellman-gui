@@ -4,9 +4,13 @@ use serde_yaml::{Mapping, Value as YamlValue};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
+use uuid::Uuid;
 
 use crate::bellman_cmd::run_bellman;
-use crate::graph::RoadmapGraphDto;
+use crate::graph::{
+    all_link_artifact_paths, build_registry_index, load_registry_document, registry_path,
+    resolve_link_file_for_endpoints, IndexedInstance, RegistryIndex, RoadmapGraphDto,
+};
 
 const LINKS_TEMPLATE: &str = r#"{
   "description": "Directed links between issued object ids. Edit by hand or via fits CLI; validate with fits validate.",
@@ -17,48 +21,9 @@ const LINKS_TEMPLATE: &str = r#"{
 
 const WORK_PACKAGES_HEADER: &str = "version: 1\n\nwork_packages:\n";
 
-#[derive(Debug, Deserialize)]
-struct RegistryLinkType {
-    link_type: String,
-    in_type: String,
-    out_type: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RegistryDocument {
-    link_types: Vec<RegistryLinkType>,
-    instances: Vec<RegistryInstance>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RegistryInstance {
-    id: String,
-    #[serde(rename = "type")]
-    type_name: String,
-    kind: String,
-}
-
-fn registry_path(root: &Path) -> PathBuf {
-    root.join(".fits/registry.json")
-}
-
-pub fn links_path(root: &Path) -> Option<PathBuf> {
-    let jsonc = root.join("links/links.jsonc");
-    if jsonc.is_file() {
-        return Some(jsonc);
-    }
-    let json = root.join("links/links.json");
-    if json.is_file() {
-        return Some(json);
-    }
-    None
-}
-
-fn read_registry(root: &Path) -> Result<RegistryDocument, String> {
-    let path = registry_path(root);
-    let raw = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    serde_json::from_str(&raw).map_err(|error| format!("invalid registry JSON: {error}"))
+fn read_registry_index(root: &Path) -> Result<RegistryIndex, String> {
+    let raw = load_registry_document(root)?;
+    Ok(build_registry_index(&raw))
 }
 
 fn node_matches_endpoint(node_type: &str, endpoint_type: &str) -> bool {
@@ -66,21 +31,28 @@ fn node_matches_endpoint(node_type: &str, endpoint_type: &str) -> bool {
         || (endpoint_type == "work_scope" && (node_type == "initiative" || node_type == "project"))
 }
 
-fn find_node<'a>(registry: &'a RegistryDocument, node_id: &str) -> Result<&'a RegistryInstance, String> {
-    registry
+fn find_node<'a>(
+    index: &'a RegistryIndex,
+    node_id: &str,
+) -> Result<&'a IndexedInstance, String> {
+    index
         .instances
         .iter()
-        .find(|instance| instance.kind == "node" && instance.id == node_id)
+        .find(|instance| {
+            instance.kind == "node"
+                && instance.type_name != "kind"
+                && instance.logical_id == node_id
+        })
         .ok_or_else(|| format!("unknown node {node_id:?}"))
 }
 
 fn validate_link_type(
-    registry: &RegistryDocument,
+    index: &RegistryIndex,
     link_type: &str,
     source_type: &str,
     target_type: &str,
 ) -> Result<(), String> {
-    let Some(record) = registry
+    let Some(record) = index
         .link_types
         .iter()
         .find(|item| item.link_type == link_type)
@@ -105,8 +77,33 @@ fn validate_link_type(
     Ok(())
 }
 
-fn link_id(link_type: &str, source: &str, target: &str) -> String {
-    format!("{link_type}--{source}--{target}")
+fn read_json_file(path: &Path) -> Result<JsonValue, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_str(&raw)
+        .map_err(|error| format!("invalid JSON in {}: {error}", path.display()))
+}
+
+fn write_json_file(path: &Path, document: &JsonValue) -> Result<(), String> {
+    let formatted = serde_json::to_string_pretty(document)
+        .map_err(|error| format!("failed to serialize {}: {error}", path.display()))?;
+    fs::write(path, format!("{formatted}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn links_array_mut<'a>(
+    document: &'a mut JsonValue,
+    path: &Path,
+) -> Result<&'a mut Vec<JsonValue>, String> {
+    document
+        .get_mut("links")
+        .and_then(JsonValue::as_array_mut)
+        .ok_or_else(|| format!("links file missing links array in {}", path.display()))
+}
+
+fn link_matches_guid(link: &JsonValue, guid: &str) -> bool {
+    link.get("guid").and_then(JsonValue::as_str) == Some(guid)
+        || link.get("id").and_then(JsonValue::as_str) == Some(guid)
 }
 
 pub fn append_link(
@@ -115,91 +112,183 @@ pub fn append_link(
     source: &str,
     target: &str,
 ) -> Result<(), String> {
-    let registry = read_registry(root)?;
-    let source_node = find_node(&registry, source)?;
-    let target_node = find_node(&registry, target)?;
+    let index = read_registry_index(root)?;
+    let source_node = find_node(&index, source)?;
+    let target_node = find_node(&index, target)?;
     validate_link_type(
-        &registry,
+        &index,
         link_type,
         &source_node.type_name,
         &target_node.type_name,
     )?;
 
-    let links_file = links_path(root).ok_or_else(|| {
-        format!(
-            "not a bellman roadmap: missing links/links.jsonc or links/links.json under {}",
-            root.display()
-        )
-    })?;
+    let source_guid = source_node.guid.clone();
+    let target_guid = target_node.guid.clone();
+    let links_file = resolve_link_file_for_endpoints(root, &index, &source_guid, &target_guid)?;
 
-    let id = link_id(link_type, source, target);
-    let raw = if links_file.is_file() {
-        fs::read_to_string(&links_file)
-            .map_err(|error| format!("failed to read {}: {error}", links_file.display()))?
+    let mut document = if links_file.is_file() {
+        read_json_file(&links_file)?
     } else {
-        LINKS_TEMPLATE.to_string()
+        serde_json::from_str(LINKS_TEMPLATE)
+            .map_err(|error| format!("failed to parse links template: {error}"))?
     };
+    let links = links_array_mut(&mut document, &links_file)?;
 
-    let mut document: JsonValue = serde_json::from_str(&raw)
-        .map_err(|error| format!("invalid links JSON in {}: {error}", links_file.display()))?;
-    let links = document
-        .get_mut("links")
-        .and_then(JsonValue::as_array_mut)
-        .ok_or_else(|| format!("links file missing links array in {}", links_file.display()))?;
-
-    if links.iter().any(|link| link.get("id").and_then(JsonValue::as_str) == Some(id.as_str())) {
-        return Err(format!("link already exists: {id}"));
+    if links.iter().any(|link| {
+        link.get("link_type").and_then(JsonValue::as_str) == Some(link_type)
+            && link.get("in").and_then(JsonValue::as_str) == Some(source_guid.as_str())
+            && link.get("out").and_then(JsonValue::as_str) == Some(target_guid.as_str())
+    }) {
+        return Err(format!(
+            "link already exists: {link_type}:{source}->{target}"
+        ));
     }
 
+    let guid = Uuid::new_v4().to_string();
     links.push(json!({
-        "id": id,
+        "guid": guid,
         "link_type": link_type,
-        "in": source,
-        "out": target,
+        "in": source_guid,
+        "out": target_guid,
         "labels": null
     }));
 
-    let formatted = serde_json::to_string_pretty(&document)
-        .map_err(|error| format!("failed to serialize links: {error}"))?;
-    fs::write(&links_file, format!("{formatted}\n"))
-        .map_err(|error| format!("failed to write {}: {error}", links_file.display()))?;
-
-    Ok(())
+    write_json_file(&links_file, &document)
 }
 
 pub fn remove_link_record(root: &Path, link_id: &str) -> Result<(), String> {
-    let links_file = links_path(root).ok_or_else(|| {
-        format!(
-            "not a bellman roadmap: missing links/links.jsonc or links/links.json under {}",
-            root.display()
-        )
-    })?;
-
-    let raw = fs::read_to_string(&links_file)
-        .map_err(|error| format!("failed to read {}: {error}", links_file.display()))?;
-    let mut document: JsonValue = serde_json::from_str(&raw)
-        .map_err(|error| format!("invalid links JSON in {}: {error}", links_file.display()))?;
-    let links = document
-        .get_mut("links")
-        .and_then(JsonValue::as_array_mut)
-        .ok_or_else(|| format!("links file missing links array in {}", links_file.display()))?;
-
-    let before = links.len();
-    links.retain(|link| link.get("id").and_then(JsonValue::as_str) != Some(link_id));
-    if links.len() == before {
-        return Err(format!("link not found: {link_id}"));
+    for path in all_link_artifact_paths(root) {
+        let mut document = read_json_file(&path)?;
+        let links = links_array_mut(&mut document, &path)?;
+        let before = links.len();
+        links.retain(|link| !link_matches_guid(link, link_id));
+        if links.len() != before {
+            write_json_file(&path, &document)?;
+            return Ok(());
+        }
     }
-
-    let formatted = serde_json::to_string_pretty(&document)
-        .map_err(|error| format!("failed to serialize links: {error}"))?;
-    fs::write(&links_file, format!("{formatted}\n"))
-        .map_err(|error| format!("failed to write {}: {error}", links_file.display()))?;
-
-    Ok(())
+    Err(format!("link not found: {link_id}"))
 }
 
 fn work_packages_path(root: &Path, project: &str) -> PathBuf {
     root.join("projects").join(project).join("work-packages.yaml")
+}
+
+fn find_work_package_path(packages: &[YamlValue], title: &str) -> Option<Vec<usize>> {
+    for (index, entry) in packages.iter().enumerate() {
+        let Some(mapping) = entry.as_mapping() else {
+            continue;
+        };
+        if mapping
+            .get(YamlValue::from("title"))
+            .and_then(YamlValue::as_str)
+            == Some(title)
+        {
+            return Some(vec![index]);
+        }
+        if let Some(subs) = mapping
+            .get(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence)
+        {
+            if let Some(mut nested) = find_work_package_path(subs, title) {
+                nested.insert(0, index);
+                return Some(nested);
+            }
+        }
+    }
+    None
+}
+
+fn work_package_at_path<'a>(
+    packages: &'a mut [YamlValue],
+    path: &[usize],
+) -> Option<&'a mut YamlValue> {
+    let mut current = packages;
+    let mut last_index = None;
+    for (depth, &index) in path.iter().enumerate() {
+        if depth + 1 == path.len() {
+            last_index = Some(index);
+            break;
+        }
+        let entry = current.get_mut(index)?;
+        current = entry
+            .as_mapping_mut()?
+            .get_mut(YamlValue::from("sub_packages"))?
+            .as_sequence_mut()?;
+    }
+    current.get_mut(last_index?)
+}
+
+fn work_package_exists(packages: &[YamlValue], title: &str) -> bool {
+    find_work_package_path(packages, title).is_some()
+}
+
+fn retain_work_package(packages: &mut Vec<YamlValue>, title: &str) -> bool {
+    let before = packages.len();
+    packages.retain(|entry| {
+        entry
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("title")))
+            .and_then(YamlValue::as_str)
+            .is_none_or(|existing| existing != title)
+    });
+    if packages.len() != before {
+        return true;
+    }
+    for entry in packages.iter_mut() {
+        let Some(mapping) = entry.as_mapping_mut() else {
+            continue;
+        };
+        if let Some(subs) = mapping
+            .get_mut(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence_mut)
+        {
+            if retain_work_package(subs, title) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn scrub_dependency_refs(packages: &mut [YamlValue], title: &str) {
+    for entry in packages.iter_mut() {
+        let Some(mapping) = entry.as_mapping_mut() else {
+            continue;
+        };
+        if let Some(deps) = mapping
+            .get_mut(YamlValue::from("dependencies"))
+            .and_then(YamlValue::as_sequence_mut)
+        {
+            deps.retain(|dep| match dep {
+                YamlValue::String(value) => value != title,
+                YamlValue::Mapping(map) => map
+                    .get(YamlValue::from("after"))
+                    .and_then(YamlValue::as_str)
+                    .is_none_or(|after| after != title),
+                _ => true,
+            });
+        }
+        if let Some(subs) = mapping
+            .get_mut(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence_mut)
+        {
+            scrub_dependency_refs(subs, title);
+        }
+    }
+}
+
+fn dependency_yaml_values(dependencies: &[String]) -> Vec<YamlValue> {
+    dependencies
+        .iter()
+        .map(|dep| {
+            let mut entry = Mapping::new();
+            entry.insert(YamlValue::from("after"), YamlValue::from(dep.as_str()));
+            entry.insert(YamlValue::from("relation"), YamlValue::from("FS"));
+            entry.insert(YamlValue::from("hardness"), YamlValue::from("Mandatory"));
+            YamlValue::Mapping(entry)
+        })
+        .collect()
 }
 
 pub fn append_work_package(
@@ -208,9 +297,9 @@ pub fn append_work_package(
     title: &str,
     description: &str,
 ) -> Result<(), String> {
-    let registry = read_registry(root)?;
-    let project_id = format!("project--{project}");
-    find_node(&registry, &project_id)?;
+    let index = read_registry_index(root)?;
+    let project_id = format!("project/{project}");
+    find_node(&index, &project_id)?;
 
     let path = work_packages_path(root, project);
     if !path.is_file() {
@@ -235,16 +324,17 @@ pub fn append_work_package(
         .as_mapping_mut()
         .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
         .and_then(YamlValue::as_sequence_mut)
-        .ok_or_else(|| format!("work-packages file missing work_packages list in {}", path.display()))?;
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
 
-    if work_packages.iter().any(|entry| {
-        entry
-            .as_mapping()
-            .and_then(|map| map.get(YamlValue::from("title")))
-            .and_then(YamlValue::as_str)
-            .is_some_and(|existing| existing == title)
-    }) {
-        return Err(format!("work package {title:?} already exists in project {project:?}"));
+    if work_package_exists(work_packages, title) {
+        return Err(format!(
+            "work package {title:?} already exists in project {project:?}"
+        ));
     }
 
     let mut entry = Mapping::new();
@@ -262,72 +352,9 @@ pub fn append_work_package(
 }
 
 pub fn remove_work_package(root: &Path, project: &str, title: &str) -> Result<(), String> {
-    let registry = read_registry(root)?;
-    let project_id = format!("project--{project}");
-    find_node(&registry, &project_id)?;
-
-    let path = work_packages_path(root, project);
-    if !path.is_file() {
-        return Err(format!(
-            "project {project:?} has no work-packages.yaml at {}",
-            path.display()
-        ));
-    }
-
-    let raw = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let mut document: YamlValue = serde_yaml::from_str(&raw)
-        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
-
-    let work_packages = document
-        .as_mapping_mut()
-        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
-        .and_then(YamlValue::as_sequence_mut)
-        .ok_or_else(|| format!("work-packages file missing work_packages list in {}", path.display()))?;
-
-    let before = work_packages.len();
-    work_packages.retain(|entry| {
-        entry
-            .as_mapping()
-            .and_then(|map| map.get(YamlValue::from("title")))
-            .and_then(YamlValue::as_str)
-            .is_none_or(|existing| existing != title)
-    });
-    if work_packages.len() == before {
-        return Err(format!("work package {title:?} not found in project {project:?}"));
-    }
-
-    for entry in work_packages.iter_mut() {
-        let Some(mapping) = entry.as_mapping_mut() else {
-            continue;
-        };
-        let Some(deps) = mapping
-            .get_mut(YamlValue::from("dependencies"))
-            .and_then(YamlValue::as_sequence_mut)
-        else {
-            continue;
-        };
-        deps.retain(|dep| dep.as_str().is_none_or(|value| value != title));
-    }
-
-    let formatted = serde_yaml::to_string(&document)
-        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
-    fs::write(&path, formatted)
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-
-    Ok(())
-}
-
-pub fn set_work_package_fields(
-    root: &Path,
-    project: &str,
-    title: &str,
-    description: &str,
-    dependencies: &[String],
-) -> Result<(), String> {
-    let registry = read_registry(root)?;
-    let project_id = format!("project--{project}");
-    find_node(&registry, &project_id)?;
+    let index = read_registry_index(root)?;
+    let project_id = format!("project/{project}");
+    find_node(&index, &project_id)?;
 
     let path = work_packages_path(root, project);
     if !path.is_file() {
@@ -353,15 +380,59 @@ pub fn set_work_package_fields(
             )
         })?;
 
-    let entry = work_packages
-        .iter_mut()
-        .find(|entry| {
-            entry
-                .as_mapping()
-                .and_then(|map| map.get(YamlValue::from("title")))
-                .and_then(YamlValue::as_str)
-                .is_some_and(|existing| existing == title)
-        })
+    if !retain_work_package(work_packages, title) {
+        return Err(format!(
+            "work package {title:?} not found in project {project:?}"
+        ));
+    }
+    scrub_dependency_refs(work_packages, title);
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    Ok(())
+}
+
+pub fn set_work_package_fields(
+    root: &Path,
+    project: &str,
+    title: &str,
+    description: &str,
+    dependencies: &[String],
+) -> Result<(), String> {
+    let index = read_registry_index(root)?;
+    let project_id = format!("project/{project}");
+    find_node(&index, &project_id)?;
+
+    let path = work_packages_path(root, project);
+    if !path.is_file() {
+        return Err(format!(
+            "project {project:?} has no work-packages.yaml at {}",
+            path.display()
+        ));
+    }
+
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
+
+    let path_indexes = find_work_package_path(work_packages, title)
+        .ok_or_else(|| format!("work package {title:?} not found in project {project:?}"))?;
+    let entry = work_package_at_path(work_packages, &path_indexes)
         .ok_or_else(|| format!("work package {title:?} not found in project {project:?}"))?;
 
     let mapping = entry
@@ -372,13 +443,9 @@ pub fn set_work_package_fields(
         YamlValue::from("description"),
         YamlValue::from(description),
     );
-    let deps = dependencies
-        .iter()
-        .map(|dep| YamlValue::from(dep.as_str()))
-        .collect();
     mapping.insert(
         YamlValue::from("dependencies"),
-        YamlValue::Sequence(deps),
+        YamlValue::Sequence(dependency_yaml_values(dependencies)),
     );
 
     let formatted = serde_yaml::to_string(&document)
@@ -391,64 +458,48 @@ pub fn set_work_package_fields(
 
 fn write_registry_document(root: &Path, document: &JsonValue) -> Result<(), String> {
     let path = registry_path(root);
-    let formatted = serde_json::to_string_pretty(document)
-        .map_err(|error| format!("failed to serialize registry: {error}"))?;
-    fs::write(&path, format!("{formatted}\n"))
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    write_json_file(&path, document)
 }
 
-fn link_record_references_node(link: &JsonValue, node_id: &str) -> bool {
-    link.get("in").and_then(JsonValue::as_str) == Some(node_id)
-        || link.get("out").and_then(JsonValue::as_str) == Some(node_id)
+fn link_record_references_guid(link: &JsonValue, node_guid: &str) -> bool {
+    link.get("in").and_then(JsonValue::as_str) == Some(node_guid)
+        || link.get("out").and_then(JsonValue::as_str) == Some(node_guid)
 }
 
-fn remove_links_for_node(root: &Path, node_id: &str) -> Result<Vec<String>, String> {
-    let links_file = links_path(root).ok_or_else(|| {
-        format!(
-            "not a bellman roadmap: missing links/links.jsonc or links/links.json under {}",
-            root.display()
-        )
-    })?;
-
-    let raw = fs::read_to_string(&links_file)
-        .map_err(|error| format!("failed to read {}: {error}", links_file.display()))?;
-    let mut document: JsonValue = serde_json::from_str(&raw)
-        .map_err(|error| format!("invalid links JSON in {}: {error}", links_file.display()))?;
-    let links = document
-        .get_mut("links")
-        .and_then(JsonValue::as_array_mut)
-        .ok_or_else(|| format!("links file missing links array in {}", links_file.display()))?;
-
+fn remove_links_for_node(root: &Path, node_guid: &str) -> Result<Vec<String>, String> {
     let mut removed_ids = Vec::new();
-    links.retain(|link| {
-        if link_record_references_node(link, node_id) {
-            if let Some(id) = link.get("id").and_then(JsonValue::as_str) {
-                removed_ids.push(id.to_string());
+    for path in all_link_artifact_paths(root) {
+        let mut document = read_json_file(&path)?;
+        let links = links_array_mut(&mut document, &path)?;
+        let before = links.len();
+        links.retain(|link| {
+            if link_record_references_guid(link, node_guid) {
+                if let Some(id) = link
+                    .get("guid")
+                    .and_then(JsonValue::as_str)
+                    .or_else(|| link.get("id").and_then(JsonValue::as_str))
+                {
+                    removed_ids.push(id.to_string());
+                }
+                false
+            } else {
+                true
             }
-            false
-        } else {
-            true
+        });
+        if links.len() != before {
+            write_json_file(&path, &document)?;
         }
-    });
-
-    let formatted = serde_json::to_string_pretty(&document)
-        .map_err(|error| format!("failed to serialize links: {error}"))?;
-    fs::write(&links_file, format!("{formatted}\n"))
-        .map_err(|error| format!("failed to write {}: {error}", links_file.display()))?;
-
+    }
     Ok(removed_ids)
 }
 
 fn remove_registry_node_record(
     root: &Path,
-    node_id: &str,
+    node_guid: &str,
     removed_link_ids: &[String],
 ) -> Result<(), String> {
     let path = registry_path(root);
-    let raw = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let mut document: JsonValue = serde_json::from_str(&raw)
-        .map_err(|error| format!("invalid registry JSON: {error}"))?;
+    let mut document = read_json_file(&path)?;
     let instances = document
         .get_mut("instances")
         .and_then(JsonValue::as_array_mut)
@@ -458,17 +509,17 @@ fn remove_registry_node_record(
         removed_link_ids.iter().map(String::as_str).collect();
     let before = instances.len();
     instances.retain(|instance| {
-        let id = instance.get("id").and_then(JsonValue::as_str).unwrap_or("");
+        let guid = instance.get("guid").and_then(JsonValue::as_str).unwrap_or("");
         let kind = instance.get("kind").and_then(JsonValue::as_str).unwrap_or("");
         match kind {
-            "node" => id != node_id,
-            "link" => !removed_link_ids.contains(id),
+            "node" => guid != node_guid,
+            "link" => !removed_link_ids.contains(guid),
             _ => true,
         }
     });
 
     if instances.len() == before {
-        return Err(format!("registry node {node_id:?} not found"));
+        return Err(format!("registry node {node_guid:?} not found"));
     }
 
     write_registry_document(root, &document)
@@ -479,16 +530,19 @@ fn is_missing_entity_error(error: &str) -> bool {
 }
 
 fn remove_registry_only_node(root: &Path, node_id: &str) -> Result<(), String> {
-    let removed_link_ids = remove_links_for_node(root, node_id)?;
-    remove_registry_node_record(root, node_id, &removed_link_ids)
+    let index = read_registry_index(root)?;
+    let node = find_node(&index, node_id)?;
+    let guid = node.guid.clone();
+    let removed_link_ids = remove_links_for_node(root, &guid)?;
+    remove_registry_node_record(root, &guid, &removed_link_ids)
 }
 
 pub(crate) fn bellman_entity_name(node_id: &str, node_type: &str) -> String {
-    let prefix = format!("{node_type}--");
-    if node_id.starts_with(&prefix) {
-        node_id[prefix.len()..].to_string()
+    let prefix = format!("{node_type}/");
+    if let Some(rest) = node_id.strip_prefix(&prefix) {
+        rest.rsplit('/').next().unwrap_or(rest).to_string()
     } else {
-        node_id.to_string()
+        node_id.rsplit('/').next().unwrap_or(node_id).to_string()
     }
 }
 
@@ -498,11 +552,12 @@ fn node_delete_target(node_id: &str, node_type: &str) -> Result<(String, Option<
             Ok((bellman_entity_name(node_id, node_type), None))
         }
         "work_package" => {
-            let Some(separator) = node_id.find("--") else {
+            let parts: Vec<&str> = node_id.split('/').collect();
+            if parts.len() < 3 || parts[0] != "project" {
                 return Err(format!("invalid work package id {node_id:?}"));
-            };
-            let project = node_id[..separator].to_string();
-            let title = node_id[separator + 2..].to_string();
+            }
+            let project = parts[1].to_string();
+            let title = parts[parts.len() - 1].to_string();
             if project.is_empty() || title.is_empty() {
                 return Err(format!("invalid work package id {node_id:?}"));
             }
@@ -667,8 +722,8 @@ pub async fn remove_node(app: &AppHandle, request: RemoveNodeRequest) -> Result<
         ));
     }
 
-    let registry = read_registry(&root)?;
-    find_node(&registry, &request.node_id)?;
+    let index = read_registry_index(&root)?;
+    find_node(&index, &request.node_id)?;
 
     let (name, project) = node_delete_target(&request.node_id, &request.node_type)?;
 
@@ -723,17 +778,17 @@ pub struct RenameNodeResponse {
 }
 
 fn find_node_id_by_type_and_name(
-    registry: &RegistryDocument,
+    index: &RegistryIndex,
     node_type: &str,
     name: &str,
 ) -> Result<String, String> {
-    let matches: Vec<&RegistryInstance> = registry
+    let matches: Vec<&IndexedInstance> = index
         .instances
         .iter()
         .filter(|instance| {
             instance.kind == "node"
                 && instance.type_name == node_type
-                && bellman_entity_name(&instance.id, node_type) == name
+                && bellman_entity_name(&instance.logical_id, node_type) == name
         })
         .collect();
 
@@ -741,7 +796,7 @@ fn find_node_id_by_type_and_name(
         0 => Err(format!(
             "no node found with type {node_type} and name {name:?}"
         )),
-        1 => Ok(matches[0].id.clone()),
+        1 => Ok(matches[0].logical_id.clone()),
         _ => Err(format!(
             "ambiguous node match for type {node_type} and name {name:?}"
         )),
@@ -768,8 +823,8 @@ pub async fn rename_node(app: &AppHandle, request: RenameNodeRequest) -> Result<
         return Err("new name cannot be empty".to_string());
     }
 
-    let registry = read_registry(&root)?;
-    find_node(&registry, &request.node_id)?;
+    let index = read_registry_index(&root)?;
+    find_node(&index, &request.node_id)?;
 
     let old_name = bellman_entity_name(&request.node_id, node_type);
     if old_name == new_name {
@@ -789,8 +844,8 @@ pub async fn rename_node(app: &AppHandle, request: RenameNodeRequest) -> Result<
     )
     .await?;
 
-    let updated_registry = read_registry(&root)?;
-    find_node_id_by_type_and_name(&updated_registry, node_type, &new_name)
+    let updated = read_registry_index(&root)?;
+    find_node_id_by_type_and_name(&updated, node_type, &new_name)
 }
 
 pub async fn update_work_package(
@@ -805,18 +860,13 @@ pub async fn update_work_package(
         ));
     }
 
-    let (project, title) = request
-        .node_id
-        .split_once("--")
-        .ok_or_else(|| format!("invalid work package id {:?}", request.node_id))?;
-    if project.is_empty() || title.is_empty() {
-        return Err(format!("invalid work package id {:?}", request.node_id));
-    }
+    let (name, project) = node_delete_target(&request.node_id, "work_package")?;
+    let project = project.ok_or_else(|| "project is required for work packages".to_string())?;
 
     set_work_package_fields(
         &root,
-        project,
-        title,
+        &project,
+        &name,
         &request.description,
         &request.dependencies,
     )?;
@@ -842,40 +892,34 @@ mod tests {
     }
 
     #[test]
-    fn appends_link_to_fixture_links_file() {
+    fn appends_link_errors_when_already_present() {
         let _guard = fixture_lock();
         let root = fixture_root();
-        let links_file = links_path(&root).expect("fixture links file");
-        let backup = fs::read_to_string(&links_file).expect("read links");
 
         let result = append_link(
             &root,
             "parent_of",
-            "billing-redesign--wp-invoicing",
-            "billing-redesign--wp-pdf-export",
+            "project/billing-redesign/wp-invoicing",
+            "project/billing-redesign/wp-pdf-export",
         );
 
-        let restored = fs::read_to_string(&links_file).expect("read links after test");
-        fs::write(&links_file, &backup).expect("restore links");
-
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("link already exists"));
-        assert_eq!(restored, backup);
+        assert!(result.unwrap_err().contains("link already exists"));
     }
 
     #[test]
-    fn removes_link_from_fixture_links_file() {
+    fn removes_link_from_fixture_subgraph() {
         let _guard = fixture_lock();
         let root = fixture_root();
-        let links_file = links_path(&root).expect("fixture links file");
-        let backup = fs::read_to_string(&links_file).expect("read links");
-        let link_id = "parent_of--billing-redesign--wp-invoicing--billing-redesign--wp-pdf-export";
+        let link_id = "3a150a65-6676-444f-96ce-37d40be1c004";
+        let subgraph = root.join(
+            "nodes/kind/project project/billing-redesign/.fits/subgraph.jsonc",
+        );
+        let backup = fs::read_to_string(&subgraph).expect("read subgraph");
 
         let result = remove_link_record(&root, link_id);
-        let after_delete = fs::read_to_string(&links_file).expect("read links after delete");
-        fs::write(&links_file, &backup).expect("restore links");
+        let after_delete = fs::read_to_string(&subgraph).expect("read subgraph after delete");
+        fs::write(&subgraph, &backup).expect("restore subgraph");
 
         assert!(result.is_ok());
         assert!(!after_delete.contains(link_id));
@@ -893,30 +937,38 @@ mod tests {
     #[test]
     fn bellman_entity_name_strips_type_prefix_when_present() {
         assert_eq!(
-            bellman_entity_name("project--billing-redesign", "project"),
+            bellman_entity_name("project/billing-redesign", "project"),
             "billing-redesign"
+        );
+        assert_eq!(
+            bellman_entity_name("project/billing-redesign/wp-invoicing", "work_package"),
+            "wp-invoicing"
         );
     }
 
-    #[test]
-    fn bellman_entity_name_keeps_legacy_ids() {
-        assert_eq!(bellman_entity_name("usv-lars-p2", "project"), "usv-lars-p2");
-        assert_eq!(
-            bellman_entity_name("settings-manager", "initiative"),
-            "settings-manager"
-        );
+    fn write_project_registry(root: &Path) {
+        fs::create_dir_all(root.join(".fits")).unwrap();
+        fs::write(
+            root.join(".fits/registry.json"),
+            r#"{
+  "link_types": [],
+  "nested_link_types": [],
+  "instances": [
+    {"guid":"kind-project","name":"project","type":"kind","kind":"node","scope":"root"},
+    {"guid":"proj-1","name":"billing","type":"project","kind":"node","scope":"nested","parent_guid":"kind-project"}
+  ]
+}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("links")).unwrap();
+        fs::write(root.join("links/links.jsonc"), LINKS_TEMPLATE).unwrap();
     }
 
     #[test]
     fn set_work_package_fields_updates_description_and_dependencies() {
         let temp = TempDir::new().unwrap();
         let root = temp.path();
-        fs::create_dir_all(root.join(".fits")).unwrap();
-        fs::write(
-            root.join(".fits/registry.json"),
-            r#"{"link_types":[],"instances":[{"id":"project--billing","type":"project","kind":"node"}]}"#,
-        )
-        .unwrap();
+        write_project_registry(root);
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),
@@ -937,18 +989,14 @@ mod tests {
         assert!(raw.contains("New description."));
         assert!(!raw.contains("Old description."));
         assert!(raw.contains("wp-two"));
+        assert!(raw.contains("after:"));
     }
 
     #[test]
     fn set_work_package_fields_errors_for_missing_title() {
         let temp = TempDir::new().unwrap();
         let root = temp.path();
-        fs::create_dir_all(root.join(".fits")).unwrap();
-        fs::write(
-            root.join(".fits/registry.json"),
-            r#"{"link_types":[],"instances":[{"id":"project--billing","type":"project","kind":"node"}]}"#,
-        )
-        .unwrap();
+        write_project_registry(root);
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),

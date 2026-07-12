@@ -1,10 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import exploreMlRanking from "../fixtures/example-roadmap/initiatives/explore-ml-ranking.md?raw";
 import billingRedesign from "../fixtures/example-roadmap/projects/billing-redesign/billing-redesign.md?raw";
 import gaRelease from "../fixtures/example-roadmap/milestones/ga-release.md?raw";
 import reduceChurn from "../fixtures/example-roadmap/goals/reduce-churn.md?raw";
-import wpInvoicing from "../fixtures/example-roadmap/work-packages/billing-redesign--wp-invoicing.md?raw";
-import wpPdfExport from "../fixtures/example-roadmap/work-packages/billing-redesign--wp-pdf-export.md?raw";
+import { invoke } from "@tauri-apps/api/core";
 import { nodeLabel } from "./graph";
 
 export interface WorkPackageDetail {
@@ -41,13 +39,25 @@ interface NodeDetailDto {
   work_package: WorkPackageDetailDto | null;
 }
 
+const WP_INVOICING_MARKDOWN = `# wp-invoicing
+
+Core invoicing flow.`;
+
+const WP_PDF_EXPORT_MARKDOWN = `# wp-pdf-export
+
+PDF generation and delivery.
+
+## Dependencies
+
+- wp-invoicing`;
+
 const EXAMPLE_NODE_MARKDOWN: Record<string, string> = {
-  "initiative--explore-ml-ranking": exploreMlRanking,
-  "project--billing-redesign": billingRedesign,
-  "billing-redesign--wp-invoicing": wpInvoicing,
-  "billing-redesign--wp-pdf-export": wpPdfExport,
-  "milestone--ga-release": gaRelease,
-  "goal--reduce-churn": reduceChurn,
+  "initiative/explore-ml-ranking": exploreMlRanking,
+  "project/billing-redesign": billingRedesign,
+  "project/billing-redesign/wp-invoicing": WP_INVOICING_MARKDOWN,
+  "project/billing-redesign/wp-pdf-export": WP_PDF_EXPORT_MARKDOWN,
+  "milestone/ga-release": gaRelease,
+  "goal/reduce-churn": reduceChurn,
 };
 
 function fromDto(dto: NodeDetailDto): NodeDetail {

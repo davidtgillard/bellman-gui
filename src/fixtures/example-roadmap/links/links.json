@@ -1,20 +1,20 @@
 {
-  "description": "Directed links between issued object ids. Edit by hand or via fits CLI; validate with fits validate.",
+  "description": "Aggregated example links for the bundled demo graph.",
   "version": 1,
   "kind": "fits-links-v1",
   "links": [
     {
-      "id": "parent_of--billing-redesign--wp-invoicing--billing-redesign--wp-pdf-export",
+      "guid": "3a150a65-6676-444f-96ce-37d40be1c004",
       "link_type": "parent_of",
-      "out": "billing-redesign--wp-pdf-export",
-      "in": "billing-redesign--wp-invoicing",
+      "in": "198d55c4-1a8c-4b57-aabf-55ee7d49c360",
+      "out": "060a51c5-a2cc-45f5-9cb5-9cde98bc8248",
       "labels": null
     },
     {
-      "id": "precedes_FS_Mandatory--billing-redesign--wp-invoicing--billing-redesign--wp-pdf-export",
+      "guid": "9c11cb26-c3df-404e-9715-5c47cb430e68",
       "link_type": "precedes_FS_Mandatory",
-      "out": "billing-redesign--wp-pdf-export",
-      "in": "billing-redesign--wp-invoicing",
+      "in": "198d55c4-1a8c-4b57-aabf-55ee7d49c360",
+      "out": "060a51c5-a2cc-45f5-9cb5-9cde98bc8248",
       "labels": null
     }
   ]

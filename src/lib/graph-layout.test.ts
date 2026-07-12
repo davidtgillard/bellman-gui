@@ -23,28 +23,28 @@ describe("graph-layout", () => {
       version: 1,
       kind: "bellman-gui-work-package-layout",
       top_level: {
-        "initiative--alpha": { x: 5, y: 6 },
+        "initiative/alpha": { x: 5, y: 6 },
       },
       projects: {
-        "project--billing-redesign": {
-          "billing-redesign--wp-invoicing": { x: 10, y: -5 },
+        "project/billing-redesign": {
+          "project/billing-redesign/wp-invoicing": { x: 10, y: -5 },
         },
       },
     });
 
     expect(topLevelNodePositions(layout)).toEqual({
-      "initiative--alpha": { x: 5, y: 6 },
+      "initiative/alpha": { x: 5, y: 6 },
     });
-    expect(projectNodePositions(layout, "project--billing-redesign")).toEqual({
-      "billing-redesign--wp-invoicing": { x: 10, y: -5 },
+    expect(projectNodePositions(layout, "project/billing-redesign")).toEqual({
+      "project/billing-redesign/wp-invoicing": { x: 10, y: -5 },
     });
     expect(projectNodePositions(layout, "billing-redesign")).toEqual({
-      "billing-redesign--wp-invoicing": { x: 10, y: -5 },
+      "project/billing-redesign/wp-invoicing": { x: 10, y: -5 },
     });
   });
 
   it("uses canonical project scope keys when updating positions", () => {
-    expect(projectLayoutKey("project--billing-redesign")).toBe("billing-redesign");
+    expect(projectLayoutKey("project/billing-redesign")).toBe("billing-redesign");
 
     const initial = fromWorkPackageLayoutDto({
       version: 1,
@@ -54,24 +54,24 @@ describe("graph-layout", () => {
 
     const updated = withNodePosition(
       initial,
-      "project--billing-redesign",
-      "billing-redesign--wp-invoicing",
+      "project/billing-redesign",
+      "project/billing-redesign/wp-invoicing",
       { x: 1, y: 2 },
     );
     expect(updated).not.toBe(initial);
     expect(updated.projects["billing-redesign"]).toEqual({
-      "billing-redesign--wp-invoicing": { x: 1, y: 2 },
+      "project/billing-redesign/wp-invoicing": { x: 1, y: 2 },
     });
-    expect(projectNodePositions(updated, "project--billing-redesign")).toEqual({
-      "billing-redesign--wp-invoicing": { x: 1, y: 2 },
+    expect(projectNodePositions(updated, "project/billing-redesign")).toEqual({
+      "project/billing-redesign/wp-invoicing": { x: 1, y: 2 },
     });
 
     const removed = withoutNodePosition(
       updated,
-      "project--billing-redesign",
-      "billing-redesign--wp-invoicing",
+      "project/billing-redesign",
+      "project/billing-redesign/wp-invoicing",
     );
-    expect(projectNodePositions(removed, "project--billing-redesign")).toEqual({});
+    expect(projectNodePositions(removed, "project/billing-redesign")).toEqual({});
   });
 
   it("assigns stable fallback grid positions", () => {
@@ -102,18 +102,18 @@ describe("graph-layout", () => {
     const { layout, position } = applyNodePlacement(
       initial,
       { kind: "top_level" },
-      "initiative--new",
+      "initiative/new",
       { x: 100, y: 50 },
       {
-        "initiative--alpha": { x: 0, y: 0 },
-        "project--beta": { x: 200, y: 0 },
+        "initiative/alpha": { x: 0, y: 0 },
+        "project/beta": { x: 200, y: 0 },
       },
     );
 
     expect(position).toEqual({ x: 100, y: 50 });
-    expect(layout.topLevel["initiative--alpha"]).toEqual({ x: 0, y: 0 });
-    expect(layout.topLevel["project--beta"]).toEqual({ x: 200, y: 0 });
-    expect(layout.topLevel["initiative--new"]).toEqual({ x: 100, y: 50 });
+    expect(layout.topLevel["initiative/alpha"]).toEqual({ x: 0, y: 0 });
+    expect(layout.topLevel["project/beta"]).toEqual({ x: 200, y: 0 });
+    expect(layout.topLevel["initiative/new"]).toEqual({ x: 100, y: 50 });
   });
 
   it("updates top-level node positions", () => {
@@ -124,12 +124,12 @@ describe("graph-layout", () => {
       projects: {},
     });
 
-    const updated = withTopLevelNodePosition(initial, "goal--delta", { x: 3, y: 4 });
+    const updated = withTopLevelNodePosition(initial, "goal/delta", { x: 3, y: 4 });
     expect(topLevelNodePositions(updated)).toEqual({
-      "goal--delta": { x: 3, y: 4 },
+      "goal/delta": { x: 3, y: 4 },
     });
 
-    const removed = withoutTopLevelNodePosition(updated, "goal--delta");
+    const removed = withoutTopLevelNodePosition(updated, "goal/delta");
     expect(topLevelNodePositions(removed)).toEqual({});
   });
 
@@ -138,11 +138,11 @@ describe("graph-layout", () => {
       version: 1,
       kind: "bellman-gui-work-package-layout",
       top_level: {
-        "goal--alpha": { x: 1, y: 2 },
+        "goal/alpha": { x: 1, y: 2 },
       },
       projects: {
         "billing-redesign": {
-          "billing-redesign--wp-invoicing": { x: 3, y: 4 },
+          "project/billing-redesign/wp-invoicing": { x: 3, y: 4 },
         },
       },
     });
@@ -151,47 +151,47 @@ describe("graph-layout", () => {
       initial,
       { kind: "top_level" },
       {
-        "goal--beta": { x: 5, y: 6 },
-        "project--gamma": { x: 7, y: 8 },
+        "goal/beta": { x: 5, y: 6 },
+        "project/gamma": { x: 7, y: 8 },
       },
     );
     expect(topLevelNodePositions(topLevel)).toEqual({
-      "goal--alpha": { x: 1, y: 2 },
-      "goal--beta": { x: 5, y: 6 },
-      "project--gamma": { x: 7, y: 8 },
+      "goal/alpha": { x: 1, y: 2 },
+      "goal/beta": { x: 5, y: 6 },
+      "project/gamma": { x: 7, y: 8 },
     });
 
     const project = withScopePositions(
       initial,
-      { kind: "project", projectId: "project--billing-redesign" },
+      { kind: "project", projectId: "project/billing-redesign" },
       {
-        "billing-redesign--wp-pdf-export": { x: 9, y: 10 },
+        "project/billing-redesign/wp-pdf-export": { x: 9, y: 10 },
       },
     );
-    expect(projectNodePositions(project, "project--billing-redesign")).toEqual({
-      "billing-redesign--wp-invoicing": { x: 3, y: 4 },
-      "billing-redesign--wp-pdf-export": { x: 9, y: 10 },
+    expect(projectNodePositions(project, "project/billing-redesign")).toEqual({
+      "project/billing-redesign/wp-invoicing": { x: 3, y: 4 },
+      "project/billing-redesign/wp-pdf-export": { x: 9, y: 10 },
     });
   });
 
   it("maps legacy layout keys onto canonical node ids", () => {
     const nodes = [
-      { id: "project--usv-lars-p2", type: "project" },
-      { id: "goal--partner-integrations", type: "goal" },
+      { id: "project/usv-lars-p2", type: "project" },
+      { id: "goal/partner-integrations", type: "goal" },
     ];
 
     const normalized = normalizeTopLevelPositions(
       {
         "usv-lars-p2": { x: 1, y: 2 },
-        "project--usv-lars-p2": { x: 3, y: 4 },
+        "project/usv-lars-p2": { x: 3, y: 4 },
         "partner-integrations": { x: 5, y: 6 },
       },
       nodes,
     );
 
     expect(normalized).toEqual({
-      "project--usv-lars-p2": { x: 3, y: 4 },
-      "goal--partner-integrations": { x: 5, y: 6 },
+      "project/usv-lars-p2": { x: 3, y: 4 },
+      "goal/partner-integrations": { x: 5, y: 6 },
     });
   });
 
@@ -200,27 +200,27 @@ describe("graph-layout", () => {
       version: 1,
       kind: "bellman-gui-work-package-layout",
       topLevel: {
-        "project--billing-redesign": { x: 10, y: 20, w: 100, h: 80 },
+        "project/billing-redesign": { x: 10, y: 20, w: 100, h: 80 },
       },
       projects: {
         "billing-redesign": {
-          "billing-redesign--wp-invoicing": { x: 1, y: 2 },
+          "project/billing-redesign/wp-invoicing": { x: 1, y: 2 },
         },
       },
     };
 
     const renamed = renameTopLevelNodeInLayout(
       layout,
-      "project--billing-redesign",
-      "project--invoice-v2",
+      "project/billing-redesign",
+      "project/invoice-v2",
     );
 
     expect(renamed.topLevel).toEqual({
-      "project--invoice-v2": { x: 10, y: 20, w: 100, h: 80 },
+      "project/invoice-v2": { x: 10, y: 20, w: 100, h: 80 },
     });
-    expect(renamed.topLevel["project--billing-redesign"]).toBeUndefined();
+    expect(renamed.topLevel["project/billing-redesign"]).toBeUndefined();
     expect(renamed.projects["invoice-v2"]).toEqual({
-      "billing-redesign--wp-invoicing": { x: 1, y: 2 },
+      "project/billing-redesign/wp-invoicing": { x: 1, y: 2 },
     });
     expect(renamed.projects["billing-redesign"]).toBeUndefined();
   });

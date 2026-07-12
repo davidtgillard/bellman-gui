@@ -3,7 +3,7 @@ use serde_yaml::Value as YamlValue;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::graph::load_roadmap_graph;
+use crate::graph::{load_roadmap_graph, node_label};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct WorkPackageDetailDto {
@@ -37,11 +37,7 @@ fn strip_type_prefix<'a>(node_id: &'a str, prefix: &str) -> Result<&'a str, Stri
 }
 
 fn node_title(node_id: &str) -> String {
-    node_id
-        .split("--")
-        .last()
-        .unwrap_or(node_id)
-        .to_string()
+    node_label(node_id)
 }
 
 fn read_markdown_file(path: &Path) -> Result<String, String> {
@@ -53,10 +49,10 @@ fn read_markdown_file(path: &Path) -> Result<String, String> {
 /// file (everything except work packages, which live in `work-packages.yaml`).
 fn md_path_for(root: &Path, node_id: &str, node_type: &str) -> Result<PathBuf, String> {
     let (dir, prefix) = match node_type {
-        "initiative" => ("initiatives", "initiative--"),
-        "milestone" => ("milestones", "milestone--"),
-        "goal" => ("goals", "goal--"),
-        "project" => ("projects", "project--"),
+        "initiative" => ("initiatives", "initiative/"),
+        "milestone" => ("milestones", "milestone/"),
+        "goal" => ("goals", "goal/"),
+        "project" => ("projects", "project/"),
         other => {
             return Err(format!(
                 "node type {other:?} is not backed by a markdown file"
@@ -66,7 +62,7 @@ fn md_path_for(root: &Path, node_id: &str, node_type: &str) -> Result<PathBuf, S
 
     let name = match strip_type_prefix(node_id, prefix) {
         Ok(name) => name.to_string(),
-        Err(_) => node_id.to_string(),
+        Err(_) => node_label(node_id),
     };
 
     let path = if node_type == "project" {
@@ -82,6 +78,61 @@ struct WorkPackageParsed {
     markdown: String,
     path: PathBuf,
     detail: WorkPackageDetailDto,
+}
+
+fn dependency_label(dep: &YamlValue) -> Option<String> {
+    match dep {
+        YamlValue::String(value) => Some(value.clone()),
+        YamlValue::Mapping(map) => map
+            .get(YamlValue::from("after"))
+            .and_then(YamlValue::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+fn collect_titles(packages: &[YamlValue], out: &mut Vec<String>) {
+    for item in packages {
+        let Some(mapping) = item.as_mapping() else {
+            continue;
+        };
+        if let Some(title) = mapping
+            .get(YamlValue::from("title"))
+            .and_then(YamlValue::as_str)
+        {
+            out.push(title.to_string());
+        }
+        if let Some(subs) = mapping
+            .get(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence)
+        {
+            collect_titles(subs, out);
+        }
+    }
+}
+
+fn find_work_package<'a>(packages: &'a [YamlValue], title: &str) -> Option<&'a YamlValue> {
+    for item in packages {
+        let Some(mapping) = item.as_mapping() else {
+            continue;
+        };
+        if mapping
+            .get(YamlValue::from("title"))
+            .and_then(YamlValue::as_str)
+            == Some(title)
+        {
+            return Some(item);
+        }
+        if let Some(subs) = mapping
+            .get(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence)
+        {
+            if let Some(found) = find_work_package(subs, title) {
+                return Some(found);
+            }
+        }
+    }
+    None
 }
 
 fn work_package_detail(
@@ -116,24 +167,10 @@ fn work_package_detail(
             )
         })?;
 
-    let available_titles: Vec<String> = work_packages
-        .iter()
-        .filter_map(|item| {
-            item.as_mapping()
-                .and_then(|map| map.get(YamlValue::from("title")))
-                .and_then(YamlValue::as_str)
-                .map(str::to_string)
-        })
-        .collect();
+    let mut available_titles = Vec::new();
+    collect_titles(work_packages, &mut available_titles);
 
-    let entry = work_packages.iter().find(|item| {
-        item.as_mapping()
-            .and_then(|map| map.get(YamlValue::from("title")))
-            .and_then(YamlValue::as_str)
-            .is_some_and(|title| title == package_title)
-    });
-
-    let Some(entry) = entry else {
+    let Some(entry) = find_work_package(work_packages, package_title) else {
         return Err(format!(
             "work package {package_title:?} not found in {}",
             path.display()
@@ -151,13 +188,7 @@ fn work_package_detail(
         .as_mapping()
         .and_then(|map| map.get(YamlValue::from("dependencies")))
         .and_then(YamlValue::as_sequence)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(YamlValue::as_str)
-                .map(str::to_string)
-                .collect()
-        })
+        .map(|items| items.iter().filter_map(dependency_label).collect())
         .unwrap_or_default();
 
     let mut markdown = format!("# {package_title}\n\n{description}");
@@ -196,9 +227,12 @@ fn resolve_node_markdown(
             Ok((markdown, path, None))
         }
         "work_package" => {
-            let (project, package_title) = node_id
-                .split_once("--")
-                .ok_or_else(|| format!("invalid work package id: {node_id}"))?;
+            let parts: Vec<&str> = node_id.split('/').collect();
+            if parts.len() < 3 || parts[0] != "project" {
+                return Err(format!("invalid work package id: {node_id}"));
+            }
+            let project = parts[1];
+            let package_title = parts[parts.len() - 1];
             let parsed = work_package_detail(root, project, package_title)?;
             Ok((parsed.markdown, parsed.path, Some(parsed.detail)))
         }
@@ -272,10 +306,13 @@ mod tests {
             fits.join("registry.json"),
             r#"{
   "link_types": [],
+  "nested_link_types": [],
   "instances": [
-    {"id":"initiative--alpha","type":"initiative","kind":"node"},
-    {"id":"project--billing","type":"project","kind":"node"},
-    {"id":"billing--wp-one","type":"work_package","kind":"node"}
+    {"guid":"k-init","name":"initiative","type":"kind","kind":"node","scope":"root"},
+    {"guid":"k-proj","name":"project","type":"kind","kind":"node","scope":"root"},
+    {"guid":"init-1","name":"alpha","type":"initiative","kind":"node","scope":"nested","parent_guid":"k-init"},
+    {"guid":"proj-1","name":"billing","type":"project","kind":"node","scope":"nested","parent_guid":"k-proj"},
+    {"guid":"wp-1","name":"wp-one","type":"work_package","kind":"node","scope":"nested","parent_guid":"proj-1"}
   ]
 }"#,
         )
@@ -296,7 +333,7 @@ mod tests {
         )
         .unwrap();
 
-        let detail = load_node_detail(root, "initiative--alpha").unwrap();
+        let detail = load_node_detail(root, "initiative/alpha").unwrap();
         assert!(detail.markdown.contains("Initiative body."));
         assert_eq!(detail.title, "alpha");
     }
@@ -309,11 +346,11 @@ mod tests {
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),
-            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - wp-zero\n",
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - after: wp-zero\n        relation: FS\n        hardness: Mandatory\n",
         )
         .unwrap();
 
-        let detail = load_node_detail(root, "billing--wp-one").unwrap();
+        let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
         assert!(detail.markdown.contains("Do the thing."));
         assert!(detail.markdown.contains("wp-zero"));
     }
@@ -326,11 +363,11 @@ mod tests {
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),
-            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - wp-zero\n",
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - after: wp-zero\n        relation: FS\n        hardness: Mandatory\n",
         )
         .unwrap();
 
-        let detail = load_node_detail(root, "billing--wp-one").unwrap();
+        let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
         let wp = detail.work_package.expect("work package detail");
         assert_eq!(wp.project, "billing");
         assert_eq!(wp.title, "wp-one");
@@ -348,7 +385,7 @@ mod tests {
         fs::write(root.join("initiatives/alpha.md"), "# Alpha\n\nOld body.").unwrap();
 
         let detail =
-            save_node_markdown(root, "initiative--alpha", "# Alpha\n\nNew body.").unwrap();
+            save_node_markdown(root, "initiative/alpha", "# Alpha\n\nNew body.").unwrap();
         assert!(detail.markdown.contains("New body."));
 
         let on_disk = fs::read_to_string(root.join("initiatives/alpha.md")).unwrap();
@@ -362,7 +399,7 @@ mod tests {
         let root = temp.path();
         write_registry(root);
 
-        let result = save_node_markdown(root, "billing--wp-one", "# wp-one\n\nx");
+        let result = save_node_markdown(root, "project/billing/wp-one", "# wp-one\n\nx");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("work packages"));
     }

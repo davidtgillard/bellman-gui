@@ -63,11 +63,19 @@ pub struct SaveWorkPackageNodePositionRequest {
 }
 
 fn project_layout_key(project_id: &str) -> String {
-    const PREFIX: &str = "project--";
+    const PREFIX: &str = "project/";
     if let Some(name) = project_id.strip_prefix(PREFIX) {
-        return name.to_string();
+        return name
+            .split('/')
+            .next()
+            .unwrap_or(name)
+            .to_string();
     }
-    project_id.to_string()
+    project_id
+        .rsplit('/')
+        .next()
+        .unwrap_or(project_id)
+        .to_string()
 }
 
 fn layout_path(root: &Path) -> PathBuf {
@@ -307,8 +315,8 @@ mod tests {
 
         let saved = save_work_package_node_position(
             dir.path(),
-            "project--billing-redesign",
-            "billing-redesign--wp-invoicing",
+            "project/billing-redesign",
+            "project/billing-redesign/wp-invoicing",
             12.5,
             -8.0,
             None,
@@ -317,7 +325,7 @@ mod tests {
         .expect("save");
 
         assert_eq!(
-            saved.projects["billing-redesign"]["billing-redesign--wp-invoicing"],
+            saved.projects["billing-redesign"]["project/billing-redesign/wp-invoicing"],
             NodePositionDto {
                 x: 12.5,
                 y: -8.0,
@@ -337,8 +345,8 @@ mod tests {
 
         save_work_package_node_position(
             dir.path(),
-            "project--billing-redesign",
-            "billing-redesign--wp-parent",
+            "project/billing-redesign",
+            "project/billing-redesign/wp-parent",
             0.0,
             0.0,
             Some(240.0),
@@ -349,8 +357,8 @@ mod tests {
         // A later position-only save (drag) must preserve the composite size.
         let moved = save_work_package_node_position(
             dir.path(),
-            "project--billing-redesign",
-            "billing-redesign--wp-parent",
+            "project/billing-redesign",
+            "project/billing-redesign/wp-parent",
             50.0,
             -25.0,
             None,
@@ -359,7 +367,7 @@ mod tests {
         .expect("save move");
 
         assert_eq!(
-            moved.projects["billing-redesign"]["billing-redesign--wp-parent"],
+            moved.projects["billing-redesign"]["project/billing-redesign/wp-parent"],
             NodePositionDto {
                 x: 50.0,
                 y: -25.0,
@@ -379,9 +387,9 @@ mod tests {
             kind: LAYOUT_KIND.to_string(),
             top_level: BTreeMap::new(),
             projects: BTreeMap::from([(
-                "project--billing-redesign".to_string(),
+                "project/billing-redesign".to_string(),
                 BTreeMap::from([(
-                    "billing-redesign--wp-invoicing".to_string(),
+                    "project/billing-redesign/wp-invoicing".to_string(),
                     NodePositionDto {
                         x: 1.0,
                         y: 2.0,
@@ -403,8 +411,8 @@ mod tests {
 
         let saved = save_work_package_node_position(
             dir.path(),
-            "project--billing-redesign",
-            "billing-redesign--wp-pdf-export",
+            "project/billing-redesign",
+            "project/billing-redesign/wp-pdf-export",
             3.0,
             4.0,
             None,
@@ -412,9 +420,9 @@ mod tests {
         )
         .expect("save");
 
-        assert!(!saved.projects.contains_key("project--billing-redesign"));
+        assert!(!saved.projects.contains_key("project/billing-redesign"));
         assert_eq!(
-            saved.projects["billing-redesign"]["billing-redesign--wp-invoicing"],
+            saved.projects["billing-redesign"]["project/billing-redesign/wp-invoicing"],
             NodePositionDto {
                 x: 1.0,
                 y: 2.0,
@@ -423,7 +431,7 @@ mod tests {
             }
         );
         assert_eq!(
-            saved.projects["billing-redesign"]["billing-redesign--wp-pdf-export"],
+            saved.projects["billing-redesign"]["project/billing-redesign/wp-pdf-export"],
             NodePositionDto {
                 x: 3.0,
                 y: 4.0,
@@ -440,8 +448,8 @@ mod tests {
 
         save_work_package_node_position(
             dir.path(),
-            "project--billing-redesign",
-            "billing-redesign--wp-invoicing",
+            "project/billing-redesign",
+            "project/billing-redesign/wp-invoicing",
             1.0,
             2.0,
             None,
@@ -452,7 +460,7 @@ mod tests {
         let layout = remove_work_package_node_position(
             dir.path(),
             "billing-redesign",
-            "billing-redesign--wp-invoicing",
+            "project/billing-redesign/wp-invoicing",
         )
         .expect("remove");
 
@@ -466,11 +474,11 @@ mod tests {
         fs::create_dir_all(dir.path().join(".fits")).expect("fits dir");
 
         let saved =
-            save_top_level_node_position(dir.path(), "initiative--alpha", 42.0, -17.0, None, None)
+            save_top_level_node_position(dir.path(), "initiative/alpha", 42.0, -17.0, None, None)
                 .expect("save");
 
         assert_eq!(
-            saved.top_level["initiative--alpha"],
+            saved.top_level["initiative/alpha"],
             NodePositionDto {
                 x: 42.0,
                 y: -17.0,
@@ -494,7 +502,7 @@ mod tests {
                 version: 1,
                 kind: LAYOUT_KIND.to_string(),
                 top_level: BTreeMap::from([(
-                    "initiative--alpha".to_string(),
+                    "initiative/alpha".to_string(),
                     NodePositionDto {
                         x: 1.0,
                         y: 2.0,
@@ -507,7 +515,7 @@ mod tests {
         )
         .expect("save");
 
-        let layout = remove_top_level_node_position(dir.path(), "initiative--alpha").expect("remove");
+        let layout = remove_top_level_node_position(dir.path(), "initiative/alpha").expect("remove");
         assert!(layout.top_level.is_empty());
         assert!(!layout_path(dir.path()).is_file());
     }
