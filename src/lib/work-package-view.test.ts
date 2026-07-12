@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import registry from "../fixtures/example-roadmap/.fits/registry.json";
-import links from "../fixtures/example-roadmap/links/links.json";
-import { parseRoadmapGraph } from "./graph";
+import { loadBundledExampleGraph } from "./example-roadmap";
 import {
   buildCompoundWorkPackageView,
   buildParentRelations,
@@ -13,7 +11,7 @@ import {
 } from "./work-package-view";
 
 describe("work-package-view", () => {
-  const graph = parseRoadmapGraph("/example", registry, links);
+  const graph = loadBundledExampleGraph();
   const projectId = "project/billing-redesign";
 
   it("identifies parent_of links", () => {

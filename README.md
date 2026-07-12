@@ -67,7 +67,7 @@ npm run tauri dev -- -- -- --roadmap /path/to/roadmap
 cargo run --manifest-path src-tauri/Cargo.toml -- /path/to/roadmap
 ./src-tauri/target/debug/bellman-gui /path/to/roadmap
 ```
-3. Click **Open roadmap…** (toolbar), use **File → Open Roadmap…**, or press **Ctrl+O** / **Cmd+O** and select a bellman roadmap root directory.
+3. Use **File → Open Roadmap…** (or **Ctrl+O** / **Cmd+O**) to pick a bellman roadmap root directory. Use **File → Show Example Roadmap** to return to the bundled demo graph.
 4. Pan, zoom, and click nodes to explore connections (parent/child and precedence links).
 
 Roadmap data is read from:

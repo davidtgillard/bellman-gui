@@ -86,6 +86,7 @@ interface RoadmapGraphProps {
   links: GraphViewLink[];
   visibleNodeIds?: ReadonlySet<string>;
   emptyMessage?: string;
+  emptyAction?: { label: string; onClick: () => void };
   focusNodeId?: string | null;
   selectedNodeId?: string | null;
   onNodeClick?: (nodeId: string) => void;
@@ -518,6 +519,7 @@ export function RoadmapGraph({
   links,
   visibleNodeIds,
   emptyMessage = "Open a bellman roadmap folder to view its graph.",
+  emptyAction,
   focusNodeId = null,
   selectedNodeId = null,
   onNodeClick,
@@ -2095,6 +2097,15 @@ export function RoadmapGraph({
       {nodes.length === 0 || allTypesHidden ? (
         <div className="graph-empty graph-empty-overlay" aria-live="polite">
           <p>{emptyMessage}</p>
+          {emptyAction ? (
+            <button
+              type="button"
+              className="graph-empty-action"
+              onClick={emptyAction.onClick}
+            >
+              {emptyAction.label}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {contextMenuState && contextMenu

@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import registry from "../fixtures/example-roadmap/.fits/registry.json";
-import links from "../fixtures/example-roadmap/links/links.json";
 import {
   canBeLinkFinish,
   canBeLinkStart,
@@ -14,17 +12,17 @@ import {
   nodeTypeLabel,
   wrapLabelAtHyphens,
   graphNodeDisplayLabel,
-  parseRoadmapGraph,
   normalizeRoadmapGraphData,
   deduplicateGraphNodes,
   topLevelGraphNodes,
   workPackageBelongsToProject,
   workPackageProjectName,
 } from "./graph";
+import { loadBundledExampleGraph } from "./example-roadmap";
 import { toCytoscapeElements } from "./cytoscape-graph";
 
 describe("parseRoadmapGraph", () => {
-  const graph = parseRoadmapGraph("/example", registry, links);
+  const graph = loadBundledExampleGraph();
 
   it("parses example fixture nodes and links", () => {
     expect(graph.nodes).toHaveLength(6);

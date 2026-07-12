@@ -19,6 +19,7 @@
     "tauri": "npm run prepare-sidecar && tauri"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.12.4",
     "@codemirror/lint": "^6.9.7",

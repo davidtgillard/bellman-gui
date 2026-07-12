@@ -89,7 +89,7 @@ test.describe("undo persistence", () => {
       states: [base, withMilestone],
       index: 1,
     });
-    await setupPage(page, baseScenario());
+    await setupPage(page, baseScenario(), { clearStorage: false });
 
     const legend = page.getByRole("complementary", { name: "Node types" });
 

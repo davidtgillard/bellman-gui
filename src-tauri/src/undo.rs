@@ -95,6 +95,7 @@ fn lock_err<T>(_: PoisonError<T>) -> String {
 
 fn is_excluded_managed_file(rel: &Path) -> bool {
     rel == Path::new(UNDO_HISTORY_FILE)
+        || rel == crate::node_editor_history::history_file_rel()
 }
 
 fn is_editable_roadmap(root: &Path) -> bool {
@@ -627,8 +628,18 @@ mod tests {
             write(&root.join("goals/new-goal.md"), "# new goal\n");
         });
 
+        write(
+            &root.join(crate::node_editor_history::history_file_rel()),
+            r#"{"version":1,"kind":"bellman-gui-node-editor-history","nodes":{}}"#,
+        );
+
         let snapshot = capture(root).expect("capture");
         assert!(!snapshot.contains_key(&PathBuf::from(UNDO_HISTORY_FILE)));
+        assert!(
+            !snapshot.contains_key(&PathBuf::from(
+                crate::node_editor_history::history_file_rel()
+            ))
+        );
         assert!(history_path(root).is_file());
     }
 

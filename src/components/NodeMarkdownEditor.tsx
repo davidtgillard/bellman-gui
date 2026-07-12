@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import CodeMirror from "@uiw/react-codemirror";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
-import { EditorView } from "@codemirror/view";
+import { keymap, EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import {
@@ -12,8 +12,20 @@ import {
   validateNodeMarkdown,
   type ContentValidationContext,
 } from "../lib/node-content-validation";
+import { setActiveMarkdownEditor } from "../lib/active-markdown-editor";
+import { history, historyKeymap } from "../lib/codemirror-history";
+import {
+  initialStateFromHistory,
+  loadNodeEditorHistory,
+  persistNodeEditorHistory,
+  type NodeEditorHistoryEntry,
+} from "../lib/node-editor-history";
+import { nodeLabel } from "../lib/graph";
+
+const HISTORY_DEPTH = 50;
 
 interface NodeMarkdownEditorProps {
+  roadmapRoot: string;
   nodeId: string;
   nodeType: string;
   initialMarkdown: string;
@@ -25,8 +37,7 @@ interface NodeMarkdownEditorProps {
 }
 
 function expectedSlugFor(nodeId: string): string {
-  const segments = nodeId.split("--");
-  return segments[segments.length - 1] ?? nodeId;
+  return nodeLabel(nodeId);
 }
 
 const editorTheme = EditorView.theme(
@@ -76,6 +87,7 @@ const editorHighlight = HighlightStyle.define([
 ]);
 
 export function NodeMarkdownEditor({
+  roadmapRoot,
   nodeId,
   nodeType,
   initialMarkdown,
@@ -87,6 +99,11 @@ export function NodeMarkdownEditor({
 }: NodeMarkdownEditorProps) {
   const [value, setValue] = useState(initialMarkdown);
   const [showPreview, setShowPreview] = useState(false);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [restoredHistory, setRestoredHistory] =
+    useState<NodeEditorHistoryEntry | null>(null);
+  const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const viewRef = useRef<EditorView | null>(null);
 
   const context = useMemo<ContentValidationContext>(
     () => ({ nodeType, expectedSlug: expectedSlugFor(nodeId) }),
@@ -105,6 +122,33 @@ export function NodeMarkdownEditor({
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void loadNodeEditorHistory(roadmapRoot, nodeId, initialMarkdown)
+      .then((entry) => {
+        if (!cancelled) {
+          setRestoredHistory(entry);
+          setHistoryReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRestoredHistory(null);
+          setHistoryReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roadmapRoot, nodeId, initialMarkdown]);
+
+  useEffect(() => {
+    return () => {
+      setActiveMarkdownEditor(null);
+      viewRef.current = null;
+    };
+  }, []);
+
   const lintExtension = useMemo(
     () =>
       linter((view: EditorView): Diagnostic[] => {
@@ -120,6 +164,21 @@ export function NodeMarkdownEditor({
     [context],
   );
 
+  const focusBridge = useMemo(
+    () =>
+      EditorView.domEventHandlers({
+        focus: (_event, view) => {
+          setActiveMarkdownEditor(view);
+          return false;
+        },
+        blur: () => {
+          setActiveMarkdownEditor(null);
+          return false;
+        },
+      }),
+    [],
+  );
+
   const extensions = useMemo(
     () => [
       markdown(),
@@ -127,15 +186,33 @@ export function NodeMarkdownEditor({
       lintExtension,
       lintGutter(),
       EditorView.lineWrapping,
+      history({ minDepth: HISTORY_DEPTH }),
+      keymap.of(historyKeymap),
+      focusBridge,
     ],
-    [lintExtension],
+    [focusBridge, lintExtension],
+  );
+
+  const initialState = useMemo(
+    () => initialStateFromHistory(restoredHistory),
+    [restoredHistory],
   );
 
   const handleSave = () => {
     if (saving || blocked || !dirty) {
       return;
     }
-    onSave(value);
+    const view = viewRef.current ?? editorRef.current?.view ?? null;
+    void (async () => {
+      if (view) {
+        try {
+          await persistNodeEditorHistory(roadmapRoot, nodeId, view.state);
+        } catch (error) {
+          console.error("[node-editor-history] failed to persist:", error);
+        }
+      }
+      onSave(value);
+    })();
   };
 
   return (
@@ -155,17 +232,38 @@ export function NodeMarkdownEditor({
         <article className="node-detail-markdown node-editor-preview">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
         </article>
+      ) : null}
+
+      {historyReady ? (
+        <div
+          className={
+            showPreview
+              ? "node-markdown-codemirror node-markdown-codemirror-hidden"
+              : "node-markdown-codemirror"
+          }
+          hidden={showPreview}
+          aria-hidden={showPreview}
+        >
+          <CodeMirror
+            ref={editorRef}
+            value={value}
+            theme={editorTheme}
+            minHeight="360px"
+            extensions={extensions}
+            initialState={initialState ?? undefined}
+            onChange={setValue}
+            onCreateEditor={(view) => {
+              viewRef.current = view;
+              if (view.hasFocus) {
+                setActiveMarkdownEditor(view);
+              }
+            }}
+            basicSetup={{ foldGutter: false, history: false }}
+            aria-label="Node markdown editor"
+          />
+        </div>
       ) : (
-        <CodeMirror
-          className="node-markdown-codemirror"
-          value={value}
-          theme={editorTheme}
-          minHeight="360px"
-          extensions={extensions}
-          onChange={setValue}
-          basicSetup={{ foldGutter: false }}
-          aria-label="Node markdown editor"
-        />
+        <p className="node-detail-status">Loading editor…</p>
       )}
 
       <div className="node-editor-problems" aria-label="Validation problems">

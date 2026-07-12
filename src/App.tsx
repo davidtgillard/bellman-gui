@@ -9,8 +9,6 @@ import { CreateNodeDialog } from "./components/CreateNodeDialog";
 import { NodeDetailPanel } from "./components/NodeDetailPanel";
 import { RoadmapGraph as RoadmapGraphView } from "./components/RoadmapGraph";
 import { NodeTypeLegend } from "./components/NodeTypeLegend";
-import exampleRegistry from "./fixtures/example-roadmap/.fits/registry.json";
-import exampleLinks from "./fixtures/example-roadmap/links/links.json";
 import {
   canCreateLinkFromNode,
   findAddedNodeId,
@@ -20,7 +18,6 @@ import {
   innerGraphForProject,
   nodeLabel,
   nodeTypeColor,
-  parseRoadmapGraph,
   topLevelGraphNodes,
   type GraphLink,
   type GraphNode,
@@ -30,6 +27,10 @@ import {
   type NodeKind,
 } from "./lib/graph";
 import {
+  graphEmptyMessageFor,
+  loadBundledExampleGraph,
+} from "./lib/example-roadmap";
+import {
   createLink,
   createNode,
   removeLink,
@@ -38,6 +39,11 @@ import {
   updateWorkPackage,
 } from "./lib/roadmap-api";
 import { redo, undo, undoState, type UndoStatus } from "./lib/undo-api";
+import {
+  isCodeMirrorEventTarget,
+  redoActiveMarkdownEditor,
+  undoActiveMarkdownEditor,
+} from "./lib/active-markdown-editor";
 import { traceUndo } from "./lib/undo-trace";
 import {
   applyNodePlacement,
@@ -96,7 +102,7 @@ import {
 import type { Update } from "@tauri-apps/plugin-updater";
 import "./App.css";
 
-const exampleGraph = parseRoadmapGraph("example", exampleRegistry, exampleLinks);
+const exampleGraph = loadBundledExampleGraph();
 const INITIAL_GRAPH_VIEW_STACK: GraphViewFrame[] = [{ kind: "top" }];
 
 function roadmapLayoutPersistable(root: string, editable: boolean): boolean {
@@ -542,6 +548,11 @@ function App() {
     }
   }, [applyGraph, refreshUndoState]);
 
+  const handleShowExample = useCallback(() => {
+    applyGraph(exampleGraph, { resetVisibleTypes: true });
+    void refreshUndoState(exampleGraph.root, exampleGraph.editable);
+  }, [applyGraph, refreshUndoState]);
+
   const applyUpdateOutcome = useCallback(
     (outcome: UpdateCheckOutcome, options: { interactive: boolean }) => {
       if (outcome.kind === "available") {
@@ -920,23 +931,33 @@ function App() {
       return;
     }
 
-    let unlisten: (() => void) | undefined;
+    let unlistenOpen: (() => void) | undefined;
+    let unlistenExample: (() => void) | undefined;
 
     void listen("open-roadmap", () => {
       void handleOpenRoadmap();
     }).then((dispose) => {
-      unlisten = dispose;
+      unlistenOpen = dispose;
+    });
+    void listen("show-example-roadmap", () => {
+      handleShowExample();
+    }).then((dispose) => {
+      unlistenExample = dispose;
     });
 
     return () => {
-      unlisten?.();
+      unlistenOpen?.();
+      unlistenExample?.();
     };
-  }, [handleOpenRoadmap]);
+  }, [handleOpenRoadmap, handleShowExample]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      if (isCodeMirrorEventTarget(event.target)) {
         return;
       }
       event.preventDefault();
@@ -961,10 +982,20 @@ function App() {
     let unlistenCheck: (() => void) | undefined;
     let unlistenAbout: (() => void) | undefined;
 
-    void listen("undo", () => void handleUndo()).then((dispose) => {
+    void listen("undo", () => {
+      if (undoActiveMarkdownEditor()) {
+        return;
+      }
+      void handleUndo();
+    }).then((dispose) => {
       unlistenUndo = dispose;
     });
-    void listen("redo", () => void handleRedo()).then((dispose) => {
+    void listen("redo", () => {
+      if (redoActiveMarkdownEditor()) {
+        return;
+      }
+      void handleRedo();
+    }).then((dispose) => {
       unlistenRedo = dispose;
     });
     void listen("check-for-updates", () => void handleCheckForUpdates(true)).then(
@@ -1410,13 +1441,14 @@ function App() {
     [graphViewStack],
   );
 
-  const graphEmptyMessage = inWorkPackageGraph
-    ? activeProjectId
-      ? `Project ${nodeLabel(activeProjectId)} has no work packages to display.`
-      : "This project has no work packages to display."
-    : nodes.length === 0
-      ? "Open a bellman roadmap folder to view its graph."
-      : "Select at least one node type to display.";
+  const graphEmptyMessage = graphEmptyMessageFor({
+    inWorkPackageGraph,
+    activeProjectLabel: activeProjectId ? nodeLabel(activeProjectId) : null,
+    roadmapRoot,
+    nodeCount: nodes.length,
+  });
+  const showExampleEmptyAction =
+    !inWorkPackageGraph && nodes.length === 0 && roadmapRoot !== "example";
 
   const handleDetailClose = useCallback(() => {
     if (!confirmDiscardIfDirty()) {
@@ -1624,6 +1656,11 @@ function App() {
             onSelectionClear={handleGraphSelectionClear}
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}
+            emptyAction={
+              showExampleEmptyAction
+                ? { label: "Show example roadmap", onClick: handleShowExample }
+                : undefined
+            }
             draggable
             editable={editable && roadmapRoot !== "example" && !inWorkPackageGraph}
             onNodeRename={
@@ -1674,6 +1711,7 @@ function App() {
               editing={nodeEditing}
               saving={nodeEditSaving}
               saveError={nodeEditError}
+              roadmapRoot={roadmapRoot}
               onStartEdit={handleStartNodeEdit}
               onCancelEdit={handleCancelNodeEdit}
               onSaveMarkdown={(markdown) => void handleSaveNodeMarkdown(markdown)}

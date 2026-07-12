@@ -2,6 +2,7 @@ import {
   countCalls,
   expect,
   openNodeContextMenu,
+  reloadApp,
   selectNode,
   setupPage,
   test,
@@ -161,7 +162,8 @@ test.describe("node content editing", () => {
 
     await page.getByRole("button", { name: "Preview" }).click();
 
-    await expect(page.locator(".cm-content")).toHaveCount(0);
+    await expect(page.locator(".node-markdown-codemirror-hidden")).toBeAttached();
+    await expect(page.locator(".cm-content")).not.toBeVisible();
     const preview = page.locator(".node-editor-preview");
     await expect(preview).toBeVisible();
     await expect(preview.getByRole("heading", { name: "Reduce churn" })).toBeVisible();
@@ -281,5 +283,141 @@ test.describe("node content editing", () => {
 
     await page.keyboard.press("Control+z");
     expect(await countCalls(page, "undo_command")).toBe(1);
+  });
+
+  test("ctrl+z while editing undoes text without calling undo_command", async ({
+    page,
+  }) => {
+    await setupPage(page, goalScenario());
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const content = page.locator(".cm-content");
+    await expect(content).toBeVisible();
+    await content.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" TEMP");
+    await expect(content).toContainText("TEMP");
+
+    await page.keyboard.press("Control+z");
+    await expect(content).not.toContainText("TEMP");
+    expect(await countCalls(page, "undo_command")).toBe(0);
+  });
+
+  test("editor undo history survives save and reopen", async ({ page }) => {
+    await setupPage(page, goalScenario());
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const content = page.locator(".cm-content");
+    await content.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" SURVIVE");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".cm-content")).toHaveCount(0);
+    expect(await countCalls(page, "save_node_editor_history_command")).toBe(1);
+
+    await page.getByRole("button", { name: "Edit" }).click();
+    const reopened = page.locator(".cm-content");
+    await expect(reopened).toBeVisible();
+    await expect(reopened).toContainText("SURVIVE");
+    await reopened.click();
+    await page.keyboard.press("Control+z");
+    await expect(reopened).not.toContainText("SURVIVE");
+    expect(await countCalls(page, "undo_command")).toBe(0);
+  });
+
+  test("editor undo history survives reload via disk", async ({ page }) => {
+    const savedMarkdown = `${GOAL_DETAIL.markdown} RELOAD`;
+
+    await setupPage(page, goalScenario());
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const content = page.locator(".cm-content");
+    await content.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" RELOAD");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".cm-content")).toHaveCount(0);
+    expect(await countCalls(page, "save_node_editor_history_command")).toBe(1);
+
+    await reloadApp(page, {
+      ...goalScenario(),
+      nodeDetail: { ...GOAL_DETAIL, markdown: savedMarkdown },
+    });
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const reopened = page.locator(".cm-content");
+    await expect(reopened).toBeVisible();
+    await expect(reopened).toContainText("RELOAD");
+    await reopened.click();
+    await page.keyboard.press("Control+z");
+    await expect(reopened).not.toContainText("RELOAD");
+    expect(await countCalls(page, "undo_command")).toBe(0);
+  });
+
+  test("editor undo history survives rename via stable GUID", async ({ page }) => {
+    const savedMarkdown = `${GOAL_DETAIL.markdown} RENAMED`;
+    const renamedId = "goal/cut-churn";
+
+    await setupPage(page, goalScenario());
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const content = page.locator(".cm-content");
+    await content.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" RENAMED");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".cm-content")).toHaveCount(0);
+
+    await page.evaluate(async (nodeId) => {
+      const internals = (
+        window as unknown as {
+          __TAURI_INTERNALS__?: {
+            invoke: (cmd: string, args: unknown) => Promise<unknown>;
+          };
+        }
+      ).__TAURI_INTERNALS__;
+      await internals?.invoke("rename_node_command", {
+        request: {
+          roadmap_root: "/roadmap",
+          node_id: nodeId,
+          node_type: "goal",
+          new_name: "cut-churn",
+        },
+      });
+    }, GOAL.id);
+
+    await reloadApp(page, {
+      ...goalScenario(),
+      states: [
+        {
+          root: "/roadmap",
+          editable: true,
+          nodes: [{ id: renamedId, type: "goal" }],
+          links: [],
+        },
+      ],
+      nodeDetail: {
+        ...GOAL_DETAIL,
+        node_id: renamedId,
+        title: "cut-churn",
+        markdown: savedMarkdown,
+        source_path: "/roadmap/goals/cut-churn.md",
+      },
+    });
+
+    await selectNode(page, renamedId, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+    const reopened = page.locator(".cm-content");
+    await expect(reopened).toBeVisible();
+    await expect(reopened).toContainText("RENAMED");
+    await reopened.click();
+    await page.keyboard.press("Control+z");
+    await expect(reopened).not.toContainText("RENAMED");
+    expect(await countCalls(page, "undo_command")).toBe(0);
   });
 });

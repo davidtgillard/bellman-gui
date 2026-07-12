@@ -13,6 +13,7 @@ interface NodeDetailPanelProps {
   editing: boolean;
   saving: boolean;
   saveError: string | null;
+  roadmapRoot: string;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveMarkdown: (markdown: string) => void;
@@ -47,6 +48,7 @@ export function NodeDetailPanel({
   editing,
   saving,
   saveError,
+  roadmapRoot,
   onStartEdit,
   onCancelEdit,
   onSaveMarkdown,
@@ -115,6 +117,7 @@ export function NodeDetailPanel({
       ) : editing ? (
         <NodeMarkdownEditor
           key={detail.nodeId}
+          roadmapRoot={roadmapRoot}
           nodeId={detail.nodeId}
           nodeType={detail.nodeType}
           initialMarkdown={detail.markdown}

@@ -3,6 +3,7 @@ mod cli;
 mod graph;
 mod graph_layout;
 mod node_detail;
+mod node_editor_history;
 mod roadmap_edit;
 mod settings;
 mod undo;
@@ -138,8 +139,19 @@ async fn remove_node_command(
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
     let label = format!("remove {} {}", request.node_type, request.node_id);
+    let node_guid =
+        crate::node_editor_history::guid_for_node(Path::new(&roadmap_root), &request.node_id).ok();
     let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     remove_node(&app, request).await?;
+    if let Some(guid) = node_guid {
+        if let Err(error) =
+            crate::node_editor_history::remove_node_editor_history_by_guid(Path::new(&roadmap_root), &guid)
+        {
+            eprintln!(
+                "[node-editor-history] failed to remove history for {guid}: {error}"
+            );
+        }
+    }
     record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
@@ -179,6 +191,28 @@ async fn save_node_markdown_command(
         node_detail::save_node_markdown(Path::new(&roadmap_root), &node_id, &markdown)?;
     record_edit(&state, &roadmap_root, label, before);
     Ok(detail)
+}
+
+#[tauri::command]
+fn load_node_editor_history_command(
+    roadmap_root: String,
+    node_id: String,
+    expected_doc: String,
+) -> Result<Option<node_editor_history::NodeEditorHistoryEntry>, String> {
+    node_editor_history::load_node_editor_history(
+        Path::new(&roadmap_root),
+        &node_id,
+        &expected_doc,
+    )
+}
+
+#[tauri::command]
+fn save_node_editor_history_command(
+    roadmap_root: String,
+    node_id: String,
+    entry: node_editor_history::NodeEditorHistoryEntry,
+) -> Result<(), String> {
+    node_editor_history::save_node_editor_history(Path::new(&roadmap_root), &node_id, entry)
 }
 
 #[tauri::command]
@@ -322,7 +356,15 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+O"),
             )?;
-            let file_menu = Submenu::with_items(app, "File", true, &[&open_roadmap])?;
+            let show_example = MenuItem::with_id(
+                app,
+                "show-example-roadmap",
+                "Show Example Roadmap",
+                true,
+                None::<&str>,
+            )?;
+            let file_menu =
+                Submenu::with_items(app, "File", true, &[&open_roadmap, &show_example])?;
             let undo_item =
                 MenuItem::with_id(app, "undo", "Undo", true, Some("CmdOrCtrl+Z"))?;
             let redo_item =
@@ -345,6 +387,9 @@ pub fn run() {
         .on_menu_event(|app, event| match event.id().0.as_str() {
             "open-roadmap" => {
                 let _ = app.emit("open-roadmap", ());
+            }
+            "show-example-roadmap" => {
+                let _ = app.emit("show-example-roadmap", ());
             }
             "undo" => {
                 let _ = app.emit("undo", ());
@@ -372,6 +417,8 @@ pub fn run() {
             remove_node_command,
             rename_node_command,
             save_node_markdown_command,
+            load_node_editor_history_command,
+            save_node_editor_history_command,
             update_work_package_command,
             undo_command,
             redo_command,

@@ -104,6 +104,7 @@ export interface GraphNodeState {
 }
 
 const PERSIST_KEY_PREFIX = "bellman:undo-history:";
+const EDITOR_HISTORY_KEY_PREFIX = "bellman:node-editor-history:";
 const LEGEND_VISIBILITY_KEY_PREFIX = "bellman:legend-visibility:";
 
 function scenarioState(scenario: Scenario): RoadmapState {
@@ -115,25 +116,47 @@ function scenarioState(scenario: Scenario): RoadmapState {
 }
 
 /**
- * Clears persisted legend visibility and undo history from localStorage.
+ * Clears persisted legend visibility, undo history, and editor history from localStorage
+ * once per setup token. Safe to register as an init script: reloads reuse the same token
+ * and skip clearing so disk-backed history survives `reloadApp`.
  * @param page - Playwright page to configure.
+ * @param clearToken - Unique token for this `setupPage` call.
  */
-export async function clearTestStorage(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < (globalThis.localStorage?.length ?? 0); i += 1) {
-      const key = globalThis.localStorage?.key(i);
-      if (
-        key &&
-        (key.startsWith(PERSIST_KEY_PREFIX) || key.startsWith(LEGEND_VISIBILITY_KEY_PREFIX))
-      ) {
-        keysToRemove.push(key);
+export async function clearTestStorage(page: Page, clearToken: string): Promise<void> {
+  await page.addInitScript(
+    ({ undoPrefix, editorPrefix, legendPrefix, token }) => {
+      const flagKey = "bellman:storage-clear-token";
+      try {
+        if (globalThis.sessionStorage?.getItem(flagKey) === token) {
+          return;
+        }
+        globalThis.sessionStorage?.setItem(flagKey, token);
+      } catch {
+        // Fall through and clear if sessionStorage is unavailable.
       }
-    }
-    for (const key of keysToRemove) {
-      globalThis.localStorage?.removeItem(key);
-    }
-  });
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < (globalThis.localStorage?.length ?? 0); i += 1) {
+        const key = globalThis.localStorage?.key(i);
+        if (
+          key &&
+          (key.startsWith(undoPrefix) ||
+            key.startsWith(editorPrefix) ||
+            key.startsWith(legendPrefix))
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      for (const key of keysToRemove) {
+        globalThis.localStorage?.removeItem(key);
+      }
+    },
+    {
+      undoPrefix: PERSIST_KEY_PREFIX,
+      editorPrefix: EDITOR_HISTORY_KEY_PREFIX,
+      legendPrefix: LEGEND_VISIBILITY_KEY_PREFIX,
+      token: clearToken,
+    },
+  );
 }
 
 /**
@@ -202,9 +225,17 @@ export async function waitForSettingsApplied(
  * Installs the fake Tauri IPC backend for the given scenario and loads the app.
  * @param page - Playwright page to configure.
  * @param scenario - Seed roadmap states and starting history index.
+ * @param options - Setup options.
+ * @param options.clearStorage - When false, skip wiping localStorage (for seeded persistence tests).
  */
-export async function setupPage(page: Page, scenario: Scenario): Promise<void> {
-  await clearTestStorage(page);
+export async function setupPage(
+  page: Page,
+  scenario: Scenario,
+  options?: { clearStorage?: boolean },
+): Promise<void> {
+  if (options?.clearStorage !== false) {
+    await clearTestStorage(page, `setup-${Date.now()}-${Math.random()}`);
+  }
   await page.addInitScript((seed) => {
     (window as unknown as { __TEST_SCENARIO__: unknown }).__TEST_SCENARIO__ = seed;
   }, scenario);

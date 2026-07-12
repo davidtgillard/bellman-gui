@@ -11,6 +11,7 @@
   const listeners = new Map();
   const calls = [];
   const PERSIST_KEY_PREFIX = "bellman:undo-history:";
+  const EDITOR_HISTORY_KEY_PREFIX = "bellman:node-editor-history:";
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -191,6 +192,63 @@
   }
 
   const savedNodeDetails = new Map();
+  const editorHistoryByGuid = new Map();
+  const nodeIdToGuid = new Map();
+
+  function editorHistoryStorageKey(root) {
+    return `${EDITOR_HISTORY_KEY_PREFIX}${root}`;
+  }
+
+  function loadEditorHistoryFromStorage() {
+    try {
+      const raw = globalThis.localStorage?.getItem(editorHistoryStorageKey(roadmapRoot));
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+      if (parsed.ids && typeof parsed.ids === "object") {
+        for (const [nodeId, guid] of Object.entries(parsed.ids)) {
+          nodeIdToGuid.set(nodeId, guid);
+        }
+      }
+      if (parsed.nodes && typeof parsed.nodes === "object") {
+        for (const [guid, entry] of Object.entries(parsed.nodes)) {
+          editorHistoryByGuid.set(guid, entry);
+        }
+      }
+    } catch {
+      // Ignore storage failures in tests.
+    }
+  }
+
+  function persistEditorHistory() {
+    try {
+      globalThis.localStorage?.setItem(
+        editorHistoryStorageKey(roadmapRoot),
+        JSON.stringify({
+          ids: Object.fromEntries(nodeIdToGuid.entries()),
+          nodes: Object.fromEntries(editorHistoryByGuid.entries()),
+        }),
+      );
+    } catch {
+      // Ignore storage failures in tests.
+    }
+  }
+
+  loadEditorHistoryFromStorage();
+
+  function guidForNode(nodeId) {
+    if (!nodeIdToGuid.has(nodeId)) {
+      const guid =
+        globalThis.crypto?.randomUUID?.() ||
+        `guid-${nodeIdToGuid.size + 1}-${String(nodeId).replace(/[^a-z0-9]+/gi, "-")}`;
+      nodeIdToGuid.set(nodeId, guid);
+    }
+    return nodeIdToGuid.get(nodeId);
+  }
 
   function currentNodeDetail(nodeId) {
     if (nodeId && savedNodeDetails.has(nodeId)) {
@@ -254,8 +312,15 @@
       }
       case "remove_node_command": {
         const next = clone(states[index]);
-        next.nodes = next.nodes.filter((node) => node.id !== request.node_id);
+        const removedId = request.node_id;
+        next.nodes = next.nodes.filter((node) => node.id !== removedId);
         next.label = "remove node";
+        if (nodeIdToGuid.has(removedId)) {
+          const guid = nodeIdToGuid.get(removedId);
+          nodeIdToGuid.delete(removedId);
+          editorHistoryByGuid.delete(guid);
+          persistEditorHistory();
+        }
         pushState(next);
         return currentGraph();
       }
@@ -264,8 +329,17 @@
         const nodeType = request.node_type || "goal";
         const oldId = request.node_id;
         const newName = (request.new_name || "").trim();
-        const prefix = `${nodeType}--`;
-        const newId = oldId.startsWith(prefix) ? `${prefix}${newName}` : newName;
+        const slashPrefix = `${nodeType}/`;
+        const dashPrefix = `${nodeType}--`;
+        let newId;
+        if (oldId.startsWith(slashPrefix)) {
+          const parent = oldId.slice(0, oldId.lastIndexOf("/") + 1);
+          newId = `${parent}${newName}`;
+        } else if (oldId.startsWith(dashPrefix)) {
+          newId = `${dashPrefix}${newName}`;
+        } else {
+          newId = newName;
+        }
         next.nodes = next.nodes.map((node) =>
           node.id === oldId ? { ...node, id: newId } : node,
         );
@@ -275,6 +349,21 @@
           target: link.target === oldId ? newId : link.target,
         }));
         next.label = `rename ${nodeType} ${oldId} -> ${newId}`;
+        if (nodeIdToGuid.has(oldId)) {
+          const guid = nodeIdToGuid.get(oldId);
+          nodeIdToGuid.delete(oldId);
+          nodeIdToGuid.set(newId, guid);
+          persistEditorHistory();
+        }
+        if (savedNodeDetails.has(oldId)) {
+          const detail = savedNodeDetails.get(oldId);
+          savedNodeDetails.delete(oldId);
+          savedNodeDetails.set(newId, {
+            ...detail,
+            node_id: newId,
+            title: newName,
+          });
+        }
         pushState(next);
         return {
           graph: currentGraph(),
@@ -283,6 +372,24 @@
       }
       case "load_node_detail_command":
         return currentNodeDetail(request.node_id);
+      case "load_node_editor_history_command": {
+        const guid = guidForNode(cmdArgs.nodeId);
+        const entry = editorHistoryByGuid.get(guid);
+        if (!entry || entry.doc !== cmdArgs.expectedDoc) {
+          if (entry && entry.doc !== cmdArgs.expectedDoc) {
+            editorHistoryByGuid.delete(guid);
+            persistEditorHistory();
+          }
+          return null;
+        }
+        return clone(entry);
+      }
+      case "save_node_editor_history_command": {
+        const guid = guidForNode(cmdArgs.nodeId);
+        editorHistoryByGuid.set(guid, clone(cmdArgs.entry));
+        persistEditorHistory();
+        return null;
+      }
       case "save_node_markdown_command": {
         if (scenario.saveError) {
           throw new Error(scenario.saveError);
