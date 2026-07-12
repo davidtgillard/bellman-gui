@@ -29,6 +29,24 @@ export const EMPTY_WORK_PACKAGE_LAYOUT: WorkPackageLayout = {
   projects: {},
 };
 
+/** Deterministic layout for the read-only bundled example roadmap. */
+export const EXAMPLE_WORK_PACKAGE_LAYOUT: WorkPackageLayout = {
+  version: 1,
+  kind: "bellman-gui-work-package-layout",
+  topLevel: {
+    "goal/reduce-churn": { x: -160, y: -40 },
+    "initiative/explore-ml-ranking": { x: 140, y: -70 },
+    "project/billing-redesign": { x: -20, y: 110 },
+    "milestone/ga-release": { x: 170, y: 100 },
+  },
+  projects: {
+    "billing-redesign": {
+      "project/billing-redesign/wp-invoicing": { x: 0, y: 0, w: 420, h: 280 },
+      "project/billing-redesign/wp-pdf-export": { x: 0, y: -24 },
+    },
+  },
+};
+
 export const MIN_NODE_DISTANCE = 85;
 
 interface WorkPackageLayoutDto {

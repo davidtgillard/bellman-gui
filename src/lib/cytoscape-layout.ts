@@ -1789,6 +1789,43 @@ export function collectDragPersistencePositions(
 }
 
 /**
+ * Persists top-level (non-compound) node positions after the user finishes a drag.
+ * Work-package compound graphs use scene drag handlers instead.
+ * @param cy - Cytoscape instance containing the graph nodes.
+ * @param onDragComplete - Called with positions that changed during the drag.
+ * @returns Cleanup function that removes drag listeners.
+ */
+export function installTopLevelDragPersistence(
+  cy: Core,
+  onDragComplete?: (positions: Record<string, NodePosition>) => void,
+): () => void {
+  const onGrab = (event: EventObject) => {
+    const node = event.target as NodeSingular;
+    const position = node.position();
+    node.scratch(DRAG_START_POSITION_KEY, { x: position.x, y: position.y });
+  };
+
+  const onDragFree = (event: EventObject) => {
+    const node = event.target as NodeSingular;
+    const start = node.scratch(DRAG_START_POSITION_KEY) as NodePosition | undefined;
+    node.removeScratch(DRAG_START_POSITION_KEY);
+    const position = node.position();
+    const moved = !start || start.x !== position.x || start.y !== position.y;
+    if (moved) {
+      onDragComplete?.(collectDragPersistencePositions(cy, node.id()));
+    }
+  };
+
+  cy.on("grab", "node", onGrab);
+  cy.on("dragfree", "node", onDragFree);
+
+  return () => {
+    cy.removeListener("grab", "node", onGrab);
+    cy.removeListener("dragfree", "node", onDragFree);
+  };
+}
+
+/**
  * Installs drag constraints that keep composite work packages coherent:
  * - Dragging a composite (parent) moves it and its children rigidly; its size,
  *   shape, and the relative placement of its children are untouched.

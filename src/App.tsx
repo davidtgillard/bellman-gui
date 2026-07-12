@@ -48,6 +48,7 @@ import { traceUndo } from "./lib/undo-trace";
 import {
   applyNodePlacement,
   EMPTY_WORK_PACKAGE_LAYOUT,
+  EXAMPLE_WORK_PACKAGE_LAYOUT,
   fromWorkPackageLayoutDto,
   loadWorkPackageLayout,
   normalizeLayoutForNodes,
@@ -168,7 +169,7 @@ function App() {
   const nodeDetailRequestRef = useRef(0);
   const legendPersistReadyRef = useRef(false);
   const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
-    EMPTY_WORK_PACKAGE_LAYOUT,
+    EXAMPLE_WORK_PACKAGE_LAYOUT,
   );
   const [hydratedLayoutKey, setHydratedLayoutKey] = useState<string | null>(() =>
     roadmapLayoutPersistable(exampleGraph.root, exampleGraph.editable) ? null : "",
@@ -210,9 +211,17 @@ function App() {
       setNodeDetailError(null);
       setNodeDetailLoading(false);
       if (!roadmapLayoutPersistable(graph.root, graph.editable)) {
-        setWorkPackageLayout(EMPTY_WORK_PACKAGE_LAYOUT);
+        setWorkPackageLayout(
+          graph.root === "example"
+            ? EXAMPLE_WORK_PACKAGE_LAYOUT
+            : EMPTY_WORK_PACKAGE_LAYOUT,
+        );
         setHydratedLayoutKey("");
+        setLayoutSyncToken((token) => token + 1);
       } else {
+        // Drop any prior example/demo layout so overlapping node ids cannot
+        // look like a hydrated preset before the real file load finishes.
+        setWorkPackageLayout(EMPTY_WORK_PACKAGE_LAYOUT);
         setHydratedLayoutKey(null);
       }
     } else {
@@ -498,7 +507,7 @@ function App() {
 
   const handleAutoLayoutComplete = useCallback(
     (positions: Record<string, NodePosition>) => {
-      if (!roadmapLayoutPersistable(roadmapRoot, editable) || !layoutHydrated) {
+      if (!layoutHydrated) {
         return;
       }
 
@@ -521,6 +530,11 @@ function App() {
       );
       workPackageLayoutRef.current = nextLayout;
       setWorkPackageLayout(nextLayout);
+
+      if (!roadmapLayoutPersistable(roadmapRoot, editable)) {
+        return;
+      }
+
       void saveGraphLayout(roadmapRoot, nextLayout).catch((caught) =>
         setError(String(caught)),
       );
@@ -1687,11 +1701,7 @@ function App() {
                 ? handleCompoundSizesMeasured
                 : undefined
             }
-            onAutoLayoutComplete={
-              roadmapLayoutPersistable(roadmapRoot, editable)
-                ? handleAutoLayoutComplete
-                : undefined
-            }
+            onAutoLayoutComplete={handleAutoLayoutComplete}
           />
           {!inWorkPackageGraph ? (
             <NodeTypeLegend

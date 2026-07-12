@@ -82,6 +82,7 @@ test.describe("keyboard pan", () => {
   test("max pan speed comes from global settings", async ({ page }) => {
     await setupPage(page, graphScenario({ max_pan_speed: 180 }));
     await waitForGraphPan(page);
+    await page.locator(".graph-viewport").click();
 
     const slowBefore = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
@@ -89,10 +90,8 @@ test.describe("keyboard pan", () => {
     await page.keyboard.up("ArrowRight");
     const slowAfter = await getGraphPan(page);
     const slowDistance = Math.abs(slowAfter.x - slowBefore.x);
+    expect(slowDistance).toBeGreaterThan(0);
 
-    await page.addInitScript((seed) => {
-      (window as unknown as { __TEST_SCENARIO__: unknown }).__TEST_SCENARIO__ = seed;
-    }, graphScenario({ max_pan_speed: 1800 }));
     await reloadApp(page, graphScenario({ max_pan_speed: 1800 }));
     await waitForGraphPan(page);
     await expect
@@ -106,6 +105,7 @@ test.describe("keyboard pan", () => {
         return calls >= 1;
       })
       .toBe(true);
+    await page.locator(".graph-viewport").click();
 
     const fastBefore = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyNodePlacement,
   defaultNodePosition,
+  EXAMPLE_WORK_PACKAGE_LAYOUT,
   fromWorkPackageLayoutDto,
   MIN_NODE_DISTANCE,
   projectLayoutKey,
@@ -16,8 +17,21 @@ import {
   withoutNodePosition,
   withoutTopLevelNodePosition,
 } from "./graph-layout";
+import { loadBundledExampleGraph } from "./example-roadmap";
+import { topLevelGraphNodes } from "./graph";
 
 describe("graph-layout", () => {
+  it("ships distinct positions for every bundled example top-level node", () => {
+    const exampleNodes = topLevelGraphNodes(loadBundledExampleGraph().nodes);
+    const positions = topLevelNodePositions(EXAMPLE_WORK_PACKAGE_LAYOUT);
+    const coords = exampleNodes.map((node) => {
+      const position = positions[node.id];
+      expect(position).toBeDefined();
+      return `${position!.x},${position!.y}`;
+    });
+    expect(new Set(coords).size).toBe(exampleNodes.length);
+  });
+
   it("normalizes backend layout payloads", () => {
     const layout = fromWorkPackageLayoutDto({
       version: 1,

@@ -143,6 +143,7 @@
   let index = history.index;
   const persistUndo = history.persistUndo;
   const roadmapRoot = history.root;
+  let persistedLayout = scenario.layout ? clone(scenario.layout) : null;
 
   function persistHistory() {
     if (!persistUndo) {
@@ -433,18 +434,43 @@
         return currentGraph();
       }
       case "load_work_package_layout_command":
-      case "save_work_package_node_position_command":
-      case "remove_work_package_node_position_command":
-      case "save_graph_layout_command":
-      case "save_top_level_node_position_command":
-      case "remove_top_level_node_position_command":
-        return (
-          (window.__TEST_SCENARIO__ || scenario).layout || {
+        return clone(
+          persistedLayout ||
+            (window.__TEST_SCENARIO__ || scenario).layout || {
+              version: 1,
+              kind: "bellman-gui-work-package-layout",
+              top_level: {},
+              projects: {},
+            },
+        );
+      case "save_graph_layout_command": {
+        const layout = clone(
+          cmdArgs.layout || {
             version: 1,
             kind: "bellman-gui-work-package-layout",
             top_level: {},
             projects: {},
-          }
+          },
+        );
+        persistedLayout = layout;
+        scenario.layout = layout;
+        if (window.__TEST_SCENARIO__) {
+          window.__TEST_SCENARIO__.layout = layout;
+        }
+        return layout;
+      }
+      case "save_work_package_node_position_command":
+      case "remove_work_package_node_position_command":
+      case "save_top_level_node_position_command":
+      case "remove_top_level_node_position_command":
+        return clone(
+          persistedLayout ||
+            (window.__TEST_SCENARIO__ || scenario).layout || {
+              version: 1,
+              kind: "bellman-gui-work-package-layout",
+              top_level: {},
+              projects: {},
+            },
         );
       case "load_settings_command": {
         const liveScenario = window.__TEST_SCENARIO__ || {};

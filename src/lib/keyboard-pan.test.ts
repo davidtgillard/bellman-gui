@@ -1,3 +1,7 @@
+/* eslint-disable jsdoc/check-tag-names -- Vitest environment pragma */
+/**
+ * @vitest-environment jsdom
+ */
 import { describe, expect, it } from "vitest";
 import {
   KeyboardPanController,
@@ -78,5 +82,30 @@ describe("shouldAllowKeyboardPan", () => {
   it("allows pan for ordinary event targets", () => {
     const event = { target: {} } as KeyboardEvent;
     expect(shouldAllowKeyboardPan(event)).toBe(true);
+  });
+
+  it("allows pan when a legend checkbox is focused", () => {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    document.body.appendChild(checkbox);
+    checkbox.focus();
+    try {
+      const event = { target: checkbox } as unknown as KeyboardEvent;
+      expect(shouldAllowKeyboardPan(event)).toBe(true);
+    } finally {
+      checkbox.remove();
+    }
+  });
+
+  it("blocks pan for text inputs", () => {
+    const input = document.createElement("input");
+    input.type = "text";
+    document.body.appendChild(input);
+    try {
+      const event = { target: input } as unknown as KeyboardEvent;
+      expect(shouldAllowKeyboardPan(event)).toBe(false);
+    } finally {
+      input.remove();
+    }
   });
 });

@@ -135,6 +135,7 @@ test.describe("composite graph interaction", () => {
 
     await tapGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
+    await page.locator(".graph-container").focus();
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
@@ -155,6 +156,7 @@ test.describe("composite graph interaction", () => {
 
     await clickGraphBackground(page);
     await expect(page.locator(".node-detail-sidebar")).toHaveCount(0);
+    await page.locator(".graph-container").focus();
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
@@ -177,6 +179,7 @@ test.describe("composite graph interaction", () => {
 
     await clickGraphBackground(page);
     await expect(sidebar).toHaveCount(0);
+    await page.locator(".graph-container").focus();
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");

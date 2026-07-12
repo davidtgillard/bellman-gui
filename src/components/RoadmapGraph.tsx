@@ -27,6 +27,7 @@ import {
   centerSelectedNodeInViewportIfObscured,
   compoundGraphMaxZoom,
   graphNodeModelPosition,
+  installTopLevelDragPersistence,
   installWheelZoom,
   redrawGraphSynchronously,
   runLayoutWhenContainerReady,
@@ -544,6 +545,7 @@ export function RoadmapGraph({
   const layoutCleanupRef = useRef<(() => void) | null>(null);
   const sceneChildDragCleanupRef = useRef<(() => void) | null>(null);
   const sceneParentDragCleanupRef = useRef<(() => void) | null>(null);
+  const topLevelDragCleanupRef = useRef<(() => void) | null>(null);
   const wheelZoomCleanupRef = useRef<(() => void) | null>(null);
   const graphStructureKeyRef = useRef("");
   const sceneRef = useRef<CompoundGraphScene | null>(null);
@@ -1052,13 +1054,19 @@ export function RoadmapGraph({
 
       if (
         event.defaultPrevented ||
-        event.repeat ||
         event.ctrlKey ||
         event.metaKey ||
         event.altKey ||
         !isArrowPanKey(event.key) ||
         !shouldAllowKeyboardPan(event)
       ) {
+        return;
+      }
+
+      // Browser key-repeat should not re-enter beginHold once a hold is active,
+      // but if the initial keydown was ignored (e.g. transient sidebar focus),
+      // allow a later repeat to start panning once focus is valid again.
+      if (event.repeat && controller.isActive()) {
         return;
       }
 
@@ -1128,6 +1136,8 @@ export function RoadmapGraph({
     sceneChildDragCleanupRef.current = null;
     sceneParentDragCleanupRef.current?.();
     sceneParentDragCleanupRef.current = null;
+    topLevelDragCleanupRef.current?.();
+    topLevelDragCleanupRef.current = null;
     wheelZoomCleanupRef.current?.();
     wheelZoomCleanupRef.current = null;
 
@@ -1236,19 +1246,24 @@ export function RoadmapGraph({
             cy.nodes().unselect();
             node.select();
             onNodeClickRef.current?.(nodeId);
+            lastSelectedCompoundLeafRef.current = nodeId;
+            graphContainerRef.current?.focus({ preventScroll: true });
           }
           return;
         }
         node.trigger("mousedown");
         node.trigger("tap");
+        graphContainerRef.current?.focus({ preventScroll: true });
       };
       testWindow.__TEST__.tapGraphBackground = () => {
         closeContextMenu();
         const cleared = onSelectionClearRef.current?.() ?? false;
         if (cleared) {
           cy.nodes().unselect();
-          graphContainerRef.current?.focus({ preventScroll: true });
         }
+        // Always return keyboard focus to the graph so arrow pan works even if
+        // selection was already clear.
+        graphContainerRef.current?.focus({ preventScroll: true });
       };
       testWindow.__TEST__.getGraphNodeState = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
@@ -1443,6 +1458,8 @@ export function RoadmapGraph({
       if (!node.empty()) {
         node.select();
       }
+      lastSelectedCompoundLeafRef.current = childId;
+      graphContainerRef.current?.focus({ preventScroll: true });
     };
 
     compoundLeafTapRef.current = (childId, wasSelected) => {
@@ -1694,6 +1711,8 @@ export function RoadmapGraph({
       sceneChildDragCleanupRef.current = null;
       sceneParentDragCleanupRef.current?.();
       sceneParentDragCleanupRef.current = null;
+      topLevelDragCleanupRef.current?.();
+      topLevelDragCleanupRef.current = null;
       wheelZoomCleanupRef.current?.();
       wheelZoomCleanupRef.current = null;
       resizeObserver.disconnect();
@@ -1746,7 +1765,6 @@ export function RoadmapGraph({
 
     if (structureChanged) {
       const preservedViewport = { pan: cy.pan(), zoom: cy.zoom() };
-      const hadCompletedLayout = layoutCompletedRef.current;
       const compoundModeChanged =
         previousCompoundGraphForLayoutRef.current !== compoundGraph;
       graphStructureKeyRef.current = structureKey;
@@ -1772,19 +1790,17 @@ export function RoadmapGraph({
       const hasCompoundNodesAfter =
         compoundGraph && nodes.some((node) => Boolean(node.parent || node.data?.isCompound));
 
-      // Renames rebuild elements in the same view. Keep the camera then.
-      // Entering/leaving the work-package graph must still fit / re-layout.
-      if (
-        !compoundModeChanged &&
-        (hadCompletedLayout || usesPresetLayout(nodePositions))
-      ) {
-        if (usesPresetLayout(nodePositions) && !hasCompoundNodesAfter) {
+      // Renames rebuild elements in the same view. Keep the camera when we can
+      // restore saved positions. Without a preset layout, fall through so
+      // auto-layout can place nodes (e.g. switching to the bundled example).
+      if (!compoundModeChanged && usesPresetLayout(nodePositions)) {
+        if (!hasCompoundNodesAfter) {
           applySavedNodePositions(cy, nodePositions);
         }
         cy.viewport(preservedViewport);
         layoutCompletedRef.current = true;
         applyGraphVisibility(cy, true);
-        if (hasCompoundNodesAfter && usesPresetLayout(nodePositions)) {
+        if (hasCompoundNodesAfter) {
           initializeCompoundScene(cy);
         }
         lastLayoutSyncTokenRef.current = layoutSyncToken;
@@ -1883,6 +1899,27 @@ export function RoadmapGraph({
         : TOP_LEVEL_GRAPH_MAX_ZOOM,
     );
   }, [compoundGraph, compoundReferenceZoom, cyReady]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy || !draggable || compoundGraph) {
+      topLevelDragCleanupRef.current?.();
+      topLevelDragCleanupRef.current = null;
+      return;
+    }
+
+    topLevelDragCleanupRef.current?.();
+    topLevelDragCleanupRef.current = installTopLevelDragPersistence(cy, (positions) => {
+      redrawGraphSynchronously(cy);
+      setGraphSelectionRevision((revision) => revision + 1);
+      onNodePositionChangeRef.current?.(positions);
+    });
+
+    return () => {
+      topLevelDragCleanupRef.current?.();
+      topLevelDragCleanupRef.current = null;
+    };
+  }, [compoundGraph, cyReady, draggable]);
 
   useEffect(() => {
     const shell = graphContainerRef.current;

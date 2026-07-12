@@ -169,7 +169,9 @@ export function shouldIgnoreKeyboardPanTarget(target: EventTarget | null): boole
     return false;
   }
   return Boolean(
-    target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']"),
+    target.closest(
+      "textarea, select, [contenteditable='true'], [role='dialog'], input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='reset'])",
+    ),
   );
 }
 
