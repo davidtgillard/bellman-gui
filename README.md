@@ -4,7 +4,7 @@ Desktop graph viewer for [Bellman](https://github.com/davidtgillard/bellman) roa
 
 Bellman stores product roadmaps as markdown on disk and derives a pyfits graph for validation. This app visualizes that graph — initiatives, projects, work packages, milestones, goals, and their connections — in an interactive WebGL canvas powered by [Reagraph](https://reagraph.dev/).
 
-On first launch the app shows a bundled example roadmap. Pass a roadmap root on the command line to open it directly, or use **Open roadmap…** to pick any initialized bellman roadmap folder (one that contains `.fits/registry.json` from `bellman init`).
+On first launch the app shows a bundled example roadmap. After you open a roadmap folder, the next launch reopens that project when it is still available; otherwise it falls back to the example. Pass a roadmap root on the command line to open it directly (this also becomes the remembered project), or use **Open roadmap…** to pick any initialized bellman roadmap folder (one that contains `.fits/registry.json` from `bellman init`).
 
 ## Prerequisites
 
@@ -116,7 +116,7 @@ To inspect undo/redo stack activity while developing:
 
 Release AppImages check for updates in the background (at most once per 24 hours by default) and show a banner when a newer build is available. Use **Help → Check for Updates…** to check immediately, and **Update now** on the banner to download, install, and relaunch.
 
-Update settings live in `$XDG_CONFIG_HOME/bellman-gui/settings.json` (`update_check_interval_hours`, default `24`). Last-check state is stored in `update-state.json` next to that file.
+Update settings live in `$XDG_CONFIG_HOME/bellman-gui/settings.json` (`update_check_interval_hours`, default `24`; `last_roadmap_root` remembers the last opened project). Last-check state is stored in `update-state.json` next to that file.
 
 ## Releases
 

@@ -15,6 +15,9 @@ pub struct BellmanGuiSettingsDto {
     pub background_pan_enabled: bool,
     #[serde(default = "default_update_check_interval_hours")]
     pub update_check_interval_hours: f64,
+    /// Absolute path of the last successfully opened disk roadmap, if any.
+    #[serde(default)]
+    pub last_roadmap_root: Option<String>,
 }
 
 fn default_max_pan_speed() -> f64 {
@@ -31,6 +34,7 @@ impl Default for BellmanGuiSettingsDto {
             max_pan_speed: DEFAULT_MAX_PAN_SPEED,
             background_pan_enabled: false,
             update_check_interval_hours: DEFAULT_UPDATE_CHECK_INTERVAL_HOURS,
+            last_roadmap_root: None,
         }
     }
 }
@@ -89,12 +93,52 @@ pub fn load_settings() -> BellmanGuiSettingsDto {
         update_check_interval_hours: clamp_update_check_interval_hours(
             parsed.update_check_interval_hours,
         ),
+        last_roadmap_root: parsed
+            .last_roadmap_root
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+    }
+}
+
+pub fn save_settings(settings: &BellmanGuiSettingsDto) -> Result<(), String> {
+    let path = settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create settings directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let raw = serde_json::to_string_pretty(settings)
+        .map_err(|error| format!("failed to serialize settings: {error}"))?;
+    fs::write(&path, format!("{raw}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+/// Remembers the last opened disk roadmap, or clears it when `root` is `None`.
+pub fn set_last_roadmap_root(root: Option<String>) {
+    let mut settings = load_settings();
+    let next = root
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value != "example");
+    if settings.last_roadmap_root == next {
+        return;
+    }
+    settings.last_roadmap_root = next;
+    if let Err(error) = save_settings(&settings) {
+        eprintln!("[settings] failed to save last roadmap: {error}");
     }
 }
 
 #[tauri::command]
 pub fn load_settings_command() -> BellmanGuiSettingsDto {
     load_settings()
+}
+
+#[tauri::command]
+pub fn clear_last_roadmap_command() {
+    set_last_roadmap_root(None);
 }
 
 #[cfg(test)]
@@ -105,8 +149,18 @@ mod tests {
 
     #[test]
     fn defaults_when_settings_file_is_missing() {
+        let temp = TempDir::new().expect("temp dir");
+        let previous = env::var("XDG_CONFIG_HOME").ok();
+        env::set_var("XDG_CONFIG_HOME", temp.path());
+
         let settings = load_settings();
         assert_eq!(settings, BellmanGuiSettingsDto::default());
+
+        if let Some(value) = previous {
+            env::set_var("XDG_CONFIG_HOME", value);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
     }
 
     #[test]
@@ -201,6 +255,58 @@ mod tests {
 
         let settings = load_settings();
         assert_eq!(settings.max_pan_speed, MIN_MAX_PAN_SPEED);
+
+        if let Some(value) = previous {
+            env::set_var("XDG_CONFIG_HOME", value);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
+
+    #[test]
+    fn reads_last_roadmap_root_from_settings_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let config_dir = temp.path().join("bellman-gui");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::write(
+            config_dir.join("settings.json"),
+            r#"{ "last_roadmap_root": "/tmp/my-roadmap" }"#,
+        )
+        .expect("write settings");
+
+        let previous = env::var("XDG_CONFIG_HOME").ok();
+        env::set_var("XDG_CONFIG_HOME", temp.path());
+
+        let settings = load_settings();
+        assert_eq!(
+            settings.last_roadmap_root.as_deref(),
+            Some("/tmp/my-roadmap")
+        );
+
+        if let Some(value) = previous {
+            env::set_var("XDG_CONFIG_HOME", value);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
+
+    #[test]
+    fn set_last_roadmap_root_round_trips_through_settings_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let previous = env::var("XDG_CONFIG_HOME").ok();
+        env::set_var("XDG_CONFIG_HOME", temp.path());
+
+        set_last_roadmap_root(Some("/tmp/persisted-roadmap".into()));
+        assert_eq!(
+            load_settings().last_roadmap_root.as_deref(),
+            Some("/tmp/persisted-roadmap")
+        );
+
+        set_last_roadmap_root(None);
+        assert_eq!(load_settings().last_roadmap_root, None);
+
+        set_last_roadmap_root(Some("example".into()));
+        assert_eq!(load_settings().last_roadmap_root, None);
 
         if let Some(value) = previous {
             env::set_var("XDG_CONFIG_HOME", value);

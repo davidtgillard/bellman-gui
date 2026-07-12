@@ -565,6 +565,11 @@ function App() {
   const handleShowExample = useCallback(() => {
     applyGraph(exampleGraph, { resetVisibleTypes: true });
     void refreshUndoState(exampleGraph.root, exampleGraph.editable);
+    if (isTauri()) {
+      void invoke("clear_last_roadmap_command").catch((caught) => {
+        console.warn("[roadmap] failed to clear last roadmap:", caught);
+      });
+    }
   }, [applyGraph, refreshUndoState]);
 
   const applyUpdateOutcome = useCallback(

@@ -24,7 +24,9 @@ use roadmap_edit::{
     CreateLinkRequest, CreateNodeRequest, RemoveLinkRequest, RemoveNodeRequest, RenameNodeRequest,
     RenameNodeResponse, UpdateWorkPackageRequest,
 };
-use settings::load_settings_command;
+use settings::{
+    clear_last_roadmap_command, load_settings, load_settings_command, set_last_roadmap_root,
+};
 use crate::undo::{Snapshot, UndoState, UndoStateDto};
 use update_state::{touch_update_check_command, update_check_status_command};
 use std::path::{Path, PathBuf};
@@ -85,6 +87,7 @@ async fn pick_and_load_roadmap(
 
     let graph = load_roadmap_graph(path_ref)?;
     state.load_or_reset(path_ref)?;
+    set_last_roadmap_root(Some(graph.root.clone()));
     Ok(Some(graph))
 }
 
@@ -328,14 +331,29 @@ fn load_initial_roadmap(
     cli: tauri::State<CliOptions>,
     state: tauri::State<UndoState>,
 ) -> Result<Option<graph::RoadmapGraphDto>, String> {
-    match cli.initial_roadmap_root.as_ref() {
-        Some(path) => {
-            let graph = load_roadmap_graph(path.as_path())?;
-            state.load_or_reset(path.as_path())?;
-            Ok(Some(graph))
-        }
-        None => Ok(None),
+    if let Some(path) = cli.initial_roadmap_root.as_ref() {
+        let graph = load_roadmap_graph(path.as_path())?;
+        state.load_or_reset(path.as_path())?;
+        set_last_roadmap_root(Some(graph.root.clone()));
+        return Ok(Some(graph));
     }
+
+    if let Some(path) = load_settings().last_roadmap_root {
+        match load_roadmap_graph(Path::new(&path)) {
+            Ok(graph) => {
+                state.load_or_reset(Path::new(&graph.root))?;
+                set_last_roadmap_root(Some(graph.root.clone()));
+                return Ok(Some(graph));
+            }
+            Err(error) => {
+                eprintln!(
+                    "[roadmap] failed to reopen last roadmap {path}: {error}; showing example"
+                );
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -409,6 +427,7 @@ pub fn run() {
             load_roadmap_graph_command,
             load_initial_roadmap,
             load_settings_command,
+            clear_last_roadmap_command,
             pick_and_load_roadmap,
             bellman_version,
             create_node_command,

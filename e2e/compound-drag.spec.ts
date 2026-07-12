@@ -139,11 +139,10 @@ test.describe("composite graph interaction", () => {
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
-    await page.waitForTimeout(400);
+    await expect
+      .poll(async () => (await getGraphPan(page)).x, { timeout: 3_000 })
+      .toBeLessThan(before.x);
     await page.keyboard.up("ArrowRight");
-    const after = await getGraphPan(page);
-
-    expect(after.x).toBeLessThan(before.x);
   });
 
   test("arrow keys pan after deselecting an inner node via canvas click", async ({
@@ -160,11 +159,10 @@ test.describe("composite graph interaction", () => {
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
-    await page.waitForTimeout(400);
+    await expect
+      .poll(async () => (await getGraphPan(page)).x, { timeout: 3_000 })
+      .toBeLessThan(before.x);
     await page.keyboard.up("ArrowRight");
-    const after = await getGraphPan(page);
-
-    expect(after.x).toBeLessThan(before.x);
   });
 
   test("arrow keys pan after focusing sidebar then deselecting via canvas", async ({
@@ -183,11 +181,10 @@ test.describe("composite graph interaction", () => {
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
-    await page.waitForTimeout(400);
+    await expect
+      .poll(async () => (await getGraphPan(page)).x, { timeout: 3_000 })
+      .toBeLessThan(before.x);
     await page.keyboard.up("ArrowRight");
-    const after = await getGraphPan(page);
-
-    expect(after.x).toBeLessThan(before.x);
   });
 
   test("arrow keys pan after sidebar unmounts with stale focus", async ({ page }) => {
@@ -205,11 +202,12 @@ test.describe("composite graph interaction", () => {
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");
-    await page.waitForTimeout(400);
+    await expect
+      .poll(async () => Math.abs((await getGraphPan(page)).x - before.x), {
+        timeout: 3_000,
+      })
+      .toBeGreaterThan(20);
     await page.keyboard.up("ArrowRight");
-    const after = await getGraphPan(page);
-
-    expect(Math.abs(after.x - before.x)).toBeGreaterThan(20);
   });
 
   test("arrow keys pan the composite border with its chrome", async ({ page }) => {
@@ -217,20 +215,23 @@ test.describe("composite graph interaction", () => {
 
     await tapGraphNode(page, COMPOSITE_PARENT.id);
     await expect(page.locator(".compound-parent-label")).toBeVisible();
+    // Keep keyboard focus on the graph so arrow pan is allowed while the
+    // node-detail sidebar is open (and keep the page active under parallel workers).
+    await page.locator(".graph-container").focus();
 
     const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
     const panBefore = await getGraphPan(page);
 
     await page.keyboard.down("ArrowLeft");
-    await page.waitForTimeout(400);
+    await expect
+      .poll(async () => (await getGraphPan(page)).x, { timeout: 3_000 })
+      .toBeGreaterThan(panBefore.x);
     await page.keyboard.up("ArrowLeft");
 
     const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
-    const panAfter = await getGraphPan(page);
 
     expect(parentAfter?.x).toBeCloseTo(parentBefore?.x ?? 0, 0);
     expect(parentAfter?.y).toBeCloseTo(parentBefore?.y ?? 0, 0);
-    expect(panAfter.x).toBeGreaterThan(panBefore.x);
   });
 
   test("back returns from the work package graph to top level", async ({ page }) => {

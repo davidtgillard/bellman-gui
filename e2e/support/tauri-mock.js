@@ -482,6 +482,8 @@
           }
         );
       }
+      case "clear_last_roadmap_command":
+        return null;
       case "update_check_status_command":
         return {
           should_check: false,
