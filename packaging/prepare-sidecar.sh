@@ -24,11 +24,16 @@ VERSION="${BELLMAN_VERSION:-0.1.0}"
 URL="https://github.com/davidtgillard/bellman/releases/download/dev/bellman-${VERSION}-linux-x86_64"
 
 echo "Attempting to download bellman sidecar from ${URL}"
-if curl -fsSL --max-time 5 -o "${DEST}.download" "${URL}"; then
+# 23MB+ asset; allow slow links. Partial downloads must not replace a good binary.
+if curl -fsSL --connect-timeout 10 --max-time 120 -o "${DEST}.download" "${URL}"; then
   mv "${DEST}.download" "${DEST}"
   chmod +x "${DEST}"
   echo "Installed sidecar at ${DEST}"
 else
   rm -f "${DEST}.download"
-  echo "Download failed; keeping stub sidecar at ${DEST}" >&2
+  if [[ -x "${DEST}" ]]; then
+    echo "Download failed; keeping existing sidecar at ${DEST}" >&2
+  else
+    echo "Download failed; keeping stub sidecar at ${DEST}" >&2
+  fi
 fi
