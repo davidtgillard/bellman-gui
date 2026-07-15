@@ -536,6 +536,11 @@ export async function getGraphNodeState(
   }, nodeId);
 }
 
+/**
+ * Returns cytoscape edge ids exposed by the graph test hook.
+ * @param page - Playwright page to inspect.
+ * @throws {Error} When the graph edge ids test hook is unavailable.
+ */
 export async function getGraphEdgeIds(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;

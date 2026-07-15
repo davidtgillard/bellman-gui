@@ -9,6 +9,7 @@ import { CreateNodeDialog } from "./components/CreateNodeDialog";
 import { NodeDetailPanel } from "./components/NodeDetailPanel";
 import { RoadmapGraph as RoadmapGraphView } from "./components/RoadmapGraph";
 import { NodeTypeLegend } from "./components/NodeTypeLegend";
+import { useGraphAreaLayout } from "./hooks/useGraphAreaLayout";
 import {
   canCreateLinkFromNode,
   findAddedNodeId,
@@ -175,6 +176,12 @@ function App() {
   const nodeEditDirtyRef = useRef(false);
   const nodeDetailRequestRef = useRef(0);
   const legendPersistReadyRef = useRef(false);
+  const graphAreaRef = useRef<HTMLDivElement>(null);
+  const legendMeasureRef = useRef<HTMLElement>(null);
+  const [appliedSidebarWidth, setAppliedSidebarWidth] = useState(0);
+  const handleAppliedSidebarWidthChange = useCallback((width: number) => {
+    setAppliedSidebarWidth(width);
+  }, []);
   const [workPackageLayout, setWorkPackageLayout] = useState<WorkPackageLayout>(
     EXAMPLE_WORK_PACKAGE_LAYOUT,
   );
@@ -1589,6 +1596,14 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [nodeDetailOpen]);
 
+  const graphAreaLayout = useGraphAreaLayout(
+    graphAreaRef,
+    legendMeasureRef,
+    nodeDetailOpen,
+    nodeDetailOpen ? appliedSidebarWidth : 0,
+    !inWorkPackageGraph && nodeTypes.length > 0,
+  );
+
   return (
     <main className="app-shell">
       {error ? (
@@ -1680,7 +1695,7 @@ function App() {
           </dialog>
         </div>
       ) : null}
-      <div className="graph-area">
+      <div className="graph-area" ref={graphAreaRef}>
         <div className="graph-dock-panel">
           {inWorkPackageGraph ? (
             <GraphViewBreadcrumb labels={breadcrumbLabels} onBack={handleBackGraphView} />
@@ -1731,14 +1746,21 @@ function App() {
           />
           {!inWorkPackageGraph ? (
             <NodeTypeLegend
+              ref={legendMeasureRef}
               types={nodeTypes}
               visibleTypes={visibleTypes}
               onToggleType={handleToggleType}
+              fits={graphAreaLayout.legendFits}
             />
           ) : null}
         </div>
         {nodeDetailOpen ? (
-          <NodeDetailSidebar title={detailTitle} onClose={handleDetailClose}>
+          <NodeDetailSidebar
+            title={detailTitle}
+            onClose={handleDetailClose}
+            maxWidthPx={graphAreaLayout.maxSidebarWidth}
+            onAppliedWidthChange={handleAppliedSidebarWidthChange}
+          >
             <NodeDetailPanel
               detail={nodeDetail}
               loading={nodeDetailLoading}
