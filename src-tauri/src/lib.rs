@@ -1,4 +1,5 @@
 mod bellman_cmd;
+mod bellman_validate;
 mod cli;
 mod graph;
 mod graph_layout;
@@ -9,7 +10,10 @@ mod settings;
 mod undo;
 mod update_state;
 
-use bellman_cmd::run_bellman;
+use bellman_cmd::{run_bellman, run_bellman_capture};
+use bellman_validate::{
+    dependency_warnings_for_file, split_output_lines, DependencyWarningDto,
+};
 use cli::CliOptions;
 use graph::load_roadmap_graph;
 use graph_layout::{
@@ -30,6 +34,7 @@ use settings::{
 use crate::undo::{Snapshot, UndoState, UndoStateDto};
 use update_state::{touch_update_check_command, update_check_status_command};
 use std::path::{Path, PathBuf};
+use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter};
 use tauri_plugin_dialog::DialogExt;
@@ -181,19 +186,59 @@ async fn rename_node_command(
     })
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct SaveNodeMarkdownResponse {
+    pub detail: node_detail::NodeDetailDto,
+    pub graph: Option<graph::RoadmapGraphDto>,
+    pub dependency_warnings: Vec<DependencyWarningDto>,
+    pub sync_skipped: bool,
+}
+
 #[tauri::command]
 async fn save_node_markdown_command(
+    app: tauri::AppHandle,
     roadmap_root: String,
     node_id: String,
     markdown: String,
     state: tauri::State<'_, UndoState>,
-) -> Result<node_detail::NodeDetailDto, String> {
+) -> Result<SaveNodeMarkdownResponse, String> {
+    let root = PathBuf::from(&roadmap_root);
     let label = format!("edit {node_id}");
-    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
-    let detail =
-        node_detail::save_node_markdown(Path::new(&roadmap_root), &node_id, &markdown)?;
-    record_edit(&state, &roadmap_root, label, before);
-    Ok(detail)
+    let before = crate::undo::capture(root.as_path()).ok();
+
+    let detail = node_detail::write_node_markdown(root.as_path(), &node_id, &markdown)?;
+
+    let include_scope_cycle = matches!(detail.node_type.as_str(), "initiative" | "project");
+    let source_path = detail
+        .source_path
+        .as_deref()
+        .map(Path::new)
+        .ok_or_else(|| "saved node is missing source_path".to_string())?;
+
+    let validate_output = run_bellman_capture(
+        &app,
+        &["validate", "--no-registry", &roadmap_root],
+    )
+    .await?;
+    let validate_lines = split_output_lines(&validate_output.stdout, &validate_output.stderr);
+    let dependency_warnings =
+        dependency_warnings_for_file(&validate_lines, source_path, include_scope_cycle);
+
+    let graph = if validate_output.success {
+        run_bellman(&app, &["sync", &roadmap_root]).await?;
+        record_edit(&state, &roadmap_root, label, before);
+        Some(load_roadmap_graph(root.as_path())?)
+    } else {
+        record_edit(&state, &roadmap_root, label, before);
+        None
+    };
+
+    Ok(SaveNodeMarkdownResponse {
+        detail,
+        graph,
+        dependency_warnings,
+        sync_skipped: !validate_output.success,
+    })
 }
 
 #[tauri::command]

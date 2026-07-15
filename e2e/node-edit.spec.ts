@@ -1,6 +1,7 @@
 import {
   countCalls,
   expect,
+  getGraphEdgeIds,
   openNodeContextMenu,
   reloadApp,
   selectNode,
@@ -29,6 +30,49 @@ const GOAL_DETAIL: NodeDetailFixture = {
   source_path: "/roadmap/goals/reduce-churn.md",
   work_package: null,
 };
+
+const INITIATIVE_A = { id: "initiative/settings-manager", type: "initiative" };
+const INITIATIVE_B = { id: "initiative/billing-redesign", type: "initiative" };
+const PRECEDES_LINK = {
+  id: "precedes_FS_Mandatory_scope--settings-manager--billing-redesign",
+  link_type: "precedes_FS_Mandatory_scope",
+  source: INITIATIVE_B.id,
+  target: INITIATIVE_A.id,
+};
+
+const INITIATIVE_DETAIL: NodeDetailFixture = {
+  node_id: INITIATIVE_A.id,
+  node_type: "initiative",
+  title: "settings-manager",
+  markdown: `# Settings Manager
+
+Intro.
+
+## Dependencies
+
+- after: billing-redesign [FS, Mandatory]
+`,
+  source_path: "/roadmap/initiatives/settings-manager.md",
+  work_package: null,
+};
+
+function initiativeScenario(overrides: Partial<Scenario> = {}): Scenario {
+  return {
+    states: [
+      {
+        root: "/roadmap",
+        editable: true,
+        nodes: [INITIATIVE_A, INITIATIVE_B],
+        links: [],
+        link_types: [],
+        label: null,
+      },
+    ],
+    index: 0,
+    nodeDetail: INITIATIVE_DETAIL,
+    ...overrides,
+  };
+}
 
 const WP_DETAIL: NodeDetailFixture = {
   node_id: WP_INVOICING.id,
@@ -224,6 +268,111 @@ test.describe("node content editing", () => {
 
     await saveButton.click();
     expect(await countCalls(page, "save_node_markdown_command")).toBe(1);
+  });
+
+  test("refreshes the graph after a successful initiative markdown save", async ({
+    page,
+  }) => {
+    await setupPage(
+      page,
+      initiativeScenario({
+        saveGraphLinks: [PRECEDES_LINK],
+        saveSyncSkipped: false,
+      }),
+    );
+    await selectNode(page, INITIATIVE_A.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const content = page.locator(".cm-content");
+    await content.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" updated");
+
+    await page.keyboard.press("Control+s");
+
+    await expect(content).toBeVisible();
+    expect(await countCalls(page, "save_node_markdown_command")).toBe(1);
+    await expect.poll(async () => getGraphEdgeIds(page)).toContain(PRECEDES_LINK.id);
+  });
+
+  test("removes a dependency edge from the graph after markdown save", async ({
+    page,
+  }) => {
+    await setupPage(
+      page,
+      initiativeScenario({
+        states: [
+          {
+            root: "/roadmap",
+            editable: true,
+            nodes: [INITIATIVE_A, INITIATIVE_B],
+            links: [PRECEDES_LINK],
+            link_types: [],
+            label: null,
+          },
+        ],
+        saveGraphLinks: [],
+        saveSyncSkipped: false,
+      }),
+    );
+    await selectNode(page, INITIATIVE_A.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    await replaceEditorContent(
+      page,
+      `# Settings Manager
+
+Intro.
+`,
+    );
+
+    await page.keyboard.press("Control+s");
+
+    expect(await countCalls(page, "save_node_markdown_command")).toBe(1);
+    await expect.poll(async () => getGraphEdgeIds(page)).not.toContain(PRECEDES_LINK.id);
+  });
+
+  test("shows dependency warnings without blocking save", async ({ page }) => {
+    await setupPage(
+      page,
+      initiativeScenario({
+        saveSyncSkipped: true,
+        saveDependencyWarnings: [
+          {
+            line: null,
+            message: "unknown dependency predecessor 'missing-init'",
+          },
+        ],
+      }),
+    );
+    await selectNode(page, INITIATIVE_A.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    await replaceEditorContent(
+      page,
+      `# Settings Manager
+
+Intro.
+
+## Dependencies
+
+- after: missing-init [FS, Mandatory]
+`,
+    );
+
+    await page.keyboard.press("Control+s");
+
+    await expect(page.locator(".cm-content")).toBeVisible();
+    expect(await countCalls(page, "save_node_markdown_command")).toBe(1);
+    await expect(
+      page.getByText("unknown dependency predecessor", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("sync skipped until dependency issues are fixed", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await expect.poll(async () => getGraphEdgeIds(page)).toHaveLength(0);
   });
 
   test("surfaces a backend save failure and keeps editing", async ({ page }) => {

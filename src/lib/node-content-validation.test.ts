@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   hasBlockingErrors,
+  mapBellmanDependencyWarnings,
   slugify,
   validateNodeMarkdown,
   type ContentValidationContext,
@@ -80,5 +81,45 @@ describe("validateNodeMarkdown", () => {
     const diagnostics = validateNodeMarkdown(markdown, goalContext);
     const offsets = diagnostics.map((d) => d.from);
     expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
+  });
+});
+
+describe("mapBellmanDependencyWarnings", () => {
+  const markdown = `# Settings Manager MVP
+
+## Introduction
+
+Intro.
+
+## Dependencies
+
+- after: missing-init [FS, Mandatory]
+`;
+
+  it("maps line-numbered syntax errors to the dependency bullet", () => {
+    const diagnostics = mapBellmanDependencyWarnings(markdown, [
+      {
+        line: 9,
+        message: "invalid dependency syntax at line 9: '- after: missing-init'",
+      },
+    ]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].severity).toBe("warning");
+    expect(diagnostics[0].message).toContain("invalid dependency syntax");
+    expect(diagnostics[0].from).toBeGreaterThan(0);
+  });
+
+  it("maps unknown predecessor warnings by matching after: name", () => {
+    const diagnostics = mapBellmanDependencyWarnings(markdown, [
+      {
+        line: null,
+        message: "unknown dependency predecessor 'missing-init'",
+      },
+    ]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain("unknown dependency predecessor");
+    expect(markdown.slice(diagnostics[0].from, diagnostics[0].to)).toContain(
+      "missing-init",
+    );
   });
 });

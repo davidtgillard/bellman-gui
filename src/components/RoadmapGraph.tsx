@@ -1196,6 +1196,7 @@ export function RoadmapGraph({
         nodesOverlap?: (leftId: string, rightId: string) => boolean;
         isNodeRenderedVisible?: (nodeId: string) => boolean;
         getSubtreeNodeIds?: (rootId: string) => string[];
+        getGraphEdgeIds?: () => string[];
         getSelectedGraphNodeId?: () => string | null;
       };
     };
@@ -1427,6 +1428,7 @@ export function RoadmapGraph({
         }
         return collectSubtreeIds(model, rootId);
       };
+      testWindow.__TEST__.getGraphEdgeIds = () => cy.edges().map((edge) => edge.id());
       testWindow.__TEST__.getSelectedGraphNodeId = () => {
         const selected = cy.nodes(":selected");
         return selected.length > 0 ? selected[0].id() : null;

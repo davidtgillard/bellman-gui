@@ -409,8 +409,20 @@
         savedNodeDetails.set(cmdArgs.nodeId, clone(next));
         const state = clone(states[index]);
         state.label = `edit ${cmdArgs.nodeId}`;
+        const dependencyWarnings = scenario.saveDependencyWarnings ?? [];
+        const syncSkipped = scenario.saveSyncSkipped ?? dependencyWarnings.length > 0;
+        if (!syncSkipped && Array.isArray(scenario.saveGraphLinks)) {
+          // Full graph snapshot after sync (adds and removals), matching load_roadmap_graph.
+          state.links = clone(scenario.saveGraphLinks);
+        }
         pushState(state);
-        return clone(next);
+        const graph = currentGraph();
+        return {
+          detail: clone(next),
+          graph: syncSkipped ? null : graph,
+          dependency_warnings: clone(dependencyWarnings),
+          sync_skipped: syncSkipped,
+        };
       }
       case "update_work_package_command": {
         if (scenario.saveError) {

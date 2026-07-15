@@ -9,9 +9,11 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import {
   hasBlockingErrors,
+  mapBellmanDependencyWarnings,
   validateNodeMarkdown,
   type ContentValidationContext,
 } from "../lib/node-content-validation";
+import type { DependencyWarning } from "../lib/node-detail";
 import { setActiveMarkdownEditor } from "../lib/active-markdown-editor";
 import { history, historyKeymap } from "../lib/codemirror-history";
 import {
@@ -37,6 +39,8 @@ interface NodeMarkdownEditorProps {
   initialMarkdown: string;
   saving: boolean;
   backendError: string | null;
+  dependencyWarnings?: DependencyWarning[];
+  syncSkipped?: boolean;
   onSave: (markdown: string, options?: SaveMarkdownOptions) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
@@ -99,6 +103,8 @@ export function NodeMarkdownEditor({
   initialMarkdown,
   saving,
   backendError,
+  dependencyWarnings = [],
+  syncSkipped = false,
   onSave,
   onCancel,
   onDirtyChange,
@@ -119,6 +125,16 @@ export function NodeMarkdownEditor({
   const diagnostics = useMemo(
     () => validateNodeMarkdown(value, context),
     [value, context],
+  );
+
+  const bellmanDiagnostics = useMemo(
+    () => mapBellmanDependencyWarnings(value, dependencyWarnings),
+    [dependencyWarnings, value],
+  );
+
+  const allDiagnostics = useMemo(
+    () => [...diagnostics, ...bellmanDiagnostics].sort((left, right) => left.from - right.from),
+    [bellmanDiagnostics, diagnostics],
   );
 
   const dirty = value !== initialMarkdown;
@@ -199,14 +215,18 @@ export function NodeMarkdownEditor({
       linter((view: EditorView): Diagnostic[] => {
         const text = view.state.doc.toString();
         const length = text.length;
-        return validateNodeMarkdown(text, context).map((diagnostic) => ({
+        const merged = [
+          ...validateNodeMarkdown(text, context),
+          ...mapBellmanDependencyWarnings(text, dependencyWarnings),
+        ];
+        return merged.map((diagnostic) => ({
           from: Math.min(diagnostic.from, length),
           to: Math.min(diagnostic.to, length),
           severity: diagnostic.severity,
           message: diagnostic.message,
         }));
       }),
-    [context],
+    [context, dependencyWarnings],
   );
 
   const focusBridge = useMemo(
@@ -300,10 +320,15 @@ export function NodeMarkdownEditor({
             {backendError}
           </p>
         ) : null}
-        {diagnostics.length === 0 && !backendError ? (
+        {syncSkipped && !backendError ? (
+          <p className="node-editor-problem warning">
+            Saved; sync skipped until dependency issues are fixed.
+          </p>
+        ) : null}
+        {allDiagnostics.length === 0 && !backendError && !syncSkipped ? (
           <p className="node-editor-problem ok">No problems detected.</p>
         ) : null}
-        {diagnostics.map((diagnostic, index) => (
+        {allDiagnostics.map((diagnostic, index) => (
           <p
             key={`${diagnostic.from}-${index}`}
             className={`node-editor-problem ${diagnostic.severity}`}

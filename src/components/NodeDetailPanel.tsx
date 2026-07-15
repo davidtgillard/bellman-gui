@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { nodeTypeLabel } from "../lib/graph";
-import type { NodeDetail } from "../lib/node-detail";
+import type { NodeDetail, DependencyWarning } from "../lib/node-detail";
 import {
   NodeMarkdownEditor,
   type SaveMarkdownOptions,
@@ -16,6 +16,8 @@ interface NodeDetailPanelProps {
   editing: boolean;
   saving: boolean;
   saveError: string | null;
+  dependencyWarnings?: DependencyWarning[];
+  syncSkipped?: boolean;
   roadmapRoot: string;
   onStartEdit: () => void;
   onCancelEdit: () => void;
@@ -51,6 +53,8 @@ export function NodeDetailPanel({
   editing,
   saving,
   saveError,
+  dependencyWarnings = [],
+  syncSkipped = false,
   roadmapRoot,
   onStartEdit,
   onCancelEdit,
@@ -126,6 +130,8 @@ export function NodeDetailPanel({
           initialMarkdown={detail.markdown}
           saving={saving}
           backendError={saveError}
+          dependencyWarnings={dependencyWarnings}
+          syncSkipped={syncSkipped}
           onSave={onSaveMarkdown}
           onCancel={onCancelEdit}
           onDirtyChange={onDirtyChange}

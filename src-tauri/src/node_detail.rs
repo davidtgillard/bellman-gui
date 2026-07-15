@@ -261,10 +261,8 @@ pub fn load_node_detail(root: &Path, node_id: &str) -> Result<NodeDetailDto, Str
     })
 }
 
-/// Writes new markdown body content for a markdown-backed node and returns the
-/// refreshed detail. Work packages are rejected because their content lives in
-/// `work-packages.yaml` and must be edited via the work-package command.
-pub fn save_node_markdown(
+/// Writes new markdown body content for a markdown-backed node.
+pub fn write_node_markdown(
     root: &Path,
     node_id: &str,
     markdown: &str,
@@ -385,7 +383,7 @@ mod tests {
         fs::write(root.join("initiatives/alpha.md"), "# Alpha\n\nOld body.").unwrap();
 
         let detail =
-            save_node_markdown(root, "initiative/alpha", "# Alpha\n\nNew body.").unwrap();
+            write_node_markdown(root, "initiative/alpha", "# Alpha\n\nNew body.").unwrap();
         assert!(detail.markdown.contains("New body."));
 
         let on_disk = fs::read_to_string(root.join("initiatives/alpha.md")).unwrap();
@@ -399,7 +397,7 @@ mod tests {
         let root = temp.path();
         write_registry(root);
 
-        let result = save_node_markdown(root, "project/billing/wp-one", "# wp-one\n\nx");
+        let result = write_node_markdown(root, "project/billing/wp-one", "# wp-one\n\nx");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("work packages"));
     }

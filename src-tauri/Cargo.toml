@@ -28,6 +28,9 @@ uuid = { version = "1.23.4", features = ["v4"] }
 [dev-dependencies]
 tempfile = "3"
 
+[lints.rust]
+warnings = "deny"
+
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-process = "2.3.1"
 tauri-plugin-updater = "2.10.1"

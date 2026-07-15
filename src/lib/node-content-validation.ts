@@ -121,6 +121,95 @@ export function validateNodeMarkdown(
   return diagnostics.sort((a, b) => a.from - b.from);
 }
 
+export interface BellmanDependencyWarning {
+  line?: number | null;
+  message: string;
+}
+
+function dependenciesSectionSpan(lines: LineSpan[]): LineSpan | undefined {
+  const heading = lines.find((line) => /^##\s+Dependencies\s*$/i.test(line.text.trim()));
+  return heading;
+}
+
+function predecessorFromMessage(message: string): string | null {
+  const quoted = message.match(/predecessor '([^']+)'/i);
+  if (quoted) {
+    return quoted[1];
+  }
+  const ambiguous = message.match(/reference '([^']+)'/i);
+  return ambiguous?.[1] ?? null;
+}
+
+/**
+ * Maps bellman dependency warnings onto markdown character ranges for lint display.
+ * @param markdown - Saved markdown source.
+ * @param warnings - Dependency warnings returned after save.
+ * @returns Warning diagnostics for the Dependencies section.
+ */
+export function mapBellmanDependencyWarnings(
+  markdown: string,
+  warnings: BellmanDependencyWarning[],
+): ContentDiagnostic[] {
+  if (warnings.length === 0) {
+    return [];
+  }
+
+  const lines = toLineSpans(markdown);
+  const section = dependenciesSectionSpan(lines);
+  const diagnostics: ContentDiagnostic[] = [];
+
+  for (const warning of warnings) {
+    if (warning.line !== null && warning.line !== undefined && warning.line > 0) {
+      const lineSpan = lines[warning.line - 1];
+      if (lineSpan) {
+        diagnostics.push({
+          from: lineSpan.start,
+          to: lineSpan.end,
+          severity: "warning",
+          message: warning.message,
+        });
+        continue;
+      }
+    }
+
+    const predecessor = predecessorFromMessage(warning.message);
+    if (predecessor) {
+      const bullet = lines.find((line) =>
+        new RegExp(`-\\s+after:\\s*${predecessor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(
+          line.text,
+        ),
+      );
+      if (bullet) {
+        diagnostics.push({
+          from: bullet.start,
+          to: bullet.end,
+          severity: "warning",
+          message: warning.message,
+        });
+        continue;
+      }
+    }
+
+    if (section) {
+      diagnostics.push({
+        from: section.start,
+        to: section.end,
+        severity: "warning",
+        message: warning.message,
+      });
+    } else {
+      diagnostics.push({
+        from: 0,
+        to: Math.max(markdown.length, 1),
+        severity: "warning",
+        message: warning.message,
+      });
+    }
+  }
+
+  return diagnostics.sort((left, right) => left.from - right.from);
+}
+
 /**
  * Reports whether any diagnostic is an error (which should block saving).
  * @param diagnostics - Diagnostics from {@link validateNodeMarkdown}.

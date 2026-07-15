@@ -86,7 +86,12 @@ import {
   type GraphViewFrame,
   workPackageHasChildren,
 } from "./lib/work-package-view";
-import { loadNodeDetail, saveNodeMarkdown, type NodeDetail } from "./lib/node-detail";
+import {
+  loadNodeDetail,
+  saveNodeMarkdown,
+  type DependencyWarning,
+  type NodeDetail,
+} from "./lib/node-detail";
 import { slugify } from "./lib/node-content-validation";
 import {
   loadLegendVisibility,
@@ -165,6 +170,8 @@ function App() {
   const [nodeEditing, setNodeEditing] = useState(false);
   const [nodeEditSaving, setNodeEditSaving] = useState(false);
   const [nodeEditError, setNodeEditError] = useState<string | null>(null);
+  const [dependencyWarnings, setDependencyWarnings] = useState<DependencyWarning[]>([]);
+  const [syncSkipped, setSyncSkipped] = useState(false);
   const nodeEditDirtyRef = useRef(false);
   const nodeDetailRequestRef = useRef(0);
   const legendPersistReadyRef = useRef(false);
@@ -1196,6 +1203,10 @@ function App() {
 
   const handleNodeEditDirtyChange = useCallback((dirty: boolean) => {
     nodeEditDirtyRef.current = dirty;
+    if (dirty) {
+      setDependencyWarnings([]);
+      setSyncSkipped(false);
+    }
   }, []);
 
   const confirmDiscardIfDirty = useCallback(() => {
@@ -1484,6 +1495,8 @@ function App() {
 
   const handleStartNodeEdit = useCallback(() => {
     setNodeEditError(null);
+    setDependencyWarnings([]);
+    setSyncSkipped(false);
     nodeEditDirtyRef.current = false;
     setNodeEditing(true);
   }, []);
@@ -1491,6 +1504,8 @@ function App() {
   const handleCancelNodeEdit = useCallback(() => {
     nodeEditDirtyRef.current = false;
     setNodeEditError(null);
+    setDependencyWarnings([]);
+    setSyncSkipped(false);
     setNodeEditing(false);
   }, []);
 
@@ -1503,11 +1518,16 @@ function App() {
       setNodeEditSaving(true);
       setNodeEditError(null);
       try {
-        const detail = await saveNodeMarkdown(roadmapRoot, nodeId, markdown);
-        setNodeDetail(detail);
+        const result = await saveNodeMarkdown(roadmapRoot, nodeId, markdown);
+        setNodeDetail(result.detail);
+        setDependencyWarnings(result.dependencyWarnings);
+        setSyncSkipped(result.syncSkipped);
+        if (result.graph) {
+          applyGraph(result.graph);
+        }
         nodeEditDirtyRef.current = false;
-        // ensure that the editor is open if the user wants to continue editing
-        setNodeEditing(options?.keepOpen ?? false);
+        // Keep the editor open when sync was skipped so dependency warnings stay visible.
+        setNodeEditing(options?.keepOpen ?? result.syncSkipped);
         void refreshUndoState(roadmapRoot, editable);
       } catch (caught) {
         setNodeEditError(String(caught));
@@ -1515,7 +1535,7 @@ function App() {
         setNodeEditSaving(false);
       }
     },
-    [editable, nodeDetail, refreshUndoState, roadmapRoot],
+    [applyGraph, editable, nodeDetail, refreshUndoState, roadmapRoot],
   );
 
   const handleSaveWorkPackage = useCallback(
@@ -1727,6 +1747,8 @@ function App() {
               editing={nodeEditing}
               saving={nodeEditSaving}
               saveError={nodeEditError}
+              dependencyWarnings={dependencyWarnings}
+              syncSkipped={syncSkipped}
               roadmapRoot={roadmapRoot}
               onStartEdit={handleStartNodeEdit}
               onCancelEdit={handleCancelNodeEdit}

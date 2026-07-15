@@ -43,6 +43,9 @@ export interface Scenario {
   nodeDetail?: NodeDetailFixture;
   nodeDetails?: Record<string, NodeDetailFixture>;
   saveError?: string;
+  saveDependencyWarnings?: Array<{ line: number | null; message: string }>;
+  saveSyncSkipped?: boolean;
+  saveGraphLinks?: RoadmapState["links"];
   layout?: {
     version: number;
     kind: string;
@@ -92,6 +95,7 @@ interface TestBridge {
   nodesOverlap?: (leftId: string, rightId: string) => boolean;
   isNodeRenderedVisible?: (nodeId: string) => boolean;
   getSubtreeNodeIds?: (rootId: string) => string[];
+  getGraphEdgeIds?: () => string[];
 }
 
 export interface GraphNodeState {
@@ -530,6 +534,16 @@ export async function getGraphNodeState(
     }
     return bridge.getGraphNodeState(id);
   }, nodeId);
+}
+
+export async function getGraphEdgeIds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getGraphEdgeIds) {
+      throw new Error("graph edge ids test hook is unavailable");
+    }
+    return bridge.getGraphEdgeIds();
+  });
 }
 
 /**

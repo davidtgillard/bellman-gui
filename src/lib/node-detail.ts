@@ -3,6 +3,7 @@ import billingRedesign from "../fixtures/example-roadmap/projects/billing-redesi
 import gaRelease from "../fixtures/example-roadmap/milestones/ga-release.md?raw";
 import reduceChurn from "../fixtures/example-roadmap/goals/reduce-churn.md?raw";
 import { invoke } from "@tauri-apps/api/core";
+import { fromRoadmapGraphDto, type RoadmapGraph, type RoadmapGraphDto } from "./graph";
 import { nodeLabel } from "./graph";
 
 export interface WorkPackageDetail {
@@ -22,6 +23,18 @@ export interface NodeDetail {
   workPackage: WorkPackageDetail | null;
 }
 
+export interface DependencyWarning {
+  line: number | null;
+  message: string;
+}
+
+export interface SaveNodeMarkdownResult {
+  detail: NodeDetail;
+  graph: RoadmapGraph | null;
+  dependencyWarnings: DependencyWarning[];
+  syncSkipped: boolean;
+}
+
 interface WorkPackageDetailDto {
   project: string;
   title: string;
@@ -37,6 +50,18 @@ interface NodeDetailDto {
   markdown: string;
   source_path: string | null;
   work_package: WorkPackageDetailDto | null;
+}
+
+interface DependencyWarningDto {
+  line: number | null;
+  message: string;
+}
+
+interface SaveNodeMarkdownResponseDto {
+  detail: NodeDetailDto;
+  graph: RoadmapGraphDto | null;
+  dependency_warnings: DependencyWarningDto[];
+  sync_skipped: boolean;
 }
 
 const WP_INVOICING_MARKDOWN = `# wp-invoicing
@@ -121,22 +146,31 @@ export async function loadNodeDetail(
 }
 
 /**
- * Saves new markdown body content for a markdown-backed node and returns the
- * refreshed detail. Not valid for work packages (use `updateWorkPackage`).
+ * Saves markdown, runs bellman validate/sync, and returns refreshed detail plus
+ * an updated graph when sync succeeds.
  * @param roadmapRoot - Editable roadmap root path.
  * @param nodeId - Fully qualified node id from the registry.
  * @param markdown - New markdown body to persist.
- * @returns Refreshed node detail after the write.
+ * @returns Save result with optional graph and dependency warnings.
  */
 export async function saveNodeMarkdown(
   roadmapRoot: string,
   nodeId: string,
   markdown: string,
-): Promise<NodeDetail> {
-  const dto = await invoke<NodeDetailDto>("save_node_markdown_command", {
+): Promise<SaveNodeMarkdownResult> {
+  const dto = await invoke<SaveNodeMarkdownResponseDto>("save_node_markdown_command", {
     roadmapRoot,
     nodeId,
     markdown,
   });
-  return fromDto(dto);
+
+  return {
+    detail: fromDto(dto.detail),
+    graph: dto.graph ? fromRoadmapGraphDto(dto.graph) : null,
+    dependencyWarnings: dto.dependency_warnings.map((warning) => ({
+      line: warning.line,
+      message: warning.message,
+    })),
+    syncSkipped: dto.sync_skipped,
+  };
 }

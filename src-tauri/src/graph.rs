@@ -67,7 +67,7 @@ pub struct LinkTypeDto {
     pub out_type: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct RoadmapGraphDto {
     pub root: String,
     pub editable: bool,
