@@ -87,18 +87,30 @@ export function panDeltaToRevealNodeOnRight(
   return Math.min(0, viewportWidth - padding - boxX2);
 }
 
+/** Short duration for sidebar reveal/restore viewport pans. */
+export const SIDEBAR_VIEWPORT_ANIMATION_MS = 160;
+
 /**
  * When a node detail sidebar shrinks the graph, pan horizontally just enough
  * so an obscured selected node remains in the visible viewport. Zoom is unchanged.
  * @param cy
  * @param container
  * @param nodeId
+ * @param options
+ * @param options.animate - Whether to ease the pan instead of snapping.
+ * @param options.durationMs - Animation duration when `animate` is true.
+ * @param options.onComplete - Called after the pan finishes (animated or not).
  * @returns Whether the viewport was panned to reveal the node.
  */
 export function revealSelectedNodeInViewportIfObscured(
   cy: Core,
   container: HTMLElement,
   nodeId: string,
+  options?: {
+    animate?: boolean;
+    durationMs?: number;
+    onComplete?: () => void;
+  },
 ): boolean {
   const node = cy.getElementById(nodeId);
   if (node.empty()) {
@@ -110,6 +122,10 @@ export function revealSelectedNodeInViewportIfObscured(
     return false;
   }
 
+  // Cancel any in-flight viewport animation so a follow-up reveal (e.g. from
+  // ResizeObserver) measures and pans from a stable position.
+  cy.stop(true, false);
+
   redrawGraphSynchronously(cy);
   const box = node.renderedBoundingBox({ includeLabels: true, includeOverlays: false });
   if (!isNodeObscuredOnRight(box, viewportWidth)) {
@@ -117,10 +133,52 @@ export function revealSelectedNodeInViewportIfObscured(
   }
 
   const zoomBefore = cy.zoom();
-  cy.panBy({ x: panDeltaToRevealNodeOnRight(box.x2, viewportWidth), y: 0 });
-  if (cy.zoom() !== zoomBefore) {
-    cy.zoom(zoomBefore);
+  const panBefore = cy.pan();
+  const deltaX = panDeltaToRevealNodeOnRight(box.x2, viewportWidth);
+  const nextPan = { x: panBefore.x + deltaX, y: panBefore.y };
+  const animate = Boolean(options?.animate);
+  const durationMs = options?.durationMs ?? SIDEBAR_VIEWPORT_ANIMATION_MS;
+
+  const applyPanInstant = () => {
+    const width = container.clientWidth;
+    if (width <= 0 || node.empty()) {
+      return;
+    }
+    redrawGraphSynchronously(cy);
+    const current = node.renderedBoundingBox({
+      includeLabels: true,
+      includeOverlays: false,
+    });
+    if (!isNodeObscuredOnRight(current, width)) {
+      return;
+    }
+    const zoom = cy.zoom();
+    cy.panBy({ x: panDeltaToRevealNodeOnRight(current.x2, width), y: 0 });
+    if (cy.zoom() !== zoom) {
+      cy.zoom(zoom);
+    }
+  };
+
+  if (!animate || durationMs <= 0) {
+    cy.panBy({ x: deltaX, y: 0 });
+    if (cy.zoom() !== zoomBefore) {
+      cy.zoom(zoomBefore);
+    }
+    options?.onComplete?.();
+    return true;
   }
+
+  cy.animate({
+    pan: nextPan,
+    zoom: zoomBefore,
+    duration: durationMs,
+    easing: "ease-out",
+    complete: () => {
+      // Resize may have continued during the animation; snap if still clipped.
+      applyPanInstant();
+      options?.onComplete?.();
+    },
+  });
   return true;
 }
 
@@ -149,9 +207,9 @@ export function createSidebarViewportSession(): SidebarViewportSession {
 }
 
 /**
- * Captures the current Cytoscape pan and zoom.
+ * Captures the current Cytoscape pan and zoom as a restorable snapshot.
  * @param cy
- * @returns Viewport snapshot.
+ * @returns Pan and zoom to reapply later with `cy.viewport`.
  */
 export function captureViewportSnapshot(cy: Core): ViewportSnapshot {
   const pan = cy.pan();
@@ -197,16 +255,44 @@ export function shouldRestoreSidebarViewport(session: SidebarViewportSession): b
  * Restores the pre-reveal viewport when the session is still clean.
  * @param cy
  * @param session
+ * @param options
+ * @param options.animate - Whether to ease the restore instead of snapping.
+ * @param options.durationMs - Animation duration when `animate` is true.
+ * @param options.onComplete - Called after the restore finishes (animated or not).
  * @returns Whether the viewport was restored.
  */
 export function restoreSidebarViewportIfEligible(
   cy: Core,
   session: SidebarViewportSession,
+  options?: {
+    animate?: boolean;
+    durationMs?: number;
+    onComplete?: () => void;
+  },
 ): boolean {
   if (!shouldRestoreSidebarViewport(session) || !session.restore) {
     return false;
   }
-  cy.viewport(session.restore);
+
+  const target = session.restore;
+  const animate = Boolean(options?.animate);
+  const durationMs = options?.durationMs ?? SIDEBAR_VIEWPORT_ANIMATION_MS;
+
+  if (!animate || durationMs <= 0) {
+    cy.stop(true, false);
+    cy.viewport(target);
+    options?.onComplete?.();
+    return true;
+  }
+
+  cy.stop(true, false);
+  cy.animate({
+    pan: target.pan,
+    zoom: target.zoom,
+    duration: durationMs,
+    easing: "ease-out",
+    complete: options?.onComplete,
+  });
   return true;
 }
 
@@ -2548,6 +2634,7 @@ export function wheelZoomLevel(
  * @param cy - Cytoscape instance to zoom.
  * @param cyContainer - Cytoscape canvas container used for zoom focal coordinates.
  * @param sensitivity - Wheel sensitivity multiplier.
+ * @param onUserZoom - Optional callback after a user-initiated wheel zoom.
  * @returns Cleanup function that removes the wheel listener.
  */
 export function installWheelZoom(
@@ -2555,6 +2642,7 @@ export function installWheelZoom(
   cy: Core,
   cyContainer: HTMLElement,
   sensitivity = DEFAULT_WHEEL_SENSITIVITY,
+  onUserZoom?: () => void,
 ): () => void {
   const onWheel = (event: WheelEvent) => {
     if (!cy.zoomingEnabled() || cy.destroyed()) {
@@ -2579,6 +2667,7 @@ export function installWheelZoom(
     );
 
     cy.zoom({ level: nextZoom, renderedPosition });
+    onUserZoom?.();
   };
 
   wheelContainer.addEventListener("wheel", onWheel, { passive: false });

@@ -574,11 +574,8 @@ export function RoadmapGraph({
   const selectedNodeIdRef = useRef(selectedNodeId);
   const nodeDetailOpenRef = useRef(nodeDetailOpen);
   const sidebarViewportSessionRef = useRef<SidebarViewportSession>(createSidebarViewportSession());
-  const suppressSidebarViewportDirtyRef = useRef(false);
+  const sidebarRevealAnimatingRef = useRef(false);
   const markSidebarViewportDirtyRef = useRef<() => void>(() => {});
-  const revealSelectedNodeForSidebarRef = useRef<
-    (cy: Core, container: HTMLElement, nodeId: string) => void
-  >(() => {});
   const lastSelectedCompoundLeafRef = useRef<string | null>(null);
   const compoundLeafTapRef = useRef<
     ((childId: string, wasSelected: boolean) => void) | null
@@ -950,25 +947,78 @@ export function RoadmapGraph({
     if (!nodeDetailOpenRef.current) {
       return;
     }
+    const session = sidebarViewportSessionRef.current;
+    // Animate only the first reveal of a sidebar session; later pans (e.g. while
+    // dragging the sidebar width) stay instant so the drag stays responsive.
+    const animate = session.restore === null && !session.dirty;
+    if (!animate && sidebarRevealAnimatingRef.current) {
+      // Let the opening animation finish; its completion handler settles if needed.
+      return;
+    }
     const viewportBefore = captureViewportSnapshot(cy);
-    suppressSidebarViewportDirtyRef.current = true;
-    const panned = revealSelectedNodeInViewportIfObscured(cy, container, nodeId);
-    suppressSidebarViewportDirtyRef.current = false;
-    noteRevealPanForSidebarSession(
-      sidebarViewportSessionRef.current,
-      viewportBefore,
-      panned,
-    );
+    if (animate) {
+      sidebarRevealAnimatingRef.current = true;
+    }
+    const panned = revealSelectedNodeInViewportIfObscured(cy, container, nodeId, {
+      animate,
+      onComplete: () => {
+        sidebarRevealAnimatingRef.current = false;
+      },
+    });
+    if (!panned) {
+      sidebarRevealAnimatingRef.current = false;
+    }
+    noteRevealPanForSidebarSession(session, viewportBefore, panned);
   }, []);
-  revealSelectedNodeForSidebarRef.current = revealSelectedNodeForSidebar;
+
+  const firstRevealTimerRef = useRef<number | null>(null);
+  const scheduleRevealSelectedNodeForSidebar = useCallback(
+    (cy: Core, container: HTMLElement, nodeId: string) => {
+      if (!nodeDetailOpenRef.current) {
+        return;
+      }
+      const session = sidebarViewportSessionRef.current;
+      const isFirstReveal = session.restore === null && !session.dirty;
+      if (!isFirstReveal) {
+        revealSelectedNodeForSidebar(cy, container, nodeId);
+        return;
+      }
+      // Debounce the first animated reveal until the sidebar width finishes
+      // settling so ResizeObserver churn cannot stop the animation mid-pan.
+      if (firstRevealTimerRef.current !== null) {
+        window.clearTimeout(firstRevealTimerRef.current);
+      }
+      firstRevealTimerRef.current = window.setTimeout(() => {
+        firstRevealTimerRef.current = null;
+        if (!nodeDetailOpenRef.current || selectedNodeIdRef.current !== nodeId) {
+          return;
+        }
+        revealSelectedNodeForSidebar(cy, container, nodeId);
+      }, 50);
+    },
+    [revealSelectedNodeForSidebar],
+  );
+  const scheduleRevealSelectedNodeForSidebarRef = useRef(scheduleRevealSelectedNodeForSidebar);
 
   const markSidebarViewportDirty = useCallback(() => {
     if (!nodeDetailOpenRef.current) {
       return;
     }
+    if (firstRevealTimerRef.current !== null) {
+      window.clearTimeout(firstRevealTimerRef.current);
+      firstRevealTimerRef.current = null;
+    }
+    cyRef.current?.stop(true, false);
     markSidebarViewportSessionDirty(sidebarViewportSessionRef.current);
   }, []);
-  markSidebarViewportDirtyRef.current = markSidebarViewportDirty;
+
+  useEffect(() => {
+    scheduleRevealSelectedNodeForSidebarRef.current = scheduleRevealSelectedNodeForSidebar;
+  }, [scheduleRevealSelectedNodeForSidebar]);
+
+  useEffect(() => {
+    markSidebarViewportDirtyRef.current = markSidebarViewportDirty;
+  }, [markSidebarViewportDirty]);
 
   useLayoutEffect(() => {
     const wasOpen = nodeDetailOpenRef.current;
@@ -980,11 +1030,15 @@ export function RoadmapGraph({
     }
 
     if (!nodeDetailOpen && wasOpen) {
+      if (firstRevealTimerRef.current !== null) {
+        window.clearTimeout(firstRevealTimerRef.current);
+        firstRevealTimerRef.current = null;
+      }
+      sidebarRevealAnimatingRef.current = false;
       const cy = cyRef.current;
+      const session = sidebarViewportSessionRef.current;
       if (cy) {
-        suppressSidebarViewportDirtyRef.current = true;
-        restoreSidebarViewportIfEligible(cy, sidebarViewportSessionRef.current);
-        suppressSidebarViewportDirtyRef.current = false;
+        restoreSidebarViewportIfEligible(cy, session, { animate: true });
       }
       sidebarViewportSessionRef.current = createSidebarViewportSession();
     }
@@ -1099,6 +1153,7 @@ export function RoadmapGraph({
 
       const { dx, dy } = controller.tick(performance.now());
       if (dx !== 0 || dy !== 0) {
+        markSidebarViewportDirtyRef.current();
         cy.panBy({ x: dx, y: dy });
       }
 
@@ -1765,22 +1820,22 @@ export function RoadmapGraph({
       cy,
       container,
       0.2,
+      () => {
+        markSidebarViewportDirtyRef.current();
+      },
     );
 
-    const onUserViewportChange = () => {
-      if (suppressSidebarViewportDirtyRef.current) {
-        return;
-      }
+    const onUserDragPan = () => {
       markSidebarViewportDirtyRef.current();
     };
-    cy.on("pan zoom", onUserViewportChange);
+    cy.on("dragpan", onUserDragPan);
 
     const resizeObserver = new ResizeObserver(() => {
       cy.resize();
 
       const selectedId = selectedNodeIdRef.current;
       if (selectedId) {
-        revealSelectedNodeForSidebarRef.current(cy, container, selectedId);
+        scheduleRevealSelectedNodeForSidebarRef.current(cy, container, selectedId);
       }
 
       // cy.resize() clears the canvas synchronously but defers the repaint to
@@ -1802,7 +1857,7 @@ export function RoadmapGraph({
       topLevelDragCleanupRef.current = null;
       wheelZoomCleanupRef.current?.();
       wheelZoomCleanupRef.current = null;
-      cy.off("pan zoom", onUserViewportChange);
+      cy.off("dragpan", onUserDragPan);
       resizeObserver.disconnect();
       graphStructureKeyRef.current = "";
       layoutCompletedRef.current = false;
@@ -2161,8 +2216,8 @@ export function RoadmapGraph({
     if (!cyReady || !cy || !container || !selectedNodeId || !nodeDetailOpen) {
       return;
     }
-    revealSelectedNodeForSidebar(cy, container, selectedNodeId);
-  }, [selectedNodeId, cyReady, nodeDetailOpen, revealSelectedNodeForSidebar]);
+    scheduleRevealSelectedNodeForSidebar(cy, container, selectedNodeId);
+  }, [selectedNodeId, cyReady, nodeDetailOpen, scheduleRevealSelectedNodeForSidebar]);
 
   useEffect(() => {
     if (

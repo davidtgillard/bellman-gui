@@ -10,6 +10,7 @@ import {
   noteRevealPanForSidebarSession,
   panDeltaToRevealNodeOnRight,
   REVEAL_NODE_RIGHT_PADDING,
+  SIDEBAR_VIEWPORT_ANIMATION_MS,
   shiftBoxInside,
   shouldRestoreSidebarViewport,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
@@ -122,6 +123,11 @@ describe("cytoscape-layout", () => {
     expect(panDeltaToRevealNodeOnRight(500, 480)).toBe(-(500 - 480 + REVEAL_NODE_RIGHT_PADDING));
     expect(panDeltaToRevealNodeOnRight(400, 480, 8)).toBe(0);
     expect(panDeltaToRevealNodeOnRight(472, 480, 8)).toBe(0);
+  });
+
+  it("uses a short sidebar viewport animation duration", () => {
+    expect(SIDEBAR_VIEWPORT_ANIMATION_MS).toBeGreaterThan(0);
+    expect(SIDEBAR_VIEWPORT_ANIMATION_MS).toBeLessThanOrEqual(200);
   });
 
   it("remembers the first reveal pan for sidebar close restore", () => {
