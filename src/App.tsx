@@ -1707,6 +1707,7 @@ function App() {
             visibleNodeIds={visibleNodeIds}
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
+            nodeDetailOpen={nodeDetailOpen}
             onNodeClick={handleNodeClick}
             onSelectionClear={handleGraphSelectionClear}
             contextMenu={renderContextMenu}

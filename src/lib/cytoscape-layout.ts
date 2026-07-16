@@ -67,28 +67,35 @@ export function isNodeObscuredOnRight(
   return box.x2 > viewportWidth;
 }
 
+/** Padding kept between a revealed node’s right edge and the viewport edge. */
+export const REVEAL_NODE_RIGHT_PADDING = 8;
+
 /**
- * Horizontal pan delta needed to centre a node in the viewport.
- * @param nodeCenterX
+ * Horizontal pan delta needed to bring a node’s right edge into the viewport.
+ * Negative values pan left. When the node is already clear of the right edge
+ * (accounting for padding), returns 0.
+ * @param boxX2
  * @param viewportWidth
+ * @param padding
  * @returns Pan delta in rendered pixels.
  */
-export function panDeltaToCenterNodeHorizontally(
-  nodeCenterX: number,
+export function panDeltaToRevealNodeOnRight(
+  boxX2: number,
   viewportWidth: number,
+  padding: number = REVEAL_NODE_RIGHT_PADDING,
 ): number {
-  return viewportWidth / 2 - nodeCenterX;
+  return Math.min(0, viewportWidth - padding - boxX2);
 }
 
 /**
- * When a node detail sidebar shrinks the graph, pan horizontally so an obscured
- * selected node is centred in the visible viewport. Zoom is unchanged.
+ * When a node detail sidebar shrinks the graph, pan horizontally just enough
+ * so an obscured selected node remains in the visible viewport. Zoom is unchanged.
  * @param cy
  * @param container
  * @param nodeId
  * @returns Whether the viewport was panned to reveal the node.
  */
-export function centerSelectedNodeInViewportIfObscured(
+export function revealSelectedNodeInViewportIfObscured(
   cy: Core,
   container: HTMLElement,
   nodeId: string,
@@ -110,11 +117,96 @@ export function centerSelectedNodeInViewportIfObscured(
   }
 
   const zoomBefore = cy.zoom();
-  const center = node.renderedPosition();
-  cy.panBy({ x: panDeltaToCenterNodeHorizontally(center.x, viewportWidth), y: 0 });
+  cy.panBy({ x: panDeltaToRevealNodeOnRight(box.x2, viewportWidth), y: 0 });
   if (cy.zoom() !== zoomBefore) {
     cy.zoom(zoomBefore);
   }
+  return true;
+}
+
+/** Pan/zoom snapshot used to undo an automatic sidebar reveal pan. */
+export type ViewportSnapshot = {
+  pan: { x: number; y: number };
+  zoom: number;
+};
+
+/**
+ * Tracks whether closing the node-detail sidebar should restore the viewport
+ * from before the first automatic reveal pan.
+ */
+export type SidebarViewportSession = {
+  /** Viewport from before the first reveal pan; null until that pan happens. */
+  restore: ViewportSnapshot | null;
+  /** True when the user changed the view or graph after the sidebar opened. */
+  dirty: boolean;
+};
+
+/**
+ * @returns A fresh sidebar viewport session.
+ */
+export function createSidebarViewportSession(): SidebarViewportSession {
+  return { restore: null, dirty: false };
+}
+
+/**
+ * Captures the current Cytoscape pan and zoom.
+ * @param cy
+ * @returns Viewport snapshot.
+ */
+export function captureViewportSnapshot(cy: Core): ViewportSnapshot {
+  const pan = cy.pan();
+  return { pan: { x: pan.x, y: pan.y }, zoom: cy.zoom() };
+}
+
+/**
+ * After an automatic reveal pan, remember the pre-pan viewport once per session.
+ * @param session
+ * @param viewportBeforeReveal
+ * @param panned
+ */
+export function noteRevealPanForSidebarSession(
+  session: SidebarViewportSession,
+  viewportBeforeReveal: ViewportSnapshot,
+  panned: boolean,
+): void {
+  if (!panned || session.dirty || session.restore !== null) {
+    return;
+  }
+  session.restore = viewportBeforeReveal;
+}
+
+/**
+ * Marks the session dirty so closing the sidebar will not restore the viewport.
+ * @param session
+ */
+export function markSidebarViewportSessionDirty(session: SidebarViewportSession): void {
+  session.dirty = true;
+  session.restore = null;
+}
+
+/**
+ * Whether a sidebar session should restore its saved viewport on close.
+ * @param session
+ * @returns True when a clean restore snapshot exists.
+ */
+export function shouldRestoreSidebarViewport(session: SidebarViewportSession): boolean {
+  return session.restore !== null && !session.dirty;
+}
+
+/**
+ * Restores the pre-reveal viewport when the session is still clean.
+ * @param cy
+ * @param session
+ * @returns Whether the viewport was restored.
+ */
+export function restoreSidebarViewportIfEligible(
+  cy: Core,
+  session: SidebarViewportSession,
+): boolean {
+  if (!shouldRestoreSidebarViewport(session) || !session.restore) {
+    return false;
+  }
+  cy.viewport(session.restore);
   return true;
 }
 

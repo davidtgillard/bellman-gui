@@ -3,10 +3,15 @@ import {
   autoLayoutOptions,
   compoundGraphMaxZoom,
   compoundSizeForContent,
+  createSidebarViewportSession,
   graphLayoutSeed,
   isNodeObscuredOnRight,
-  panDeltaToCenterNodeHorizontally,
+  markSidebarViewportSessionDirty,
+  noteRevealPanForSidebarSession,
+  panDeltaToRevealNodeOnRight,
+  REVEAL_NODE_RIGHT_PADDING,
   shiftBoxInside,
+  shouldRestoreSidebarViewport,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   TOP_LEVEL_NODE_DIAMETER,
   usesPresetLayout,
@@ -112,9 +117,45 @@ describe("cytoscape-layout", () => {
     expect(isNodeObscuredOnRight({ x2: 120 }, 480)).toBe(false);
   });
 
-  it("computes horizontal pan to centre a node in the viewport", () => {
-    expect(panDeltaToCenterNodeHorizontally(400, 800)).toBe(0);
-    expect(panDeltaToCenterNodeHorizontally(700, 800)).toBe(-300);
-    expect(panDeltaToCenterNodeHorizontally(100, 800)).toBe(300);
+  it("computes horizontal pan to reveal a node clipped on the right", () => {
+    expect(panDeltaToRevealNodeOnRight(500, 480, 8)).toBe(-28);
+    expect(panDeltaToRevealNodeOnRight(500, 480)).toBe(-(500 - 480 + REVEAL_NODE_RIGHT_PADDING));
+    expect(panDeltaToRevealNodeOnRight(400, 480, 8)).toBe(0);
+    expect(panDeltaToRevealNodeOnRight(472, 480, 8)).toBe(0);
+  });
+
+  it("remembers the first reveal pan for sidebar close restore", () => {
+    const session = createSidebarViewportSession();
+    const first = { pan: { x: 10, y: 20 }, zoom: 1 };
+    const second = { pan: { x: 30, y: 40 }, zoom: 1.2 };
+
+    noteRevealPanForSidebarSession(session, first, false);
+    expect(shouldRestoreSidebarViewport(session)).toBe(false);
+
+    noteRevealPanForSidebarSession(session, first, true);
+    expect(session.restore).toEqual(first);
+    expect(shouldRestoreSidebarViewport(session)).toBe(true);
+
+    noteRevealPanForSidebarSession(session, second, true);
+    expect(session.restore).toEqual(first);
+  });
+
+  it("skips sidebar viewport restore after the view or graph is dirtied", () => {
+    const session = createSidebarViewportSession();
+    noteRevealPanForSidebarSession(
+      session,
+      { pan: { x: 10, y: 20 }, zoom: 1 },
+      true,
+    );
+    markSidebarViewportSessionDirty(session);
+    expect(shouldRestoreSidebarViewport(session)).toBe(false);
+    expect(session.restore).toBeNull();
+
+    noteRevealPanForSidebarSession(
+      session,
+      { pan: { x: 50, y: 60 }, zoom: 1 },
+      true,
+    );
+    expect(shouldRestoreSidebarViewport(session)).toBe(false);
   });
 });

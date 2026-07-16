@@ -24,7 +24,12 @@ import type { CompoundGraphScene } from "@dgillard/cytoscape-compound-graph";
 import { layoutModelFromCy } from "@dgillard/cytoscape-compound-graph";
 import {
   applySavedNodePositions,
-  centerSelectedNodeInViewportIfObscured,
+  captureViewportSnapshot,
+  createSidebarViewportSession,
+  markSidebarViewportSessionDirty,
+  noteRevealPanForSidebarSession,
+  revealSelectedNodeInViewportIfObscured,
+  restoreSidebarViewportIfEligible,
   compoundGraphMaxZoom,
   graphNodeModelPosition,
   installTopLevelDragPersistence,
@@ -33,6 +38,7 @@ import {
   runLayoutWhenContainerReady,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   usesPresetLayout,
+  type SidebarViewportSession,
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
 import { defaultNodePosition, type NodePosition, type NodeSize } from "../lib/graph-layout";
@@ -90,6 +96,8 @@ interface RoadmapGraphProps {
   emptyAction?: { label: string; onClick: () => void };
   focusNodeId?: string | null;
   selectedNodeId?: string | null;
+  /** When true, the node detail sidebar is open and may shrink the graph. */
+  nodeDetailOpen?: boolean;
   onNodeClick?: (nodeId: string) => void;
   /** Returns true when React selection state was cleared. */
   onSelectionClear?: () => boolean;
@@ -523,6 +531,7 @@ export function RoadmapGraph({
   emptyAction,
   focusNodeId = null,
   selectedNodeId = null,
+  nodeDetailOpen = false,
   onNodeClick,
   onSelectionClear,
   contextMenu,
@@ -563,6 +572,13 @@ export function RoadmapGraph({
   const layoutReadyRef = useRef(layoutReady);
   const compoundGraphRef = useRef(compoundGraph);
   const selectedNodeIdRef = useRef(selectedNodeId);
+  const nodeDetailOpenRef = useRef(nodeDetailOpen);
+  const sidebarViewportSessionRef = useRef<SidebarViewportSession>(createSidebarViewportSession());
+  const suppressSidebarViewportDirtyRef = useRef(false);
+  const markSidebarViewportDirtyRef = useRef<() => void>(() => {});
+  const revealSelectedNodeForSidebarRef = useRef<
+    (cy: Core, container: HTMLElement, nodeId: string) => void
+  >(() => {});
   const lastSelectedCompoundLeafRef = useRef<string | null>(null);
   const compoundLeafTapRef = useRef<
     ((childId: string, wasSelected: boolean) => void) | null
@@ -627,6 +643,7 @@ export function RoadmapGraph({
     }
     redrawGraphSynchronously(cyRef.current!);
     setGraphSelectionRevision((revision) => revision + 1);
+    markSidebarViewportDirtyRef.current();
     onNodePositionChangeRef.current?.(scene.flatLayout());
   }, []);
 
@@ -929,8 +946,68 @@ export function RoadmapGraph({
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
 
+  const revealSelectedNodeForSidebar = useCallback((cy: Core, container: HTMLElement, nodeId: string) => {
+    if (!nodeDetailOpenRef.current) {
+      return;
+    }
+    const viewportBefore = captureViewportSnapshot(cy);
+    suppressSidebarViewportDirtyRef.current = true;
+    const panned = revealSelectedNodeInViewportIfObscured(cy, container, nodeId);
+    suppressSidebarViewportDirtyRef.current = false;
+    noteRevealPanForSidebarSession(
+      sidebarViewportSessionRef.current,
+      viewportBefore,
+      panned,
+    );
+  }, []);
+  revealSelectedNodeForSidebarRef.current = revealSelectedNodeForSidebar;
+
+  const markSidebarViewportDirty = useCallback(() => {
+    if (!nodeDetailOpenRef.current) {
+      return;
+    }
+    markSidebarViewportSessionDirty(sidebarViewportSessionRef.current);
+  }, []);
+  markSidebarViewportDirtyRef.current = markSidebarViewportDirty;
+
+  useLayoutEffect(() => {
+    const wasOpen = nodeDetailOpenRef.current;
+    nodeDetailOpenRef.current = nodeDetailOpen;
+
+    if (nodeDetailOpen && !wasOpen) {
+      sidebarViewportSessionRef.current = createSidebarViewportSession();
+      return;
+    }
+
+    if (!nodeDetailOpen && wasOpen) {
+      const cy = cyRef.current;
+      if (cy) {
+        suppressSidebarViewportDirtyRef.current = true;
+        restoreSidebarViewportIfEligible(cy, sidebarViewportSessionRef.current);
+        suppressSidebarViewportDirtyRef.current = false;
+      }
+      sidebarViewportSessionRef.current = createSidebarViewportSession();
+    }
+  }, [nodeDetailOpen]);
+
   useEffect(() => {
     nodesRef.current = nodes;
+  }, [nodes]);
+
+  const previousNodeIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const nextIds = new Set(nodes.map((node) => node.id));
+    const previousIds = previousNodeIdsRef.current;
+    previousNodeIdsRef.current = nextIds;
+    if (!previousIds || !nodeDetailOpenRef.current) {
+      return;
+    }
+    for (const id of nextIds) {
+      if (!previousIds.has(id)) {
+        markSidebarViewportDirtyRef.current();
+        break;
+      }
+    }
   }, [nodes]);
 
   useEffect(() => {
@@ -1690,12 +1767,20 @@ export function RoadmapGraph({
       0.2,
     );
 
+    const onUserViewportChange = () => {
+      if (suppressSidebarViewportDirtyRef.current) {
+        return;
+      }
+      markSidebarViewportDirtyRef.current();
+    };
+    cy.on("pan zoom", onUserViewportChange);
+
     const resizeObserver = new ResizeObserver(() => {
       cy.resize();
 
       const selectedId = selectedNodeIdRef.current;
       if (selectedId) {
-        centerSelectedNodeInViewportIfObscured(cy, container, selectedId);
+        revealSelectedNodeForSidebarRef.current(cy, container, selectedId);
       }
 
       // cy.resize() clears the canvas synchronously but defers the repaint to
@@ -1717,6 +1802,7 @@ export function RoadmapGraph({
       topLevelDragCleanupRef.current = null;
       wheelZoomCleanupRef.current?.();
       wheelZoomCleanupRef.current = null;
+      cy.off("pan zoom", onUserViewportChange);
       resizeObserver.disconnect();
       graphStructureKeyRef.current = "";
       layoutCompletedRef.current = false;
@@ -1838,6 +1924,7 @@ export function RoadmapGraph({
       links.length,
       Boolean(hasCompoundNodes),
       (positions) => {
+        markSidebarViewportDirtyRef.current();
         onAutoLayoutCompleteRef.current?.(positions);
       },
       () => {
@@ -1914,6 +2001,7 @@ export function RoadmapGraph({
     topLevelDragCleanupRef.current = installTopLevelDragPersistence(cy, (positions) => {
       redrawGraphSynchronously(cy);
       setGraphSelectionRevision((revision) => revision + 1);
+      markSidebarViewportDirtyRef.current();
       onNodePositionChangeRef.current?.(positions);
     });
 
@@ -2070,11 +2158,11 @@ export function RoadmapGraph({
   useLayoutEffect(() => {
     const cy = cyRef.current;
     const container = containerRef.current;
-    if (!cyReady || !cy || !container || !selectedNodeId) {
+    if (!cyReady || !cy || !container || !selectedNodeId || !nodeDetailOpen) {
       return;
     }
-    centerSelectedNodeInViewportIfObscured(cy, container, selectedNodeId);
-  }, [selectedNodeId, cyReady]);
+    revealSelectedNodeForSidebar(cy, container, selectedNodeId);
+  }, [selectedNodeId, cyReady, nodeDetailOpen, revealSelectedNodeForSidebar]);
 
   useEffect(() => {
     if (
@@ -2127,9 +2215,10 @@ export function RoadmapGraph({
           referenceZoom={compoundReferenceZoom}
           probeLabel={overlayProbeLabel}
           selectedContainerId={compositeChromeId}
-          onResizeComplete={(nodeId, position) =>
-            onNodeResizeRef.current?.(nodeId, position)
-          }
+          onResizeComplete={(nodeId, position) => {
+            markSidebarViewportDirtyRef.current();
+            onNodeResizeRef.current?.(nodeId, position);
+          }}
           onOverlayChange={() => setGraphSelectionRevision((revision) => revision + 1)}
         />
       ) : null}
