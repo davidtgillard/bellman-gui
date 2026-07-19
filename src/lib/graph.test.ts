@@ -85,6 +85,7 @@ describe("parseRoadmapGraph", () => {
   it("maps node type labels and colors", () => {
     expect(nodeTypeLabel("work_package")).toBe("Work Package");
     expect(nodeTypeColor("initiative")).toBe("#3b82f6");
+    expect(nodeTypeColor("milestone")).toBe("#eab308");
     expect(nodeTypeColor("unknown")).toBe("#64748b");
   });
 

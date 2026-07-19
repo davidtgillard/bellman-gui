@@ -468,6 +468,107 @@ body {
   pointer-events: none;
 }
 
+.milestone-overlays-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.milestone-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  transform: translateY(-50%);
+}
+
+.milestone-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(234 179 8 / 0.35) 8%,
+    rgb(234 179 8 / 0.55) 50%,
+    rgb(234 179 8 / 0.35) 92%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.milestone-overlay.is-selected .milestone-band {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(56 189 248 / 0.35) 8%,
+    rgb(56 189 248 / 0.65) 50%,
+    rgb(56 189 248 / 0.35) 92%,
+    transparent 100%
+  );
+  height: 3px;
+}
+
+.milestone-pennant-cluster {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.milestone-pennant {
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 1px rgb(15 23 42 / 0.55));
+}
+
+.milestone-overlay.is-selected .milestone-pennant-cluster {
+  outline: 2px solid #38bdf8;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.milestone-overlay-labels {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  max-width: 10rem;
+}
+
+.milestone-overlay-title,
+.milestone-overlay-date {
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #e2e8f0;
+  text-shadow:
+    0 0 2px #0f172a,
+    0 0 2px #0f172a,
+    1px 0 0 #0f172a,
+    -1px 0 0 #0f172a,
+    0 1px 0 #0f172a,
+    0 -1px 0 #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.milestone-overlay-date {
+  font-size: 10px;
+  color: #fde68a;
+}
+
 .compound-parent-overlay {
   position: absolute;
   z-index: 1;

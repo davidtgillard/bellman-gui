@@ -168,7 +168,7 @@ export const NODE_TYPE_COLORS: Record<string, string> = {
   initiative: "#3b82f6",
   project: "#22c55e",
   work_package: "#94a3b8",
-  milestone: "#f97316",
+  milestone: "#eab308",
   goal: "#a855f7",
 };
 

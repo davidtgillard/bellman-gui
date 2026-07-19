@@ -1967,6 +1967,115 @@ export function collectDragPersistencePositions(
 }
 
 /**
+ * Model-space X of the horizontal center of the Cytoscape viewport.
+ * Used so milestone pennants stay centered as the camera pans/zooms.
+ * @param cy - Cytoscape instance.
+ * @returns Model X at the viewport's horizontal center.
+ */
+export function viewportCenterModelX(cy: Core): number {
+  const container = cy.container();
+  const width = container?.clientWidth ?? 0;
+  const pan = cy.pan();
+  const zoom = cy.zoom();
+  if (!(zoom > 0) || width <= 0) {
+    return 0;
+  }
+  return (width / 2 - pan.x) / zoom;
+}
+
+/**
+ * Whether a Cytoscape node is a milestone anchor (pennant band).
+ * @param node - Cytoscape node to inspect.
+ * @returns True when the node's registry type is `milestone`.
+ */
+export function isMilestoneNode(node: NodeSingular): boolean {
+  return node.data("type") === "milestone";
+}
+
+/**
+ * Pins every visible milestone node's model X to the viewport center.
+ * Does not persist layout; call after pan/zoom/resize/layout apply.
+ * Later milestones sit higher on screen (smaller Y); X is not meaningful.
+ * @param cy - Cytoscape instance.
+ * @returns Whether any milestone position was updated.
+ */
+export function syncMilestoneNodesToViewportCenter(cy: Core): boolean {
+  const centerX = viewportCenterModelX(cy);
+  let changed = false;
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      if (!isMilestoneNode(node) || node.style("display") === "none") {
+        return;
+      }
+      const position = node.position();
+      if (position.x !== centerX) {
+        node.position({ x: centerX, y: position.y });
+        changed = true;
+      }
+    });
+  });
+  return changed;
+}
+
+/**
+ * Keeps milestone anchors centered horizontally on viewport changes.
+ * @param cy - Cytoscape instance.
+ * @param onSynced - Optional callback after a sync that moved nodes (e.g. redraw overlay).
+ * @returns Cleanup function.
+ */
+export function installMilestoneViewportSync(
+  cy: Core,
+  onSynced?: () => void,
+): () => void {
+  const sync = () => {
+    syncMilestoneNodesToViewportCenter(cy);
+    onSynced?.();
+  };
+
+  cy.on("viewport", sync);
+  cy.on("resize", sync);
+  sync();
+
+  return () => {
+    cy.removeListener("viewport", sync);
+    cy.removeListener("resize", sync);
+  };
+}
+
+/**
+ * Constrains milestone drags to the vertical axis and keeps X at viewport center.
+ * Time advances upward on screen (smaller Cytoscape Y = later).
+ * @param cy - Cytoscape instance.
+ * @returns Cleanup function.
+ */
+export function installMilestoneYOnlyDrag(cy: Core): () => void {
+  const lockMilestoneX = (node: NodeSingular) => {
+    if (!isMilestoneNode(node)) {
+      return;
+    }
+    const centerX = viewportCenterModelX(cy);
+    const y = node.position("y");
+    node.position({ x: centerX, y });
+  };
+
+  const onGrab = (event: EventObject) => {
+    lockMilestoneX(event.target as NodeSingular);
+  };
+
+  const onDrag = (event: EventObject) => {
+    lockMilestoneX(event.target as NodeSingular);
+  };
+
+  cy.on("grab", "node", onGrab);
+  cy.on("drag", "node", onDrag);
+
+  return () => {
+    cy.removeListener("grab", "node", onGrab);
+    cy.removeListener("drag", "node", onDrag);
+  };
+}
+
+/**
  * Persists top-level (non-compound) node positions after the user finishes a drag.
  * Work-package compound graphs use scene drag handlers instead.
  * @param cy - Cytoscape instance containing the graph nodes.

@@ -57,11 +57,34 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
+    // Invisible hit target: MilestoneOverlays draws the pennant/band/date.
+    // Lower z-index so other nodes win grabs when overlapping the flag.
+    selector: "node[type = 'milestone']",
+    style: {
+      "background-opacity": 0,
+      "border-opacity": 0,
+      "text-opacity": 0,
+      width: 28,
+      height: 22,
+      shape: "rectangle",
+      "z-index": 1,
+      "overlay-opacity": 0,
+    },
+  },
+  {
     selector: "node:selected:childless:not([kind = 'leaf'])",
     style: {
       "border-width": 3,
       "border-color": "#38bdf8",
       "border-opacity": 1,
+    },
+  },
+  {
+    selector: "node[type = 'milestone']:selected",
+    style: {
+      "background-opacity": 0,
+      "border-opacity": 0,
+      "overlay-opacity": 0,
     },
   },
   {

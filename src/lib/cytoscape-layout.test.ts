@@ -16,6 +16,7 @@ import {
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   TOP_LEVEL_NODE_DIAMETER,
   usesPresetLayout,
+  viewportCenterModelX,
   wheelZoomLevel,
 } from "./cytoscape-layout";
 import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH, COMPOUND_PADDING } from "./cytoscape-theme";
@@ -110,6 +111,15 @@ describe("cytoscape-layout", () => {
 
     expect(maxZoom).toBe(TOP_LEVEL_GRAPH_MAX_ZOOM * referenceZoom);
     expect(leafMaxScreen).toBeCloseTo(topLevelMaxScreen);
+  });
+
+  it("maps the viewport horizontal center into model X", () => {
+    const cy = {
+      container: () => ({ clientWidth: 400 }),
+      pan: () => ({ x: 100, y: 0 }),
+      zoom: () => 2,
+    };
+    expect(viewportCenterModelX(cy as never)).toBe(50);
   });
 
   it("detects when a node extends past the right edge of the viewport", () => {

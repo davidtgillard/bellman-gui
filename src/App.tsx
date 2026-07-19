@@ -93,6 +93,7 @@ import {
   type DependencyWarning,
   type NodeDetail,
 } from "./lib/node-detail";
+import { parseMilestoneDate } from "./lib/milestone-date";
 import { slugify } from "./lib/node-content-validation";
 import {
   loadLegendVisibility,
@@ -161,6 +162,7 @@ function App() {
     ),
   );
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [milestoneDates, setMilestoneDates] = useState<Record<string, string>>({});
   const [graphViewStack, setGraphViewStack] =
     useState<GraphViewFrame[]>(INITIAL_GRAPH_VIEW_STACK);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -290,6 +292,47 @@ function App() {
     }
     saveLegendVisibility(roadmapRoot, visibleTypes);
   }, [roadmapRoot, visibleTypes]);
+
+  useEffect(() => {
+    const milestones = topLevelGraphNodes(nodes).filter(
+      (node) => node.type === "milestone",
+    );
+    let cancelled = false;
+
+    const loadDates = async (): Promise<Record<string, string>> => {
+      if (milestones.length === 0) {
+        return {};
+      }
+      const entries = await Promise.all(
+        milestones.map(async (node) => {
+          try {
+            const detail = await loadNodeDetail(roadmapRoot, node.id, node.type);
+            const date = parseMilestoneDate(detail.markdown);
+            return date ? ([node.id, date] as const) : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const next: Record<string, string> = {};
+      for (const entry of entries) {
+        if (entry) {
+          next[entry[0]] = entry[1];
+        }
+      }
+      return next;
+    };
+
+    void loadDates().then((next) => {
+      if (!cancelled) {
+        setMilestoneDates(next);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nodes, roadmapRoot]);
 
   const refreshUndoState = useCallback(
     async (root: string, isEditable: boolean): Promise<UndoStatus | null> => {
@@ -1163,11 +1206,13 @@ function App() {
         return {
           id: node.id,
           label: nodeLabel(node.id),
+          subLabel:
+            node.type === "milestone" ? milestoneDates[node.id] : undefined,
           fill: nodeTypeColor(node.type),
           data: { type: node.type },
         };
       }),
-    [compoundView, displayGraph.nodes],
+    [compoundView, displayGraph.nodes, milestoneDates],
   );
 
   const graphViewLinks = useMemo(

@@ -32,15 +32,19 @@ import {
   restoreSidebarViewportIfEligible,
   compoundGraphMaxZoom,
   graphNodeModelPosition,
+  installMilestoneViewportSync,
+  installMilestoneYOnlyDrag,
   installTopLevelDragPersistence,
   installWheelZoom,
   redrawGraphSynchronously,
   runLayoutWhenContainerReady,
+  syncMilestoneNodesToViewportCenter,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   usesPresetLayout,
   type SidebarViewportSession,
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
+import { MilestoneOverlays } from "./MilestoneOverlays";
 import { defaultNodePosition, type NodePosition, type NodeSize } from "../lib/graph-layout";
 import { graphNodeDisplayLabel, isRenameableNodeType, nodeLabel } from "../lib/graph";
 import { slugify } from "../lib/node-content-validation";
@@ -555,6 +559,8 @@ export function RoadmapGraph({
   const sceneChildDragCleanupRef = useRef<(() => void) | null>(null);
   const sceneParentDragCleanupRef = useRef<(() => void) | null>(null);
   const topLevelDragCleanupRef = useRef<(() => void) | null>(null);
+  const milestoneViewportSyncCleanupRef = useRef<(() => void) | null>(null);
+  const milestoneYOnlyDragCleanupRef = useRef<(() => void) | null>(null);
   const wheelZoomCleanupRef = useRef<(() => void) | null>(null);
   const graphStructureKeyRef = useRef("");
   const sceneRef = useRef<CompoundGraphScene | null>(null);
@@ -1855,6 +1861,10 @@ export function RoadmapGraph({
       sceneParentDragCleanupRef.current = null;
       topLevelDragCleanupRef.current?.();
       topLevelDragCleanupRef.current = null;
+      milestoneViewportSyncCleanupRef.current?.();
+      milestoneViewportSyncCleanupRef.current = null;
+      milestoneYOnlyDragCleanupRef.current?.();
+      milestoneYOnlyDragCleanupRef.current = null;
       wheelZoomCleanupRef.current?.();
       wheelZoomCleanupRef.current = null;
       cy.off("dragpan", onUserDragPan);
@@ -1945,6 +1955,9 @@ export function RoadmapGraph({
         applyGraphVisibility(cy, true);
         if (hasCompoundNodesAfter) {
           initializeCompoundScene(cy);
+        } else {
+          // Keep pennants at viewport center after restoring saved Y positions.
+          syncMilestoneNodesToViewportCenter(cy);
         }
         lastLayoutSyncTokenRef.current = layoutSyncToken;
         previousCompoundGraphForLayoutRef.current = compoundGraph;
@@ -1990,6 +2003,7 @@ export function RoadmapGraph({
             initializeCompoundScene(cyRef.current);
           } else {
             measureCompoundSizes();
+            syncMilestoneNodesToViewportCenter(cyRef.current);
           }
         }
       },
@@ -2022,6 +2036,9 @@ export function RoadmapGraph({
     }
 
     applyGraphVisibility(cy, true);
+    if (!compoundGraphRef.current) {
+      syncMilestoneNodesToViewportCenter(cy);
+    }
   }, [applyGraphVisibility, cyReady, visibleNodeIds]);
 
   useEffect(() => {
@@ -2049,6 +2066,8 @@ export function RoadmapGraph({
     if (!cyReady || !cy || !draggable || compoundGraph) {
       topLevelDragCleanupRef.current?.();
       topLevelDragCleanupRef.current = null;
+      milestoneYOnlyDragCleanupRef.current?.();
+      milestoneYOnlyDragCleanupRef.current = null;
       return;
     }
 
@@ -2060,11 +2079,68 @@ export function RoadmapGraph({
       onNodePositionChangeRef.current?.(positions);
     });
 
+    milestoneYOnlyDragCleanupRef.current?.();
+    milestoneYOnlyDragCleanupRef.current = installMilestoneYOnlyDrag(cy);
+
     return () => {
       topLevelDragCleanupRef.current?.();
       topLevelDragCleanupRef.current = null;
+      milestoneYOnlyDragCleanupRef.current?.();
+      milestoneYOnlyDragCleanupRef.current = null;
     };
   }, [compoundGraph, cyReady, draggable]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy || compoundGraph) {
+      milestoneViewportSyncCleanupRef.current?.();
+      milestoneViewportSyncCleanupRef.current = null;
+      return;
+    }
+
+    milestoneViewportSyncCleanupRef.current?.();
+    milestoneViewportSyncCleanupRef.current = installMilestoneViewportSync(cy, () => {
+      redrawGraphSynchronously(cy);
+    });
+
+    return () => {
+      milestoneViewportSyncCleanupRef.current?.();
+      milestoneViewportSyncCleanupRef.current = null;
+    };
+  }, [compoundGraph, cyReady, nodes, links, layoutSyncToken]);
+
+  // Async milestone dates arrive as subLabel without a structure change; push into Cy.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy || compoundGraph) {
+      return;
+    }
+
+    let updated = false;
+    cy.batch(() => {
+      for (const node of nodes) {
+        if (node.data?.type !== "milestone") {
+          continue;
+        }
+        const cyNode = cy.getElementById(node.id);
+        if (cyNode.empty()) {
+          continue;
+        }
+        const baseLabel = graphNodeDisplayLabel(node.label ?? node.id);
+        const label = node.subLabel
+          ? `${baseLabel}\n${graphNodeDisplayLabel(node.subLabel)}`
+          : baseLabel;
+        if (cyNode.data("label") !== label || cyNode.data("subLabel") !== node.subLabel) {
+          cyNode.data("label", label);
+          cyNode.data("subLabel", node.subLabel ?? null);
+          updated = true;
+        }
+      }
+    });
+    if (updated) {
+      setGraphSelectionRevision((revision) => revision + 1);
+    }
+  }, [compoundGraph, cyReady, nodes]);
 
   useEffect(() => {
     const shell = graphContainerRef.current;
@@ -2275,6 +2351,13 @@ export function RoadmapGraph({
             onNodeResizeRef.current?.(nodeId, position);
           }}
           onOverlayChange={() => setGraphSelectionRevision((revision) => revision + 1)}
+        />
+      ) : null}
+      {!compoundGraph && cyInstance && cyReady ? (
+        <MilestoneOverlays
+          cy={cyInstance}
+          visibleNodeIds={visibleNodeIds}
+          revision={graphSelectionRevision}
         />
       ) : null}
       {nodes.length === 0 || allTypesHidden ? (
