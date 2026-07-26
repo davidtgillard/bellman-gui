@@ -49,6 +49,8 @@ jobs:
         run: bash packaging/install-linux-deps.sh
 
       - name: Prepare bellman sidecar
+        env:
+          REQUIRE_SIDECAR_DOWNLOAD: "1"
         run: bash packaging/prepare-sidecar.sh
 
       - run: cargo test
@@ -58,8 +60,18 @@ jobs:
         working-directory: src-tauri
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     needs: [frontend, rust]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+          - platform: windows
+            runner: windows-latest
+          - platform: macos
+            runner: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -73,18 +85,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ci-${{ matrix.platform }}
 
       - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
         run: bash packaging/install-linux-deps.sh
 
       - name: Prepare cytoscape-compound-graph dependency
+        shell: bash
         run: bash packaging/prepare-compound-graph.sh
 
       - run: npm ci
+        shell: bash
 
       - name: Prepare bellman sidecar
+        shell: bash
+        env:
+          REQUIRE_SIDECAR_DOWNLOAD: "1"
         run: bash packaging/prepare-sidecar.sh
 
-      # Compile the release binary without AppImage packaging (faster CI).
-      # The release-dev workflow builds and publishes the signed AppImage.
+      # Compile the release binary without packaging (faster CI).
+      # The release-dev workflow builds and publishes signed platform bundles.
       - run: npm run tauri build -- --no-bundle
+        shell: bash

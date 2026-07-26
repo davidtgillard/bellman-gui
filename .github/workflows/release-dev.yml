@@ -7,10 +7,20 @@ on:
 
 jobs:
   build:
-    name: Build AppImage
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+          - platform: windows
+            runner: windows-latest
+          - platform: macos
+            runner: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -24,22 +34,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: release-${{ matrix.platform }}
 
       - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
         run: bash packaging/install-linux-deps.sh
 
       - name: Prepare cytoscape-compound-graph dependency
+        shell: bash
         run: bash packaging/prepare-compound-graph.sh
 
       - run: npm ci
+        shell: bash
 
       - name: Prepare bellman sidecar
+        shell: bash
+        env:
+          REQUIRE_SIDECAR_DOWNLOAD: "1"
         run: bash packaging/prepare-sidecar.sh
 
       - name: Stamp release version
+        shell: bash
         run: bash packaging/stamp-version.sh "0.1.${{ github.run_number }}"
 
-      - name: Build AppImage
+      - name: Build release bundles
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           # Key was generated without a password. GitHub rejects empty secrets, so
@@ -47,10 +66,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm run tauri build
 
-      - name: Stage release artifacts
-        env:
-          VERSION: "0.1.${{ github.run_number }}"
-          REPO: ${{ github.repository }}
+      - name: Stage Linux release artifacts
+        if: matrix.platform == 'linux'
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/release
@@ -69,18 +87,66 @@ jobs:
           fi
           cp "${APPIMAGE}" dist/release/
           cp "${SIG}" dist/release/
-          bash packaging/write-latest-json.sh \
-            --version "${VERSION}" \
-            --appimage "${APPIMAGE}" \
-            --sig "${SIG}" \
-            --repo "${REPO}" \
-            --out dist/release/latest.json
+          ls -la dist/release
+
+      - name: Stage Windows release artifacts
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          NSIS_DIR="src-tauri/target/release/bundle/nsis"
+          mapfile -t SETUPS < <(find "${NSIS_DIR}" -maxdepth 1 -type f -name '*-setup.exe' | sort)
+          if [[ "${#SETUPS[@]}" -ne 1 ]]; then
+            echo "Expected exactly one NSIS setup exe in ${NSIS_DIR}, found ${#SETUPS[@]}" >&2
+            ls -la "${NSIS_DIR}" >&2 || true
+            exit 1
+          fi
+          SETUP="${SETUPS[0]}"
+          SIG="${SETUP}.sig"
+          if [[ ! -f "${SIG}" ]]; then
+            echo "Missing signature: ${SIG}" >&2
+            exit 1
+          fi
+          cp "${SETUP}" dist/release/
+          cp "${SIG}" dist/release/
+          ls -la dist/release
+
+      - name: Stage macOS release artifacts
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          MACOS_DIR="src-tauri/target/release/bundle/macos"
+          DMG_DIR="src-tauri/target/release/bundle/dmg"
+          mapfile -t TARBALLS < <(find "${MACOS_DIR}" -maxdepth 1 -type f -name '*.app.tar.gz' | sort)
+          if [[ "${#TARBALLS[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .app.tar.gz in ${MACOS_DIR}, found ${#TARBALLS[@]}" >&2
+            ls -la "${MACOS_DIR}" >&2 || true
+            exit 1
+          fi
+          TARBALL="${TARBALLS[0]}"
+          SIG="${TARBALL}.sig"
+          if [[ ! -f "${SIG}" ]]; then
+            echo "Missing signature: ${SIG}" >&2
+            exit 1
+          fi
+          mapfile -t DMGS < <(find "${DMG_DIR}" -maxdepth 1 -type f -name '*.dmg' | sort)
+          if [[ "${#DMGS[@]}" -ne 1 ]]; then
+            echo "Expected exactly one DMG in ${DMG_DIR}, found ${#DMGS[@]}" >&2
+            ls -la "${DMG_DIR}" >&2 || true
+            exit 1
+          fi
+          cp "${TARBALL}" dist/release/
+          cp "${SIG}" dist/release/
+          cp "${DMGS[0]}" dist/release/
           ls -la dist/release
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bellman-gui-appimage
+          name: bellman-gui-${{ matrix.platform }}
           path: dist/release/*
 
   publish-dev-release:
@@ -90,22 +156,80 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download release artifacts
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bellman-gui-appimage
+          name: bellman-gui-linux
           path: release
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bellman-gui-windows
+          path: release
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bellman-gui-macos
+          path: release
+
+      - name: Build latest.json
+        env:
+          VERSION: "0.1.${{ github.run_number }}"
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          APPIMAGES=(release/*.AppImage)
+          APPIMAGE_SIGS=(release/*.AppImage.sig)
+          SETUPS=(release/*-setup.exe)
+          SETUP_SIGS=(release/*-setup.exe.sig)
+          TARBALLS=(release/*.app.tar.gz)
+          TARBALL_SIGS=(release/*.app.tar.gz.sig)
+          if [[ "${#APPIMAGES[@]}" -ne 1 || "${#APPIMAGE_SIGS[@]}" -ne 1 ]]; then
+            echo "Expected one AppImage and .sig" >&2
+            ls -la release >&2
+            exit 1
+          fi
+          if [[ "${#SETUPS[@]}" -ne 1 || "${#SETUP_SIGS[@]}" -ne 1 ]]; then
+            echo "Expected one NSIS setup exe and .sig" >&2
+            ls -la release >&2
+            exit 1
+          fi
+          if [[ "${#TARBALLS[@]}" -ne 1 || "${#TARBALL_SIGS[@]}" -ne 1 ]]; then
+            echo "Expected one .app.tar.gz and .sig" >&2
+            ls -la release >&2
+            exit 1
+          fi
+          bash packaging/write-latest-json.sh \
+            --version "${VERSION}" \
+            --repo "${REPO}" \
+            --out release/latest.json \
+            --platform linux-x86_64 "${APPIMAGES[0]}" "${APPIMAGE_SIGS[0]}" \
+            --platform windows-x86_64 "${SETUPS[0]}" "${SETUP_SIGS[0]}" \
+            --platform darwin-aarch64 "${TARBALLS[0]}" "${TARBALL_SIGS[0]}"
+          ls -la release
 
       - name: Ensure dev release exists
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-          gh release create dev \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Development AppImage" \
-            --notes "Rolling development AppImage for bellman-gui (linux-x86_64)." \
-            --prerelease
+          if gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit dev \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Development builds" \
+              --notes "Rolling development builds for bellman-gui (linux-x86_64 AppImage, windows-x86_64 NSIS, darwin-aarch64 DMG)." \
+              --prerelease
+          else
+            gh release create dev \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Development builds" \
+              --notes "Rolling development builds for bellman-gui (linux-x86_64 AppImage, windows-x86_64 NSIS, darwin-aarch64 DMG)." \
+              --prerelease
+          fi
 
       - name: Remove existing dev assets
         env:

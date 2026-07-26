@@ -184,8 +184,10 @@ mod tests {
 
     #[test]
     fn round_trips_update_state_file() {
+        // Share the lock with settings tests that also mutate XDG_CONFIG_HOME.
+        let _lock = crate::settings::config_env_lock();
         let temp = TempDir::new().expect("temp dir");
-        let previous = env::var("XDG_CONFIG_HOME").ok();
+        let previous = env::var_os("XDG_CONFIG_HOME");
         env::set_var("XDG_CONFIG_HOME", temp.path());
 
         let written = touch_update_check_command().expect("touch");
@@ -194,10 +196,9 @@ mod tests {
         assert!(!status.should_check);
         assert_eq!(status.last_update_check, written.last_update_check);
 
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
+        match previous {
+            Some(value) => env::set_var("XDG_CONFIG_HOME", value),
+            None => env::remove_var("XDG_CONFIG_HOME"),
         }
     }
 }
