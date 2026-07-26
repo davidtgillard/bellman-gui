@@ -73,13 +73,13 @@ jobs:
           set -euo pipefail
           mkdir -p dist/release
           APPIMAGE_DIR="src-tauri/target/release/bundle/appimage"
-          mapfile -t APPIMAGES < <(find "${APPIMAGE_DIR}" -maxdepth 1 -type f -name '*.AppImage' | sort)
-          if [[ "${#APPIMAGES[@]}" -ne 1 ]]; then
-            echo "Expected exactly one AppImage in ${APPIMAGE_DIR}, found ${#APPIMAGES[@]}" >&2
+          COUNT="$(find "${APPIMAGE_DIR}" -maxdepth 1 -type f -name '*.AppImage' | wc -l | tr -d '[:space:]')"
+          if [[ "${COUNT}" -ne 1 ]]; then
+            echo "Expected exactly one AppImage in ${APPIMAGE_DIR}, found ${COUNT}" >&2
             ls -la "${APPIMAGE_DIR}" >&2 || true
             exit 1
           fi
-          APPIMAGE="${APPIMAGES[0]}"
+          APPIMAGE="$(find "${APPIMAGE_DIR}" -maxdepth 1 -type f -name '*.AppImage' | sort | head -n 1)"
           SIG="${APPIMAGE}.sig"
           if [[ ! -f "${SIG}" ]]; then
             echo "Missing signature: ${SIG}" >&2
@@ -96,13 +96,13 @@ jobs:
           set -euo pipefail
           mkdir -p dist/release
           NSIS_DIR="src-tauri/target/release/bundle/nsis"
-          mapfile -t SETUPS < <(find "${NSIS_DIR}" -maxdepth 1 -type f -name '*-setup.exe' | sort)
-          if [[ "${#SETUPS[@]}" -ne 1 ]]; then
-            echo "Expected exactly one NSIS setup exe in ${NSIS_DIR}, found ${#SETUPS[@]}" >&2
+          COUNT="$(find "${NSIS_DIR}" -maxdepth 1 -type f -name '*-setup.exe' | wc -l | tr -d '[:space:]')"
+          if [[ "${COUNT}" -ne 1 ]]; then
+            echo "Expected exactly one NSIS setup exe in ${NSIS_DIR}, found ${COUNT}" >&2
             ls -la "${NSIS_DIR}" >&2 || true
             exit 1
           fi
-          SETUP="${SETUPS[0]}"
+          SETUP="$(find "${NSIS_DIR}" -maxdepth 1 -type f -name '*-setup.exe' | sort | head -n 1)"
           SIG="${SETUP}.sig"
           if [[ ! -f "${SIG}" ]]; then
             echo "Missing signature: ${SIG}" >&2
@@ -120,27 +120,28 @@ jobs:
           mkdir -p dist/release
           MACOS_DIR="src-tauri/target/release/bundle/macos"
           DMG_DIR="src-tauri/target/release/bundle/dmg"
-          mapfile -t TARBALLS < <(find "${MACOS_DIR}" -maxdepth 1 -type f -name '*.app.tar.gz' | sort)
-          if [[ "${#TARBALLS[@]}" -ne 1 ]]; then
-            echo "Expected exactly one .app.tar.gz in ${MACOS_DIR}, found ${#TARBALLS[@]}" >&2
+          TARBALL_COUNT="$(find "${MACOS_DIR}" -maxdepth 1 -type f -name '*.app.tar.gz' | wc -l | tr -d '[:space:]')"
+          if [[ "${TARBALL_COUNT}" -ne 1 ]]; then
+            echo "Expected exactly one .app.tar.gz in ${MACOS_DIR}, found ${TARBALL_COUNT}" >&2
             ls -la "${MACOS_DIR}" >&2 || true
             exit 1
           fi
-          TARBALL="${TARBALLS[0]}"
+          TARBALL="$(find "${MACOS_DIR}" -maxdepth 1 -type f -name '*.app.tar.gz' | sort | head -n 1)"
           SIG="${TARBALL}.sig"
           if [[ ! -f "${SIG}" ]]; then
             echo "Missing signature: ${SIG}" >&2
             exit 1
           fi
-          mapfile -t DMGS < <(find "${DMG_DIR}" -maxdepth 1 -type f -name '*.dmg' | sort)
-          if [[ "${#DMGS[@]}" -ne 1 ]]; then
-            echo "Expected exactly one DMG in ${DMG_DIR}, found ${#DMGS[@]}" >&2
+          DMG_COUNT="$(find "${DMG_DIR}" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d '[:space:]')"
+          if [[ "${DMG_COUNT}" -ne 1 ]]; then
+            echo "Expected exactly one DMG in ${DMG_DIR}, found ${DMG_COUNT}" >&2
             ls -la "${DMG_DIR}" >&2 || true
             exit 1
           fi
+          DMG="$(find "${DMG_DIR}" -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
           cp "${TARBALL}" dist/release/
           cp "${SIG}" dist/release/
-          cp "${DMGS[0]}" dist/release/
+          cp "${DMG}" dist/release/
           ls -la dist/release
 
       - name: Upload release artifacts
