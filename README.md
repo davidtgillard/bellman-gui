@@ -8,16 +8,21 @@ On first launch the app shows a bundled example roadmap. After you open a roadma
 
 ## Prerequisites
 
-**Development** (Linux):
+**Development:**
 
 - [Node.js](https://nodejs.org/) LTS
 - [Rust](https://rustup.rs/)
-- Tauri system dependencies — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, etc.)
+- Tauri system dependencies — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+  - Linux: `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, etc.
+  - Windows: Microsoft C++ Build Tools and WebView2 (usually preinstalled on Windows 10/11)
+  - macOS: Xcode Command Line Tools
 
-**Running a release AppImage** (Linux):
+**Running a release build:**
 
-- FUSE / AppImage runtime support (most desktop distros; install `libfuse2` on Ubuntu if needed)
-- No separate bellman install required (the CLI is bundled as a sidecar inside the AppImage)
+- **Linux AppImage** — FUSE / AppImage runtime support (install `libfuse2` on Ubuntu if needed)
+- **Windows NSIS** — WebView2 runtime (installer can bootstrap it if missing)
+- **macOS DMG** — Apple Silicon (arm64). Rolling `dev` builds are not Apple-notarized; Gatekeeper may require right-click → **Open** on first launch
+- No separate bellman install required (the CLI is bundled as a sidecar)
 
 ## Development
 
@@ -35,10 +40,10 @@ Other commands:
 ```bash
 npm run test          # Vitest unit tests
 npm run lint          # ESLint
-npm run tauri build   # Production AppImage build
+npm run tauri build   # Production bundles for the current OS
 ```
 
-To build a signed AppImage locally (requires the updater signing private key):
+To build signed release bundles locally (requires the updater signing private key):
 
 ```bash
 bash packaging/prepare-sidecar.sh
@@ -47,7 +52,7 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 npm run tauri build
 ```
 
-The AppImage and `.sig` land under `src-tauri/target/release/bundle/appimage/`.
+Artifacts land under `src-tauri/target/release/bundle/` (`appimage/`, `nsis/`, `macos/`, `dmg/` depending on host OS).
 
 ## Using the app
 
@@ -114,13 +119,28 @@ To inspect undo/redo stack activity while developing:
 
 ### Self-update
 
-Release AppImages check for updates in the background (at most once per 24 hours by default) and show a banner when a newer build is available. Use **Help → Check for Updates…** to check immediately, and **Update now** on the banner to download, install, and relaunch.
+Release builds check for updates in the background (at most once per 24 hours by default) and show a banner when a newer build is available. Use **Help → Check for Updates…** to check immediately, and **Update now** on the banner to download, install, and relaunch.
 
-Update settings live in `$XDG_CONFIG_HOME/bellman-gui/settings.json` (`update_check_interval_hours`, default `24`; `last_roadmap_root` remembers the last opened project). Last-check state is stored in `update-state.json` next to that file.
+All platforms share the rolling [`dev`](https://github.com/davidtgillard/bellman-gui/releases/tag/dev) channel and `latest.json`. The updater verifies minisign signatures, then installs a platform-specific payload:
+
+| Platform | First-time install | Updater downloads |
+|---|---|---|
+| Linux x86_64 | `.AppImage` | same `.AppImage` (replaced in place) |
+| Windows x86_64 | NSIS `*-setup.exe` | same NSIS installer (app quits, passive install, relaunch) |
+| macOS aarch64 | `.dmg` | `.app.tar.gz` extracted over the installed `.app` (not the DMG) |
+
+Update settings live in:
+
+- Linux/macOS: `$XDG_CONFIG_HOME/bellman-gui/settings.json` (default `~/.config/bellman-gui/settings.json`)
+- Windows: `%APPDATA%\bellman-gui\settings.json`
+
+`update_check_interval_hours` defaults to `24`; `last_roadmap_root` remembers the last opened project. Last-check state is stored in `update-state.json` next to that file.
 
 ## Releases
 
-Rolling **linux-x86_64** AppImages are published to the [`dev` release](https://github.com/davidtgillard/bellman-gui/releases/tag/dev). Each CI run stamps version `0.1.<run_number>` so the in-app updater can detect newer builds.
+Rolling multi-platform builds are published to the [`dev` release](https://github.com/davidtgillard/bellman-gui/releases/tag/dev). Each CI run stamps version `0.1.<run_number>` so the in-app updater can detect newer builds.
+
+**Linux (AppImage):**
 
 ```bash
 curl -fsSL -o bellman-gui.AppImage \
@@ -129,13 +149,17 @@ chmod +x bellman-gui.AppImage
 ./bellman-gui.AppImage
 ```
 
-The AppImage includes the GUI and a bundled `bellman` CLI sidecar. The updater reads `latest.json` from the same `dev` release.
+**Windows (NSIS):** download `bellman-gui_0.1.VERSION_x64-setup.exe` from the [`dev` release](https://github.com/davidtgillard/bellman-gui/releases/tag/dev) and run the installer.
+
+**macOS (Apple Silicon DMG):** download `bellman-gui_0.1.VERSION_aarch64.dmg` from the same release, open it, and drag the app to Applications. If Gatekeeper blocks the unsigned `dev` build, right-click the app and choose **Open**.
+
+Each bundle includes the GUI and a bundled `bellman` CLI sidecar. The updater reads `latest.json` from the same `dev` release (`linux-x86_64`, `windows-x86_64`, `darwin-aarch64`).
 
 ### Signing secrets (maintainers)
 
 Release builds require the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY` (contents of the updater private key). The committed keypair was generated without a password; the release workflow sets `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to an empty string. Do not create a password secret unless you regenerate a password-protected key.
 
-The matching public key is committed in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
+The matching public key is committed in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. Apple Developer ID / notarization and Windows Authenticode are not configured for rolling `dev` builds.
 
 ## License
 

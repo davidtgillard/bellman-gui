@@ -46,6 +46,26 @@ pub fn settings_path() -> PathBuf {
             .join("settings.json");
     }
 
+    #[cfg(windows)]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            if !appdata.trim().is_empty() {
+                return PathBuf::from(appdata)
+                    .join("bellman-gui")
+                    .join("settings.json");
+            }
+        }
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            if !profile.trim().is_empty() {
+                return PathBuf::from(profile)
+                    .join("AppData")
+                    .join("Roaming")
+                    .join("bellman-gui")
+                    .join("settings.json");
+            }
+        }
+    }
+
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
             .join(".config")
@@ -141,32 +161,72 @@ pub fn clear_last_roadmap_command() {
     set_last_roadmap_root(None);
 }
 
+/// Serializes tests that mutate process-wide config env vars (`XDG_CONFIG_HOME`, etc.).
+#[cfg(test)]
+pub(crate) fn config_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+    use std::sync::MutexGuard;
     use tempfile::TempDir;
 
-    #[test]
-    fn defaults_when_settings_file_is_missing() {
-        let temp = TempDir::new().expect("temp dir");
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
+    /// Holds the config-env mutex and restores `XDG_CONFIG_HOME` on drop.
+    struct XdgConfigHomeGuard {
+        _lock: MutexGuard<'static, ()>,
+        previous: Option<OsString>,
+        temp: TempDir,
+    }
 
-        let settings = load_settings();
-        assert_eq!(settings, BellmanGuiSettingsDto::default());
+    impl XdgConfigHomeGuard {
+        fn new() -> Self {
+            let lock = config_env_lock();
+            let temp = TempDir::new().expect("temp dir");
+            let previous = env::var_os("XDG_CONFIG_HOME");
+            env::set_var("XDG_CONFIG_HOME", temp.path());
+            Self {
+                _lock: lock,
+                previous,
+                temp,
+            }
+        }
 
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
+        fn path(&self) -> &Path {
+            self.temp.path()
+        }
+
+        fn config_dir(&self) -> PathBuf {
+            self.path().join("bellman-gui")
+        }
+    }
+
+    impl Drop for XdgConfigHomeGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => env::set_var("XDG_CONFIG_HOME", value),
+                None => env::remove_var("XDG_CONFIG_HOME"),
+            }
         }
     }
 
     #[test]
+    fn defaults_when_settings_file_is_missing() {
+        let _guard = XdgConfigHomeGuard::new();
+        let settings = load_settings();
+        assert_eq!(settings, BellmanGuiSettingsDto::default());
+    }
+
+    #[test]
     fn reads_max_pan_speed_from_settings_file() {
-        let temp = TempDir::new().expect("temp dir");
-        let config_dir = temp.path().join("bellman-gui");
+        let guard = XdgConfigHomeGuard::new();
+        let config_dir = guard.config_dir();
         fs::create_dir_all(&config_dir).expect("create config dir");
         fs::write(
             config_dir.join("settings.json"),
@@ -174,27 +234,18 @@ mod tests {
         )
         .expect("write settings");
 
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
-
         let settings = load_settings();
         assert_eq!(settings.max_pan_speed, 420.0);
         assert_eq!(
             settings.update_check_interval_hours,
             DEFAULT_UPDATE_CHECK_INTERVAL_HOURS
         );
-
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
-        }
     }
 
     #[test]
     fn reads_background_pan_enabled_from_settings_file() {
-        let temp = TempDir::new().expect("temp dir");
-        let config_dir = temp.path().join("bellman-gui");
+        let guard = XdgConfigHomeGuard::new();
+        let config_dir = guard.config_dir();
         fs::create_dir_all(&config_dir).expect("create config dir");
         fs::write(
             config_dir.join("settings.json"),
@@ -202,23 +253,14 @@ mod tests {
         )
         .expect("write settings");
 
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
-
         let settings = load_settings();
         assert!(settings.background_pan_enabled);
-
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
-        }
     }
 
     #[test]
     fn reads_update_check_interval_from_settings_file() {
-        let temp = TempDir::new().expect("temp dir");
-        let config_dir = temp.path().join("bellman-gui");
+        let guard = XdgConfigHomeGuard::new();
+        let config_dir = guard.config_dir();
         fs::create_dir_all(&config_dir).expect("create config dir");
         fs::write(
             config_dir.join("settings.json"),
@@ -226,23 +268,14 @@ mod tests {
         )
         .expect("write settings");
 
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
-
         let settings = load_settings();
         assert_eq!(settings.update_check_interval_hours, 12.0);
-
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
-        }
     }
 
     #[test]
     fn clamps_invalid_max_pan_speed_values() {
-        let temp = TempDir::new().expect("temp dir");
-        let config_dir = temp.path().join("bellman-gui");
+        let guard = XdgConfigHomeGuard::new();
+        let config_dir = guard.config_dir();
         fs::create_dir_all(&config_dir).expect("create config dir");
         fs::write(
             config_dir.join("settings.json"),
@@ -250,23 +283,14 @@ mod tests {
         )
         .expect("write settings");
 
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
-
         let settings = load_settings();
         assert_eq!(settings.max_pan_speed, MIN_MAX_PAN_SPEED);
-
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
-        }
     }
 
     #[test]
     fn reads_last_roadmap_root_from_settings_file() {
-        let temp = TempDir::new().expect("temp dir");
-        let config_dir = temp.path().join("bellman-gui");
+        let guard = XdgConfigHomeGuard::new();
+        let config_dir = guard.config_dir();
         fs::create_dir_all(&config_dir).expect("create config dir");
         fs::write(
             config_dir.join("settings.json"),
@@ -274,27 +298,16 @@ mod tests {
         )
         .expect("write settings");
 
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
-
         let settings = load_settings();
         assert_eq!(
             settings.last_roadmap_root.as_deref(),
             Some("/tmp/my-roadmap")
         );
-
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
-        }
     }
 
     #[test]
     fn set_last_roadmap_root_round_trips_through_settings_file() {
-        let temp = TempDir::new().expect("temp dir");
-        let previous = env::var("XDG_CONFIG_HOME").ok();
-        env::set_var("XDG_CONFIG_HOME", temp.path());
+        let _guard = XdgConfigHomeGuard::new();
 
         set_last_roadmap_root(Some("/tmp/persisted-roadmap".into()));
         assert_eq!(
@@ -307,11 +320,31 @@ mod tests {
 
         set_last_roadmap_root(Some("example".into()));
         assert_eq!(load_settings().last_roadmap_root, None);
+    }
 
-        if let Some(value) = previous {
-            env::set_var("XDG_CONFIG_HOME", value);
-        } else {
-            env::remove_var("XDG_CONFIG_HOME");
+    #[cfg(windows)]
+    #[test]
+    fn settings_path_uses_appdata_when_xdg_unset() {
+        let _lock = config_env_lock();
+        let temp = TempDir::new().expect("temp dir");
+        let previous_xdg = env::var_os("XDG_CONFIG_HOME");
+        let previous_appdata = env::var_os("APPDATA");
+        env::remove_var("XDG_CONFIG_HOME");
+        env::set_var("APPDATA", temp.path());
+
+        let path = settings_path();
+        assert_eq!(
+            path,
+            temp.path().join("bellman-gui").join("settings.json")
+        );
+
+        match previous_xdg {
+            Some(value) => env::set_var("XDG_CONFIG_HOME", value),
+            None => env::remove_var("XDG_CONFIG_HOME"),
+        }
+        match previous_appdata {
+            Some(value) => env::set_var("APPDATA", value),
+            None => env::remove_var("APPDATA"),
         }
     }
 }
