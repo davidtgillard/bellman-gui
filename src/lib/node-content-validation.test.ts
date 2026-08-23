@@ -93,14 +93,15 @@ Intro.
 
 ## Dependencies
 
-- after: missing-init [FS, Mandatory]
+- missing-init [FS, Mandatory]
 `;
 
   it("maps line-numbered syntax errors to the dependency bullet", () => {
     const diagnostics = mapBellmanDependencyWarnings(markdown, [
       {
         line: 9,
-        message: "invalid dependency syntax at line 9: '- after: missing-init'",
+        message:
+          "invalid dependency syntax at line 9: '- missing-init [FS, Mandatory]'; expected '- <predecessor> [FS, Mandatory]'",
       },
     ]);
     expect(diagnostics).toHaveLength(1);
@@ -109,7 +110,7 @@ Intro.
     expect(diagnostics[0].from).toBeGreaterThan(0);
   });
 
-  it("maps unknown predecessor warnings by matching after: name", () => {
+  it("maps unknown predecessor warnings by matching predecessor name", () => {
     const diagnostics = mapBellmanDependencyWarnings(markdown, [
       {
         line: null,

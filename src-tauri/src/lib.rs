@@ -112,6 +112,7 @@ async fn create_node_command(
 
 #[tauri::command]
 async fn create_link_command(
+    app: tauri::AppHandle,
     request: CreateLinkRequest,
     state: tauri::State<'_, UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
@@ -121,20 +122,21 @@ async fn create_link_command(
         request.link_type, request.source, request.target
     );
     let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
-    create_link(request).await?;
+    create_link(&app, request).await?;
     record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }
 
 #[tauri::command]
 async fn remove_link_command(
+    app: tauri::AppHandle,
     request: RemoveLinkRequest,
     state: tauri::State<'_, UndoState>,
 ) -> Result<graph::RoadmapGraphDto, String> {
     let roadmap_root = request.roadmap_root.clone();
     let label = format!("remove link {}", request.link_id);
     let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
-    remove_link(request).await?;
+    remove_link(&app, request).await?;
     record_edit(&state, &roadmap_root, label, before);
     load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
 }

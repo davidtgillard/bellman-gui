@@ -174,11 +174,15 @@ export function mapBellmanDependencyWarnings(
 
     const predecessor = predecessorFromMessage(warning.message);
     if (predecessor) {
-      const bullet = lines.find((line) =>
-        new RegExp(`-\\s+after:\\s*${predecessor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(
-          line.text,
-        ),
-      );
+      const escaped = predecessor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const bullet = lines.find((line) => {
+        const text = line.text;
+        return (
+          new RegExp(`-\\s+${escaped}\\s+\\[`).test(text) ||
+          new RegExp(`-\\s+predecessor:\\s*${escaped}\\b`).test(text) ||
+          new RegExp(`-\\s+after:\\s*${escaped}\\b`).test(text)
+        );
+      });
       if (bullet) {
         diagnostics.push({
           from: bullet.start,

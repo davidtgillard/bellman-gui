@@ -251,6 +251,31 @@ fn retain_work_package(packages: &mut Vec<YamlValue>, title: &str) -> bool {
     false
 }
 
+fn dependency_predecessor_name(dep: &YamlValue) -> Option<&str> {
+    match dep {
+        YamlValue::String(value) => {
+            let trimmed = value.trim();
+            if let Some((name, _)) = trimmed.split_once('[') {
+                let name = name.trim();
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name)
+                }
+            } else if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        YamlValue::Mapping(map) => map
+            .get(YamlValue::from("predecessor"))
+            .or_else(|| map.get(YamlValue::from("after")))
+            .and_then(YamlValue::as_str),
+        _ => None,
+    }
+}
+
 fn scrub_dependency_refs(packages: &mut [YamlValue], title: &str) {
     for entry in packages.iter_mut() {
         let Some(mapping) = entry.as_mapping_mut() else {
@@ -260,14 +285,7 @@ fn scrub_dependency_refs(packages: &mut [YamlValue], title: &str) {
             .get_mut(YamlValue::from("dependencies"))
             .and_then(YamlValue::as_sequence_mut)
         {
-            deps.retain(|dep| match dep {
-                YamlValue::String(value) => value != title,
-                YamlValue::Mapping(map) => map
-                    .get(YamlValue::from("after"))
-                    .and_then(YamlValue::as_str)
-                    .is_none_or(|after| after != title),
-                _ => true,
-            });
+            deps.retain(|dep| dependency_predecessor_name(dep).is_none_or(|name| name != title));
         }
         if let Some(subs) = mapping
             .get_mut(YamlValue::from("sub_packages"))
@@ -283,7 +301,7 @@ fn dependency_yaml_values(dependencies: &[String]) -> Vec<YamlValue> {
         .iter()
         .map(|dep| {
             let mut entry = Mapping::new();
-            entry.insert(YamlValue::from("after"), YamlValue::from(dep.as_str()));
+            entry.insert(YamlValue::from("predecessor"), YamlValue::from(dep.as_str()));
             entry.insert(YamlValue::from("relation"), YamlValue::from("FS"));
             entry.insert(YamlValue::from("hardness"), YamlValue::from("Mandatory"));
             YamlValue::Mapping(entry)
@@ -571,6 +589,566 @@ async fn run_bellman_for_request(app: &AppHandle, args: &[&str]) -> Result<Strin
     run_bellman(app, args).await
 }
 
+fn is_markdown_owned_link_type(link_type: &str) -> bool {
+    link_type == "parent_of" || link_type.starts_with("precedes_")
+}
+
+fn parse_precedes_link_type(link_type: &str) -> Option<(String, String)> {
+    let rest = link_type.strip_prefix("precedes_")?;
+    let rest = rest.strip_suffix("_scope").unwrap_or(rest);
+    let (relation, hardness) = rest.split_once('_')?;
+    if relation.is_empty() || hardness.is_empty() {
+        return None;
+    }
+    Some((relation.to_string(), hardness.to_string()))
+}
+
+fn markdown_path_for_scope(root: &Path, node_id: &str, node_type: &str) -> Result<PathBuf, String> {
+    let name = bellman_entity_name(node_id, node_type);
+    match node_type {
+        "initiative" => Ok(root.join("initiatives").join(format!("{name}.md"))),
+        "project" => Ok(root
+            .join("projects")
+            .join(&name)
+            .join(format!("{name}.md"))),
+        other => Err(format!(
+            "markdown-owned precedence links require initiative or project, not {other:?}"
+        )),
+    }
+}
+
+fn dependency_bullet_line(predecessor: &str, relation: &str, hardness: &str) -> String {
+    format!("- {predecessor} [{relation}, {hardness}]")
+}
+
+fn line_predecessor_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix('-')?.trim_start();
+    let name = if let Some(name) = rest.strip_prefix("after:") {
+        name.split_whitespace().next()
+    } else if let Some(name) = rest.strip_prefix("predecessor:") {
+        name.split_whitespace().next()
+    } else {
+        rest.split_whitespace().next()
+    }?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+fn markdown_has_predecessor(content: &str, predecessor: &str) -> bool {
+    content
+        .lines()
+        .any(|line| line_predecessor_name(line) == Some(predecessor))
+}
+
+fn append_markdown_dependency(
+    path: &Path,
+    predecessor: &str,
+    relation: &str,
+    hardness: &str,
+) -> Result<(), String> {
+    let mut content = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    if markdown_has_predecessor(&content, predecessor) {
+        return Err(format!(
+            "dependency on {predecessor:?} already exists in {}",
+            path.display()
+        ));
+    }
+
+    let bullet = dependency_bullet_line(predecessor, relation, hardness);
+    let heading_offset = content.lines().enumerate().find_map(|(index, line)| {
+        if line.trim().eq_ignore_ascii_case("## Dependencies") {
+            let mut offset = 0;
+            for (line_index, current) in content.lines().enumerate() {
+                if line_index == index {
+                    return Some(offset + current.len());
+                }
+                offset += current.len() + 1;
+            }
+            None
+        } else {
+            None
+        }
+    });
+
+    if let Some(after_heading) = heading_offset {
+        let insert_at = if content[after_heading..].starts_with('\n') {
+            after_heading + 1
+        } else {
+            after_heading
+        };
+        let mut insertion = String::new();
+        if insert_at == after_heading {
+            insertion.push('\n');
+        }
+        insertion.push_str(&bullet);
+        insertion.push('\n');
+        content.insert_str(insert_at, &insertion);
+    } else {
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push_str("\n## Dependencies\n\n");
+        content.push_str(&bullet);
+        content.push('\n');
+    }
+
+    fs::write(path, content)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn remove_markdown_dependency(path: &Path, predecessor: &str) -> Result<(), String> {
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut removed = false;
+    let mut updated = String::with_capacity(content.len());
+    for line in content.lines() {
+        if !removed && line_predecessor_name(line) == Some(predecessor) {
+            removed = true;
+            continue;
+        }
+        updated.push_str(line);
+        updated.push('\n');
+    }
+    if !removed {
+        return Err(format!(
+            "dependency on {predecessor:?} not found in {}",
+            path.display()
+        ));
+    }
+    if !content.ends_with('\n') && updated.ends_with('\n') {
+        updated.pop();
+    }
+    fs::write(path, updated)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn append_work_package_dependency(
+    root: &Path,
+    project: &str,
+    successor: &str,
+    predecessor: &str,
+    relation: &str,
+    hardness: &str,
+) -> Result<(), String> {
+    let path = work_packages_path(root, project);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
+
+    let path_indexes = find_work_package_path(work_packages, successor)
+        .ok_or_else(|| format!("work package {successor:?} not found in project {project:?}"))?;
+    let entry = work_package_at_path(work_packages, &path_indexes)
+        .ok_or_else(|| format!("work package {successor:?} not found in project {project:?}"))?;
+    let mapping = entry
+        .as_mapping_mut()
+        .ok_or_else(|| format!("work package {successor:?} is not a mapping"))?;
+
+    if mapping.get(YamlValue::from("dependencies")).is_none() {
+        mapping.insert(
+            YamlValue::from("dependencies"),
+            YamlValue::Sequence(vec![]),
+        );
+    }
+    let deps = mapping
+        .get_mut(YamlValue::from("dependencies"))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| format!("dependencies for {successor:?} must be a list"))?;
+
+    if deps
+        .iter()
+        .any(|dep| dependency_predecessor_name(dep) == Some(predecessor))
+    {
+        return Err(format!(
+            "dependency on {predecessor:?} already exists for work package {successor:?}"
+        ));
+    }
+
+    let mut entry = Mapping::new();
+    entry.insert(
+        YamlValue::from("predecessor"),
+        YamlValue::from(predecessor),
+    );
+    entry.insert(YamlValue::from("relation"), YamlValue::from(relation));
+    entry.insert(YamlValue::from("hardness"), YamlValue::from(hardness));
+    deps.push(YamlValue::Mapping(entry));
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn remove_work_package_dependency(
+    root: &Path,
+    project: &str,
+    successor: &str,
+    predecessor: &str,
+) -> Result<(), String> {
+    let path = work_packages_path(root, project);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
+
+    let path_indexes = find_work_package_path(work_packages, successor)
+        .ok_or_else(|| format!("work package {successor:?} not found in project {project:?}"))?;
+    let entry = work_package_at_path(work_packages, &path_indexes)
+        .ok_or_else(|| format!("work package {successor:?} not found in project {project:?}"))?;
+    let mapping = entry
+        .as_mapping_mut()
+        .ok_or_else(|| format!("work package {successor:?} is not a mapping"))?;
+
+    let deps = mapping
+        .get_mut(YamlValue::from("dependencies"))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| format!("work package {successor:?} has no dependencies list"))?;
+
+    let before = deps.len();
+    deps.retain(|dep| dependency_predecessor_name(dep) != Some(predecessor));
+    if deps.len() == before {
+        return Err(format!(
+            "dependency on {predecessor:?} not found for work package {successor:?}"
+        ));
+    }
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn extract_work_package(packages: &mut Vec<YamlValue>, title: &str) -> Option<YamlValue> {
+    if let Some(index) = packages.iter().position(|entry| {
+        entry
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("title")))
+            .and_then(YamlValue::as_str)
+            == Some(title)
+    }) {
+        return Some(packages.remove(index));
+    }
+    for entry in packages.iter_mut() {
+        let Some(mapping) = entry.as_mapping_mut() else {
+            continue;
+        };
+        if let Some(subs) = mapping
+            .get_mut(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence_mut)
+        {
+            if let Some(found) = extract_work_package(subs, title) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn nest_work_package_under_parent(
+    root: &Path,
+    project: &str,
+    parent_title: &str,
+    child_title: &str,
+) -> Result<(), String> {
+    if parent_title == child_title {
+        return Err("cannot make a work package a parent of itself".to_string());
+    }
+
+    let path = work_packages_path(root, project);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
+
+    if find_work_package_path(work_packages, parent_title).is_none() {
+        return Err(format!(
+            "work package {parent_title:?} not found in project {project:?}"
+        ));
+    }
+
+    let child = extract_work_package(work_packages, child_title).ok_or_else(|| {
+        format!("work package {child_title:?} not found in project {project:?}")
+    })?;
+
+    let parent_path = find_work_package_path(work_packages, parent_title)
+        .ok_or_else(|| format!("work package {parent_title:?} not found in project {project:?}"))?;
+    let parent_entry = work_package_at_path(work_packages, &parent_path)
+        .ok_or_else(|| format!("work package {parent_title:?} not found in project {project:?}"))?;
+    let parent_map = parent_entry
+        .as_mapping_mut()
+        .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
+
+    if parent_map.get(YamlValue::from("sub_packages")).is_none() {
+        parent_map.insert(YamlValue::from("sub_packages"), YamlValue::Sequence(vec![]));
+    }
+    let subs = parent_map
+        .get_mut(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| format!("sub_packages for {parent_title:?} must be a list"))?;
+    if work_package_exists(subs, child_title) {
+        return Err(format!(
+            "work package {child_title:?} is already nested under {parent_title:?}"
+        ));
+    }
+    subs.push(child);
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn unnest_work_package_from_parent(
+    root: &Path,
+    project: &str,
+    parent_title: &str,
+    child_title: &str,
+) -> Result<(), String> {
+    let path = work_packages_path(root, project);
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+
+    let work_packages = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!(
+                "work-packages file missing work_packages list in {}",
+                path.display()
+            )
+        })?;
+
+    let parent_path = find_work_package_path(work_packages, parent_title)
+        .ok_or_else(|| format!("work package {parent_title:?} not found in project {project:?}"))?;
+    let parent_entry = work_package_at_path(work_packages, &parent_path)
+        .ok_or_else(|| format!("work package {parent_title:?} not found in project {project:?}"))?;
+    let parent_map = parent_entry
+        .as_mapping_mut()
+        .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
+    let subs = parent_map
+        .get_mut(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| {
+            format!("work package {parent_title:?} has no sub_packages for {child_title:?}")
+        })?;
+
+    let child = extract_work_package(subs, child_title).ok_or_else(|| {
+        format!("work package {child_title:?} is not nested under {parent_title:?}")
+    })?;
+    work_packages.push(child);
+
+    let formatted = serde_yaml::to_string(&document)
+        .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
+    fs::write(&path, formatted)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn find_link_endpoints(
+    root: &Path,
+    link_id: &str,
+) -> Result<(String, String, String), String> {
+    let index = read_registry_index(root)?;
+    let guid_to_logical: std::collections::HashMap<&str, &str> = index
+        .instances
+        .iter()
+        .filter(|inst| inst.kind == "node")
+        .map(|inst| (inst.guid.as_str(), inst.logical_id.as_str()))
+        .collect();
+
+    for path in all_link_artifact_paths(root) {
+        let document = read_json_file(&path)?;
+        let Some(links) = document.get("links").and_then(JsonValue::as_array) else {
+            continue;
+        };
+        for link in links {
+            if !link_matches_guid(link, link_id) {
+                continue;
+            }
+            let link_type = link
+                .get("link_type")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| format!("link {link_id} missing link_type"))?
+                .to_string();
+            let in_guid = link
+                .get("in")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| format!("link {link_id} missing in endpoint"))?;
+            let out_guid = link
+                .get("out")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| format!("link {link_id} missing out endpoint"))?;
+            let source = guid_to_logical
+                .get(in_guid)
+                .copied()
+                .unwrap_or(in_guid)
+                .to_string();
+            let target = guid_to_logical
+                .get(out_guid)
+                .copied()
+                .unwrap_or(out_guid)
+                .to_string();
+            return Ok((link_type, source, target));
+        }
+    }
+    Err(format!("link not found: {link_id}"))
+}
+
+fn create_markdown_owned_link(
+    root: &Path,
+    link_type: &str,
+    source: &str,
+    target: &str,
+) -> Result<(), String> {
+    let index = read_registry_index(root)?;
+    let source_node = find_node(&index, source)?;
+    let target_node = find_node(&index, target)?;
+    validate_link_type(
+        &index,
+        link_type,
+        &source_node.type_name,
+        &target_node.type_name,
+    )?;
+
+    if link_type == "parent_of" {
+        let (child, child_project) = node_delete_target(target, "work_package")?;
+        let (parent, parent_project) = node_delete_target(source, "work_package")?;
+        let project = child_project
+            .as_deref()
+            .or(parent_project.as_deref())
+            .ok_or_else(|| "parent_of requires work packages in a project".to_string())?;
+        if child_project.as_deref() != Some(project) || parent_project.as_deref() != Some(project) {
+            return Err("parent_of endpoints must belong to the same project".to_string());
+        }
+        return nest_work_package_under_parent(root, project, &parent, &child);
+    }
+
+    let (relation, hardness) = parse_precedes_link_type(link_type)
+        .ok_or_else(|| format!("unsupported markdown-owned link type {link_type:?}"))?;
+
+    match (source_node.type_name.as_str(), target_node.type_name.as_str()) {
+        ("work_package", "work_package") => {
+            let (successor, succ_project) = node_delete_target(target, "work_package")?;
+            let (predecessor, pred_project) = node_delete_target(source, "work_package")?;
+            let project = succ_project
+                .as_deref()
+                .ok_or_else(|| "work package predecessor links require a project".to_string())?;
+            if pred_project.as_deref() != Some(project) {
+                return Err(
+                    "work package precedence endpoints must belong to the same project"
+                        .to_string(),
+                );
+            }
+            append_work_package_dependency(
+                root,
+                project,
+                &successor,
+                &predecessor,
+                &relation,
+                &hardness,
+            )
+        }
+        ("initiative" | "project", "initiative" | "project") => {
+            let predecessor = bellman_entity_name(source, &source_node.type_name);
+            let path = markdown_path_for_scope(root, target, &target_node.type_name)?;
+            append_markdown_dependency(&path, &predecessor, &relation, &hardness)
+        }
+        (source_type, target_type) => Err(format!(
+            "cannot persist {link_type} between {source_type} and {target_type} in markdown"
+        )),
+    }
+}
+
+fn remove_markdown_owned_link(
+    root: &Path,
+    link_type: &str,
+    source: &str,
+    target: &str,
+) -> Result<(), String> {
+    let index = read_registry_index(root)?;
+    let source_node = find_node(&index, source)?;
+    let target_node = find_node(&index, target)?;
+
+    if link_type == "parent_of" {
+        let (child, child_project) = node_delete_target(target, "work_package")?;
+        let (parent, parent_project) = node_delete_target(source, "work_package")?;
+        let project = child_project
+            .as_deref()
+            .or(parent_project.as_deref())
+            .ok_or_else(|| "parent_of requires work packages in a project".to_string())?;
+        return unnest_work_package_from_parent(root, project, &parent, &child);
+    }
+
+    if parse_precedes_link_type(link_type).is_none() {
+        return Err(format!("unsupported markdown-owned link type {link_type:?}"));
+    }
+
+    match (source_node.type_name.as_str(), target_node.type_name.as_str()) {
+        ("work_package", "work_package") => {
+            let (successor, succ_project) = node_delete_target(target, "work_package")?;
+            let (predecessor, pred_project) = node_delete_target(source, "work_package")?;
+            let project = succ_project
+                .as_deref()
+                .ok_or_else(|| "work package predecessor links require a project".to_string())?;
+            if pred_project.as_deref() != Some(project) {
+                return Err(
+                    "work package precedence endpoints must belong to the same project"
+                        .to_string(),
+                );
+            }
+            remove_work_package_dependency(root, project, &successor, &predecessor)
+        }
+        ("initiative" | "project", "initiative" | "project") => {
+            let predecessor = bellman_entity_name(source, &source_node.type_name);
+            let path = markdown_path_for_scope(root, target, &target_node.type_name)?;
+            remove_markdown_dependency(&path, &predecessor)
+        }
+        (source_type, target_type) => Err(format!(
+            "cannot remove {link_type} between {source_type} and {target_type} from markdown"
+        )),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
@@ -676,13 +1254,24 @@ pub struct CreateLinkRequest {
     pub target: String,
 }
 
-pub async fn create_link(request: CreateLinkRequest) -> Result<(), String> {
+pub async fn create_link(app: &AppHandle, request: CreateLinkRequest) -> Result<(), String> {
     let root = PathBuf::from(&request.roadmap_root);
     if !registry_path(&root).is_file() {
         return Err(format!(
             "roadmap root is not editable: {}",
             request.roadmap_root
         ));
+    }
+
+    if is_markdown_owned_link_type(&request.link_type) {
+        create_markdown_owned_link(
+            &root,
+            &request.link_type,
+            &request.source,
+            &request.target,
+        )?;
+        run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
+        return Ok(());
     }
 
     append_link(&root, &request.link_type, &request.source, &request.target)
@@ -694,13 +1283,20 @@ pub struct RemoveLinkRequest {
     pub link_id: String,
 }
 
-pub async fn remove_link(request: RemoveLinkRequest) -> Result<(), String> {
+pub async fn remove_link(app: &AppHandle, request: RemoveLinkRequest) -> Result<(), String> {
     let root = PathBuf::from(&request.roadmap_root);
     if !registry_path(&root).is_file() {
         return Err(format!(
             "roadmap root is not editable: {}",
             request.roadmap_root
         ));
+    }
+
+    let (link_type, source, target) = find_link_endpoints(&root, &request.link_id)?;
+    if is_markdown_owned_link_type(&link_type) {
+        remove_markdown_owned_link(&root, &link_type, &source, &target)?;
+        run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
+        return Ok(());
     }
 
     remove_link_record(&root, &request.link_id)
@@ -989,7 +1585,8 @@ mod tests {
         assert!(raw.contains("New description."));
         assert!(!raw.contains("Old description."));
         assert!(raw.contains("wp-two"));
-        assert!(raw.contains("after:"));
+        assert!(raw.contains("predecessor:"));
+        assert!(!raw.contains("after:"));
     }
 
     #[test]

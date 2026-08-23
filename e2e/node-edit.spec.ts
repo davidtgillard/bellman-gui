@@ -50,7 +50,7 @@ Intro.
 
 ## Dependencies
 
-- after: billing-redesign [FS, Mandatory]
+- billing-redesign [FS, Mandatory]
 `,
   source_path: "/roadmap/initiatives/settings-manager.md",
   work_package: null,
@@ -356,7 +356,7 @@ Intro.
 
 ## Dependencies
 
-- after: missing-init [FS, Mandatory]
+- missing-init [FS, Mandatory]
 `,
     );
 

@@ -82,9 +82,24 @@ struct WorkPackageParsed {
 
 fn dependency_label(dep: &YamlValue) -> Option<String> {
     match dep {
-        YamlValue::String(value) => Some(value.clone()),
+        YamlValue::String(value) => {
+            let trimmed = value.trim();
+            if let Some((name, _)) = trimmed.split_once('[') {
+                let name = name.trim();
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name.to_string())
+                }
+            } else if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
         YamlValue::Mapping(map) => map
-            .get(YamlValue::from("after"))
+            .get(YamlValue::from("predecessor"))
+            .or_else(|| map.get(YamlValue::from("after")))
             .and_then(YamlValue::as_str)
             .map(str::to_string),
         _ => None,
@@ -344,7 +359,7 @@ mod tests {
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),
-            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - after: wp-zero\n        relation: FS\n        hardness: Mandatory\n",
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - predecessor: wp-zero\n        relation: FS\n        hardness: Mandatory\n",
         )
         .unwrap();
 
@@ -361,7 +376,7 @@ mod tests {
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),
-            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - after: wp-zero\n        relation: FS\n        hardness: Mandatory\n",
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    dependencies:\n      - predecessor: wp-zero\n        relation: FS\n        hardness: Mandatory\n",
         )
         .unwrap();
 
