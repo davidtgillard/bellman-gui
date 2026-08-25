@@ -154,6 +154,41 @@ test.describe("node content editing", () => {
     await expect(page.locator(".cm-content")).toBeVisible();
   });
 
+  test("scrolls the markdown editor with the mouse wheel", async ({ page }) => {
+    const longBody = Array.from(
+      { length: 80 },
+      (_, index) => `Line ${index + 1} of long markdown.`,
+    ).join("\n");
+    await setupPage(
+      page,
+      goalScenario({
+        nodeDetail: {
+          ...GOAL_DETAIL,
+          markdown: `# Reduce churn\n\n${longBody}`,
+        },
+      }),
+    );
+    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    const scroller = page.locator(".node-markdown-codemirror .cm-scroller");
+    await expect(scroller).toBeVisible();
+
+    const before = await scroller.evaluate((el) => ({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
+    expect(before.scrollHeight).toBeGreaterThan(before.clientHeight);
+
+    await scroller.hover();
+    await page.mouse.wheel(0, 400);
+
+    await expect
+      .poll(async () => scroller.evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(before.scrollTop);
+  });
+
   test("hides Edit on a read-only roadmap", async ({ page }) => {
     await setupPage(
       page,

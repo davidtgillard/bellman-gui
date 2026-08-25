@@ -59,6 +59,7 @@ run_check "run type-check" npm run type-check
 run_check "run lint:throws-diff" npm run lint:throws-diff
 run_check "run test" npm run test
 run_check "cargo test" cargo test --manifest-path src-tauri/Cargo.toml
+run_check "cargo clippy" cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 run_check "run test e2e" npm run test:e2e
 run_check "audit" npm audit
 

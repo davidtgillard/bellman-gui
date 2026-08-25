@@ -296,7 +296,7 @@ export function NodeMarkdownEditor({
             ref={editorRef}
             value={value}
             theme={editorTheme}
-            minHeight="360px"
+            height="100%"
             extensions={extensions}
             initialState={initialState ?? undefined}
             onChange={setValue}
