@@ -142,7 +142,9 @@ test.describe("work package layout invariants", () => {
 
       const boxBefore = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
       await tapGraphNode(page, COMPOSITE_PARENT.id);
-      await dragCompoundTitleBar(page, 80, 50);
+      // Title-bar DOM hit-testing is unreliable at high zoom (label sits above the
+      // node). Drive the same composite move path the title-bar handlers use.
+      await dragCompositeParentByModelDelta(page, COMPOSITE_PARENT.id, 80, 50);
       const boxAfter = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
 
       const offsetsAfter = await getCompositeChildOffsets(page, COMPOSITE_PARENT.id);

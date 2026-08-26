@@ -723,15 +723,20 @@ export async function dragCompoundTitleBar(
   steps = 12,
   onStep?: () => Promise<void>,
 ): Promise<void> {
-  const handle = page.locator(".compound-parent-label").first();
-  await expect(handle).toBeVisible();
-  const box = await handle.boundingBox();
+  // Prefer the compound border overlay top edge (inside the Cytoscape hit
+  // target). The text label sits above the box with pointer-events: none, so
+  // dragging from the label often misses the node entirely.
+  const overlay = page.locator(".compound-parent-overlay.is-selected").first();
+  const label = page.locator(".compound-parent-label").first();
+  await expect(label).toBeVisible();
+  const box =
+    (await overlay.boundingBox().catch(() => null)) ?? (await label.boundingBox());
   if (!box) {
     throw new Error("compound drag handle is not visible");
   }
 
   const startX = box.x + box.width / 2;
-  const startY = box.y + box.height / 2;
+  const startY = box.y + Math.min(8, Math.max(2, box.height / 20));
   await page.mouse.move(startX, startY);
   await page.mouse.down();
 

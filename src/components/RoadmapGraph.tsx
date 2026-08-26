@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import type { WorkPackageLayoutModel } from "@dgillard/cytoscape-compound-graph";
+import { nodesOverlapInModel } from "@dgillard/cytoscape-compound-graph";
 import {
   CYTOSCAPE_STYLESHEET,
   GRAPH_NODE_LABEL_TYPOGRAPHY,
@@ -41,6 +42,7 @@ import {
   syncMilestoneNodesToViewportCenter,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   usesPresetLayout,
+  LAYOUT_FIT_PADDING,
   type SidebarViewportSession,
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
@@ -694,7 +696,9 @@ export function RoadmapGraph({
               (endLayout?.x ?? 0) - gesture.startLayout.x,
               (endLayout?.y ?? 0) - gesture.startLayout.y,
             ) > 1;
-          if (!modelMoved && (gesture.wasSelected || !gesture.pointerMoved)) {
+          // Treat as a click whenever the model did not move. Pointer jitter during
+          // mouseup must not suppress selection of a previously unselected leaf.
+          if (!modelMoved) {
             suppressLeafSelectionRef.current = false;
             if (gesture.wasSelected) {
               pendingLeafDeselectRef.current = true;
@@ -751,25 +755,53 @@ export function RoadmapGraph({
     cy.maxZoom(compoundGraphMaxZoom(referenceZoom));
   }, []);
 
+  /**
+   * After Cytoscape measurement, unjam stacked nodes (load-time only). Persists
+   * when positions change and `persist` is not false. Skipped until layout hydration
+   * completes so an empty ref cannot trigger bootstrap mode on a cached layout.
+   */
+  const applyCompoundSceneLayoutFromCy = useCallback(
+    (
+      cy: Core,
+      scene: CompoundGraphScene,
+      positions: Record<string, NodePosition> | undefined,
+      options?: { persist?: boolean },
+    ) => {
+      scene.initializeFromCy(cy);
+      if (!layoutReadyRef.current) {
+        syncCompoundReferenceZoom(cy);
+        return false;
+      }
+      const { changed } = scene.unjamLoadedLayout(cy, {
+        bootstrap: !usesPresetLayout(positions),
+      });
+      if (changed && options?.persist !== false && !usesPresetLayout(positions)) {
+        onNodePositionChangeRef.current?.(scene.flatLayout());
+      }
+      syncCompoundReferenceZoom(cy);
+      return changed;
+    },
+    [syncCompoundReferenceZoom],
+  );
+
   const initializeCompoundScene = useCallback(
-    (cy: Core) => {
+    (cy: Core, positions: Record<string, NodePosition> | undefined) => {
       if (!isCompoundSceneEnabled()) {
         return;
       }
-      const scene = rebuildScene(nodePositionsRef.current);
+      const scene = rebuildScene(positions);
       if (!scene) {
         return;
       }
-      scene.initializeFromCy(cy);
-      syncCompoundReferenceZoom(cy);
+      applyCompoundSceneLayoutFromCy(cy, scene, positions);
       attachSceneHandlers(cy, scene);
       reportNewCompoundSizes(scene);
     },
     [
+      applyCompoundSceneLayoutFromCy,
       attachSceneHandlers,
       rebuildScene,
       reportNewCompoundSizes,
-      syncCompoundReferenceZoom,
       isCompoundSceneEnabled,
     ],
   );
@@ -1079,7 +1111,7 @@ export function RoadmapGraph({
   }, [layoutReady]);
 
   useEffect(() => {
-    if (!cyReady || !isCompoundSceneEnabled()) {
+    if (!cyReady || !isCompoundSceneEnabled() || !layoutReady) {
       return;
     }
     const cy = cyRef.current;
@@ -1090,18 +1122,18 @@ export function RoadmapGraph({
     if (!scene) {
       return;
     }
-    scene.initializeFromCy(cy);
-    syncCompoundReferenceZoom(cy);
+    applyCompoundSceneLayoutFromCy(cy, scene, nodePositions);
     if (layoutCompletedRef.current) {
       attachSceneHandlers(cy, scene);
     }
   }, [
+    applyCompoundSceneLayoutFromCy,
     attachSceneHandlers,
     cyReady,
+    layoutReady,
     layoutSyncToken,
     nodePositions,
     rebuildScene,
-    syncCompoundReferenceZoom,
     isCompoundSceneEnabled,
   ]);
 
@@ -1521,7 +1553,7 @@ export function RoadmapGraph({
         const position = parent.position();
         parent.trigger("grab");
         parent.position({ x: position.x + dx, y: position.y + dy });
-        parent.trigger("drag");
+        scene.applyContainerDragFromCy(cy, parentId);
         parent.trigger("free");
       };
       testWindow.__TEST__.getNodeVisualBox = (nodeId) => {
@@ -1534,13 +1566,9 @@ export function RoadmapGraph({
       };
       testWindow.__TEST__.nodesOverlap = (leftId, rightId) => {
         const scene = sceneRef.current;
-        if (scene) {
-          const layout = scene.flatLayout();
-          const leftOuter = layout[leftId] ? compoundLayoutOuterBox(layout[leftId]) : null;
-          const rightOuter = layout[rightId] ? compoundLayoutOuterBox(layout[rightId]) : null;
-          if (leftOuter && rightOuter) {
-            return boxesOverlap(leftOuter, rightOuter);
-          }
+        const model = scene?.getModel();
+        if (model) {
+          return nodesOverlapInModel(model, leftId, rightId);
         }
         const left = cy.getElementById(leftId);
         const right = cy.getElementById(rightId);
@@ -1931,8 +1959,7 @@ export function RoadmapGraph({
           if (scene) {
             cy.add(scene.buildElements());
             if (usesPresetLayout(nodePositions)) {
-              scene.initializeFromCy(cy);
-              syncCompoundReferenceZoom(cy);
+              applyCompoundSceneLayoutFromCy(cy, scene, nodePositions, { persist: false });
             }
           }
         } else {
@@ -1942,6 +1969,24 @@ export function RoadmapGraph({
 
       const hasCompoundNodesAfter =
         compoundGraph && nodes.some((node) => Boolean(node.parent || node.data?.isCompound));
+
+      // Preset compound graphs never use the auto-layout path — including when
+      // switching into a work-package view (compoundModeChanged).
+      if (usesPresetLayout(nodePositions) && hasCompoundNodesAfter && layoutReady) {
+        layoutCompletedRef.current = true;
+        applyGraphVisibility(cy, true);
+        initializeCompoundScene(cy, nodePositions);
+        if (compoundModeChanged) {
+          // Top-level pan/zoom is meaningless for work-package coordinates.
+          cy.fit(undefined, LAYOUT_FIT_PADDING);
+          syncCompoundReferenceZoom(cy);
+        } else {
+          cy.viewport(preservedViewport);
+        }
+        lastLayoutSyncTokenRef.current = layoutSyncToken;
+        previousCompoundGraphForLayoutRef.current = compoundGraph;
+        return;
+      }
 
       // Renames rebuild elements in the same view. Keep the camera when we can
       // restore saved positions. Without a preset layout, fall through so
@@ -1953,10 +1998,7 @@ export function RoadmapGraph({
         cy.viewport(preservedViewport);
         layoutCompletedRef.current = true;
         applyGraphVisibility(cy, true);
-        if (hasCompoundNodesAfter) {
-          initializeCompoundScene(cy);
-        } else {
-          // Keep pennants at viewport center after restoring saved Y positions.
+        if (!hasCompoundNodesAfter) {
           syncMilestoneNodesToViewportCenter(cy);
         }
         lastLayoutSyncTokenRef.current = layoutSyncToken;
@@ -1969,8 +2011,7 @@ export function RoadmapGraph({
       if (compoundGraph && isCompoundGraphNodes(nodes)) {
         const scene = rebuildScene(nodePositions);
         if (scene && usesPresetLayout(nodePositions) && cy.nodes().length > 0) {
-          scene.initializeFromCy(cy);
-          syncCompoundReferenceZoom(cy);
+          applyCompoundSceneLayoutFromCy(cy, scene, nodePositions);
         }
       }
       lastLayoutSyncTokenRef.current = layoutSyncToken;
@@ -2000,7 +2041,7 @@ export function RoadmapGraph({
         if (cyRef.current) {
           applyGraphVisibility(cyRef.current, true);
           if (hasCompoundNodes) {
-            initializeCompoundScene(cyRef.current);
+            initializeCompoundScene(cyRef.current, nodePositionsRef.current);
           } else {
             measureCompoundSizes();
             syncMilestoneNodesToViewportCenter(cyRef.current);
@@ -2014,6 +2055,7 @@ export function RoadmapGraph({
       layoutCleanupRef.current = null;
     };
   }, [
+    applyCompoundSceneLayoutFromCy,
     applyGraphVisibility,
     compoundGraph,
     cyReady,
