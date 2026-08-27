@@ -2865,7 +2865,8 @@ export function fitGraphViewport(cy: Core): void {
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @param onAutoLayoutComplete - Called with computed positions after auto layout.
  * @param isActive - Function that returns whether the layout is still active.
- * @param onLayoutApplied - Called after layout and viewport fitting complete.
+ * @param onLayoutApplied - Called after layout. For compound graphs the caller fits after
+ *   initialize/unjam; for other graphs this runs after viewport fitting.
  */
 export function applyAutoLayout(
   cy: Core,
@@ -2896,7 +2897,11 @@ export function applyAutoLayout(
     if (isActive && !isActive()) {
       return;
     }
-    fitGraphViewport(cy);
+    // Compound graphs must initialize/unjam at real container sizes before fitting,
+    // otherwise leaf metrics freeze against a zoom computed from default 30px boxes.
+    if (!hasCompoundNodes) {
+      fitGraphViewport(cy);
+    }
     onLayoutApplied?.();
   };
 
@@ -2948,7 +2953,7 @@ export function applyAutoLayout(
  * @param linkCount - Number of visible links in the graph.
  * @param hasCompoundNodes - Whether the graph includes compound parent nodes.
  * @param onAutoLayoutComplete - Called with computed positions after auto layout.
- * @param onLayoutApplied - Called after layout and viewport fitting complete.
+ * @param onLayoutApplied - Called after layout. Compound graphs still need a fit after initialize/unjam.
  * @returns Cleanup function that cancels pending layout attempts.
  */
 export function runLayoutWhenContainerReady(

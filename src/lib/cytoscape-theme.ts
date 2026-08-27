@@ -16,7 +16,6 @@ export const COMPOUND_MIN_HEIGHT = DEFAULT_COMPOUND_GRAPH_THEME.compoundMinSize.
 /** Bellman theme overrides for work-package compound graphs. */
 export const BELLMAN_COMPOUND_GRAPH_THEME = {
   ...DEFAULT_COMPOUND_GRAPH_THEME,
-  childEdgeClearancePx: -5,
 };
 
 /** Typography shared by top-level graph node labels and the inline rename editor. */
@@ -141,6 +140,12 @@ export function workPackageGraphStylesheet(): StylesheetStyle[] {
         "overlay-padding": 0,
         "border-width": 0,
         "border-opacity": 0,
+        "text-max-width": ((node: { data: (name: string) => unknown }) => {
+          const maxWidth = Number(node.data("labelMaxWidth"));
+          return Number.isFinite(maxWidth) && maxWidth > 0
+            ? maxWidth
+            : GRAPH_NODE_LABEL_TYPOGRAPHY.textMaxWidthPx;
+        }) as unknown as string,
       },
     },
     {

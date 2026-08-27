@@ -9,14 +9,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MONOREPO_DIR="$(cd "${ROOT}/.." && pwd)/cytoscope-compound-graph.git"
 PACKAGE_DIR="${MONOREPO_DIR}/packages/cytoscape-compound-graph"
 REF_FILE="${ROOT}/packaging/cytoscape-compound-graph.ref"
-DEFAULT_REF="1cc5a56998f4db55a4b728d1def375f528e76a41"
+DEFAULT_REF="f7df6c2f5ca42f1299f60b04926fd1a19d95df66"
 REF="$(tr -d '[:space:]' <"${REF_FILE}" 2>/dev/null || true)"
 REF="${REF:-${DEFAULT_REF}}"
 
 need_build=1
 if [[ -d "${MONOREPO_DIR}/.git" && -f "${PACKAGE_DIR}/dist/index.d.ts" && -f "${PACKAGE_DIR}/dist/index.js" ]]; then
   current="$(git -C "${MONOREPO_DIR}" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "${current}" == "${REF}" ]]; then
+  # Skip only when HEAD matches the pin *and* dist actually includes the current
+  # package API. A leftover dist from an older SHA would otherwise be reused
+  # (file: "main" is dist/index.js) even though Vite's src alias is the intent.
+  if [[ "${current}" == "${REF}" ]] && grep -q "applyReferenceZoomToLeafMetrics" "${PACKAGE_DIR}/dist/index.js"; then
     echo "cytoscape-compound-graph already built at ${PACKAGE_DIR} (@ ${REF})"
     need_build=0
   fi

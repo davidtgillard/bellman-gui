@@ -21,6 +21,9 @@ import {
   isCompoundGraphNodes,
   sceneLayoutInputs,
 } from "../lib/compound-graph-adapter";
+import {
+  finalizeCompoundLeafMetrics,
+} from "../lib/compound-leaf-metrics";
 import type { CompoundGraphScene } from "@dgillard/cytoscape-compound-graph";
 import { layoutModelFromCy } from "@dgillard/cytoscape-compound-graph";
 import {
@@ -39,10 +42,10 @@ import {
   installWheelZoom,
   redrawGraphSynchronously,
   runLayoutWhenContainerReady,
+  fitGraphViewport,
   syncMilestoneNodesToViewportCenter,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   usesPresetLayout,
-  LAYOUT_FIT_PADDING,
   type SidebarViewportSession,
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
@@ -597,7 +600,7 @@ export function RoadmapGraph({
   const [cyInstance, setCyInstance] = useState<Core | null>(null);
   const [compoundScene, setCompoundScene] = useState<CompoundGraphScene | null>(null);
   const [graphSelectionRevision, setGraphSelectionRevision] = useState(0);
-  const [compoundReferenceZoom, setCompoundReferenceZoom] = useState(1);
+  const [compoundReferenceZoom, setCompoundReferenceZoom] = useState<number | null>(null);
   const [maxPanSpeed, setMaxPanSpeed] = useState(DEFAULT_MAX_PAN_SPEED);
   const [backgroundPanEnabled, setBackgroundPanEnabled] = useState(false);
   const [contextMenuState, setContextMenuState] = useState<ContextMenuState | null>(
@@ -622,9 +625,8 @@ export function RoadmapGraph({
     (positions: Record<string, NodePosition> | undefined) => {
       if (!isCompoundSceneEnabled()) {
         sceneRef.current = null;
-        queueMicrotask(() => {
-          setCompoundScene(null);
-        });
+        setCompoundScene(null);
+        setCompoundReferenceZoom(null);
         return null;
       }
       const scene = buildCompoundGraphScene(
@@ -633,9 +635,7 @@ export function RoadmapGraph({
         positions ?? nodePositionsRef.current,
       );
       sceneRef.current = scene;
-      queueMicrotask(() => {
-        setCompoundScene(scene);
-      });
+      setCompoundScene(scene);
       return scene;
     },
     [links, isCompoundSceneEnabled],
@@ -747,29 +747,34 @@ export function RoadmapGraph({
     }
   }, []);
 
-  const syncCompoundReferenceZoom = useCallback((cy: Core) => {
-    const referenceZoom = cy.zoom() > 0 ? cy.zoom() : 1;
-    queueMicrotask(() => {
-      setCompoundReferenceZoom(referenceZoom);
-    });
+  const finalizeCompoundLeafZoom = useCallback((cy: Core) => {
+    const referenceZoom = finalizeCompoundLeafMetrics(cy);
+    setCompoundReferenceZoom(referenceZoom);
     cy.maxZoom(compoundGraphMaxZoom(referenceZoom));
+    return referenceZoom;
   }, []);
 
   /**
    * After Cytoscape measurement, unjam stacked nodes (load-time only). Persists
    * when positions change and `persist` is not false. Skipped until layout hydration
    * completes so an empty ref cannot trigger bootstrap mode on a cached layout.
+   *
+   * Leaf on-screen size is applied after this returns, once the caller has fitted
+   * the camera to real container sizes (`finalizeCompoundLeafZoom`).
+   * `initializeFromCy` may freeze at the current zoom; that freeze is overwritten.
    */
   const applyCompoundSceneLayoutFromCy = useCallback(
     (
       cy: Core,
       scene: CompoundGraphScene,
       positions: Record<string, NodePosition> | undefined,
-      options?: { persist?: boolean },
+      options?: { persist?: boolean; unjam?: boolean },
     ) => {
       scene.initializeFromCy(cy);
       if (!layoutReadyRef.current) {
-        syncCompoundReferenceZoom(cy);
+        return false;
+      }
+      if (options?.unjam === false) {
         return false;
       }
       const { changed } = scene.unjamLoadedLayout(cy, {
@@ -778,14 +783,17 @@ export function RoadmapGraph({
       if (changed && options?.persist !== false && !usesPresetLayout(positions)) {
         onNodePositionChangeRef.current?.(scene.flatLayout());
       }
-      syncCompoundReferenceZoom(cy);
       return changed;
     },
-    [syncCompoundReferenceZoom],
+    [],
   );
 
   const initializeCompoundScene = useCallback(
-    (cy: Core, positions: Record<string, NodePosition> | undefined) => {
+    (
+      cy: Core,
+      positions: Record<string, NodePosition> | undefined,
+      options?: { persist?: boolean; fitViewport?: boolean },
+    ) => {
       if (!isCompoundSceneEnabled()) {
         return;
       }
@@ -793,7 +801,11 @@ export function RoadmapGraph({
       if (!scene) {
         return;
       }
-      applyCompoundSceneLayoutFromCy(cy, scene, positions);
+      applyCompoundSceneLayoutFromCy(cy, scene, positions, options);
+      if (options?.fitViewport) {
+        fitGraphViewport(cy);
+      }
+      finalizeCompoundLeafZoom(cy);
       attachSceneHandlers(cy, scene);
       reportNewCompoundSizes(scene);
     },
@@ -803,6 +815,7 @@ export function RoadmapGraph({
       rebuildScene,
       reportNewCompoundSizes,
       isCompoundSceneEnabled,
+      finalizeCompoundLeafZoom,
     ],
   );
   const onAutoLayoutCompleteRef = useRef(onAutoLayoutComplete);
@@ -1118,11 +1131,17 @@ export function RoadmapGraph({
     if (!cy || !usesPresetLayout(nodePositions) || cy.nodes().length === 0) {
       return;
     }
+    // Rebuilding from React layout state mid-gesture would throw the child
+    // back to the last persisted grab pose — the same snap the library fix
+    // is trying to remove.
+    if (sceneRef.current?.isChildDragInProgress()) {
+      return;
+    }
     const scene = rebuildScene(nodePositions);
     if (!scene) {
       return;
     }
-    applyCompoundSceneLayoutFromCy(cy, scene, nodePositions);
+    applyCompoundSceneLayoutFromCy(cy, scene, nodePositions, { unjam: false });
     if (layoutCompletedRef.current) {
       attachSceneHandlers(cy, scene);
     }
@@ -1338,6 +1357,7 @@ export function RoadmapGraph({
     const testWindow = window as typeof window & {
       __TEST__?: {
         graphPan?: () => { x: number; y: number };
+        graphZoom?: () => number;
         graphUserPanningEnabled?: () => boolean;
         openNodeContextMenu?: (nodeId: string) => void;
         selectNode?: (nodeId: string) => void;
@@ -1360,9 +1380,18 @@ export function RoadmapGraph({
           dx: number,
           dy: number,
         ) => void;
+        resizeCompositeFromCorner?: (
+          parentId: string,
+          corner: "nw" | "ne" | "sw" | "se",
+          dx: number,
+          dy: number,
+        ) => void;
         getNodeVisualBox?: (
           nodeId: string,
         ) => { x1: number; y1: number; x2: number; y2: number } | null;
+        getLeafRenderedDiameterPx?: (
+          nodeId: string,
+        ) => { w: number; h: number; zoom: number } | null;
         nodesOverlap?: (leftId: string, rightId: string) => boolean;
         isNodeRenderedVisible?: (nodeId: string) => boolean;
         getSubtreeNodeIds?: (rootId: string) => string[];
@@ -1375,6 +1404,7 @@ export function RoadmapGraph({
         const pan = cy.pan();
         return { x: pan.x, y: pan.y };
       };
+      testWindow.__TEST__.graphZoom = () => cy.zoom();
       testWindow.__TEST__.graphUserPanningEnabled = () => cy.userPanningEnabled();
       testWindow.__TEST__.openNodeContextMenu = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
@@ -1470,6 +1500,13 @@ export function RoadmapGraph({
             state.w = box.x2 - box.x1;
             state.h = box.y2 - box.y1;
           }
+        } else {
+          const nodeWidth = Number(node.data("nodeWidth"));
+          const nodeHeight = Number(node.data("nodeHeight"));
+          if (Number.isFinite(nodeWidth) && nodeWidth > 0) {
+            state.w = nodeWidth;
+            state.h = Number.isFinite(nodeHeight) && nodeHeight > 0 ? nodeHeight : nodeWidth;
+          }
         }
         return state;
       };
@@ -1518,7 +1555,10 @@ export function RoadmapGraph({
         if (node.empty()) {
           throw new Error(`Graph node not found: ${nodeId}`);
         }
-        const box = node.renderedBoundingBox({ includeLabels: true, includeOverlays: false });
+        // Shape only: wrapped labels hang below the circle and are not in the
+        // Cytoscape hit box. Their bbox center sits over the parent and would
+        // start a composite drag instead of a child drag.
+        const box = node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
         const container = cy.container();
         if (!container) {
           throw new Error("graph container is unavailable");
@@ -1531,6 +1571,10 @@ export function RoadmapGraph({
       };
       testWindow.__TEST__.getGraphNodeAbsolutePosition = (nodeId: string) => {
         if (compoundGraphRef.current && isCompoundGraphNodes(nodesRef.current)) {
+          const sceneModel = sceneRef.current?.getModel();
+          if (sceneModel) {
+            return modelAbsoluteCenter(sceneModel, nodeId);
+          }
           const model = layoutModelFromCy(cy, sceneLayoutInputs(nodesRef.current));
           return modelAbsoluteCenter(model, nodeId);
         }
@@ -1556,6 +1600,16 @@ export function RoadmapGraph({
         scene.applyContainerDragFromCy(cy, parentId);
         parent.trigger("free");
       };
+      testWindow.__TEST__.resizeCompositeFromCorner = (parentId, corner, dx, dy) => {
+        const scene = sceneRef.current;
+        if (!scene) {
+          throw new Error("compound scene is unavailable");
+        }
+        const constraints = scene.computeResizeChildConstraints(cy, parentId);
+        scene.resizeFromCorner(parentId, corner, dx, dy, scene.cloneModel(), constraints);
+        scene.syncToCy(cy);
+        onNodeResizeRef.current?.(scene.flatLayoutForSubtree(parentId));
+      };
       testWindow.__TEST__.getNodeVisualBox = (nodeId) => {
         const node = cy.getElementById(nodeId);
         if (node.empty()) {
@@ -1563,6 +1617,19 @@ export function RoadmapGraph({
         }
         const box = node.boundingBox({ includeLabels: true, includeOverlays: false });
         return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
+      };
+      testWindow.__TEST__.getLeafRenderedDiameterPx = (nodeId) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          return null;
+        }
+        // Body diameter in screen pixels. renderedBoundingBox is larger (label
+        // margin / underlay AABB) even with includeLabels: false.
+        return {
+          w: node.renderedWidth(),
+          h: node.renderedHeight(),
+          zoom: cy.zoom(),
+        };
       };
       testWindow.__TEST__.nodesOverlap = (leftId, rightId) => {
         const scene = sceneRef.current;
@@ -1907,6 +1974,8 @@ export function RoadmapGraph({
       compoundLeafClearAfterDragRef.current = null;
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
+        delete testWindow.__TEST__.graphZoom;
+        delete testWindow.__TEST__.getLeafRenderedDiameterPx;
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
         delete testWindow.__TEST__.selectNode;
@@ -1952,15 +2021,15 @@ export function RoadmapGraph({
       queueMicrotask(() => {
         setGraphSelectionRevision((revision) => revision + 1);
       });
+      if (compoundGraph && isCompoundGraphNodes(nodes)) {
+        cy.style().fromJson(workPackageGraphStylesheet());
+      }
       cy.batch(() => {
         cy.elements().remove();
         if (compoundGraph && isCompoundGraphNodes(nodes)) {
           const scene = rebuildScene(nodePositions);
           if (scene) {
             cy.add(scene.buildElements());
-            if (usesPresetLayout(nodePositions)) {
-              applyCompoundSceneLayoutFromCy(cy, scene, nodePositions, { persist: false });
-            }
           }
         } else {
           cy.add(toElementDefinitions(nodes, links, nodePositions));
@@ -1975,13 +2044,11 @@ export function RoadmapGraph({
       if (usesPresetLayout(nodePositions) && hasCompoundNodesAfter && layoutReady) {
         layoutCompletedRef.current = true;
         applyGraphVisibility(cy, true);
-        initializeCompoundScene(cy, nodePositions);
         if (compoundModeChanged) {
-          // Top-level pan/zoom is meaningless for work-package coordinates.
-          cy.fit(undefined, LAYOUT_FIT_PADDING);
-          syncCompoundReferenceZoom(cy);
+          initializeCompoundScene(cy, nodePositions, { fitViewport: true });
         } else {
           cy.viewport(preservedViewport);
+          initializeCompoundScene(cy, nodePositions, { fitViewport: false });
         }
         lastLayoutSyncTokenRef.current = layoutSyncToken;
         previousCompoundGraphForLayoutRef.current = compoundGraph;
@@ -2012,6 +2079,7 @@ export function RoadmapGraph({
         const scene = rebuildScene(nodePositions);
         if (scene && usesPresetLayout(nodePositions) && cy.nodes().length > 0) {
           applyCompoundSceneLayoutFromCy(cy, scene, nodePositions);
+          finalizeCompoundLeafZoom(cy);
         }
       }
       lastLayoutSyncTokenRef.current = layoutSyncToken;
@@ -2041,7 +2109,9 @@ export function RoadmapGraph({
         if (cyRef.current) {
           applyGraphVisibility(cyRef.current, true);
           if (hasCompoundNodes) {
-            initializeCompoundScene(cyRef.current, nodePositionsRef.current);
+            initializeCompoundScene(cyRef.current, nodePositionsRef.current, {
+              fitViewport: true,
+            });
           } else {
             measureCompoundSizes();
             syncMilestoneNodesToViewportCenter(cyRef.current);
@@ -2068,7 +2138,7 @@ export function RoadmapGraph({
     nodePositions,
     nodes,
     rebuildScene,
-    syncCompoundReferenceZoom,
+    finalizeCompoundLeafZoom,
   ]);
 
   useEffect(() => {
@@ -2098,7 +2168,7 @@ export function RoadmapGraph({
     }
     cy.maxZoom(
       compoundGraph
-        ? compoundGraphMaxZoom(compoundReferenceZoom)
+        ? compoundGraphMaxZoom(compoundReferenceZoom ?? 1)
         : TOP_LEVEL_GRAPH_MAX_ZOOM,
     );
   }, [compoundGraph, compoundReferenceZoom, cyReady]);
@@ -2381,7 +2451,11 @@ export function RoadmapGraph({
         className={`graph-viewport${childDragInProgress ? " graph-viewport-dragging" : ""}`}
         ref={containerRef}
       />
-      {draggable && resizeCy && activeScene && compoundGraph ? (
+      {draggable &&
+      resizeCy &&
+      activeScene &&
+      compoundGraph &&
+      compoundReferenceZoom !== null ? (
         <CompoundOverlays
           cy={resizeCy}
           scene={activeScene}

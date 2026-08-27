@@ -78,6 +78,8 @@ interface TestBridge {
   selectGraphNodeOnly?: (nodeId: string) => void;
   tapGraphNode?: (nodeId: string) => void;
   tapGraphBackground?: () => void;
+  graphPan?: () => { x: number; y: number };
+  graphZoom?: () => number;
   getGraphNodeState?: (
     nodeId: string,
   ) => { x: number; y: number; w?: number; h?: number; x1?: number; y1?: number } | null;
@@ -92,6 +94,9 @@ interface TestBridge {
   getNodeVisualBox?: (
     nodeId: string,
   ) => { x1: number; y1: number; x2: number; y2: number } | null;
+  getLeafRenderedDiameterPx?: (
+    nodeId: string,
+  ) => { w: number; h: number; zoom: number } | null;
   nodesOverlap?: (leftId: string, rightId: string) => boolean;
   isNodeRenderedVisible?: (nodeId: string) => boolean;
   getSubtreeNodeIds?: (rootId: string) => string[];
@@ -338,6 +343,22 @@ export async function getGraphPan(page: Page): Promise<{ x: number; y: number }>
 }
 
 /**
+ * Returns the current cytoscape zoom exposed by the graph test hook.
+ * @param page - Playwright page to inspect.
+ */
+export async function getGraphZoom(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const bridge = (window as unknown as {
+      __TEST__?: { graphZoom?: () => number };
+    }).__TEST__;
+    if (!bridge?.graphZoom) {
+      throw new Error("graph zoom test hook is unavailable");
+    }
+    return bridge.graphZoom();
+  });
+}
+
+/**
  * Waits until the graph canvas and test hooks are ready.
  * @param page - Playwright page to wait on.
  */
@@ -537,6 +558,84 @@ export async function getGraphNodeState(
 }
 
 /**
+ * Returns a node's labelled bounding box in graph model coordinates.
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function getNodeVisualBox(
+  page: Page,
+  nodeId: string,
+): Promise<{ x1: number; y1: number; x2: number; y2: number } | null> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getNodeVisualBox) {
+      throw new Error("node visual box test hook is unavailable");
+    }
+    return bridge.getNodeVisualBox(id);
+  }, nodeId);
+}
+
+/** CSS diameter of `.child-drag-node` and top-level circular nodes. */
+export const GRAPH_NODE_CSS_DIAMETER_PX = 36;
+
+export interface LeafRenderedDiameter {
+  w: number;
+  h: number;
+  zoom: number;
+}
+
+/**
+ * Returns a node's rendered diameter in screen pixels (labels excluded).
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Graph node identifier.
+ */
+export async function getLeafRenderedDiameterPx(
+  page: Page,
+  nodeId: string,
+): Promise<LeafRenderedDiameter | null> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.getLeafRenderedDiameterPx) {
+      throw new Error("leaf rendered diameter test hook is unavailable");
+    }
+    return bridge.getLeafRenderedDiameterPx(id);
+  }, nodeId);
+}
+
+/**
+ * Samples rendered leaf diameter across consecutive animation frames.
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Graph node identifier.
+ * @param frames - Number of animation frames to sample after the current one.
+ */
+export async function sampleLeafRenderedDiameters(
+  page: Page,
+  nodeId: string,
+  frames = 3,
+): Promise<LeafRenderedDiameter[]> {
+  return page.evaluate(
+    async ({ id, frameCount }) => {
+      const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+      if (!bridge?.getLeafRenderedDiameterPx) {
+        throw new Error("leaf rendered diameter test hook is unavailable");
+      }
+      const samples: LeafRenderedDiameter[] = [];
+      for (let index = 0; index < frameCount; index += 1) {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
+        const sample = bridge.getLeafRenderedDiameterPx(id);
+        if (sample) {
+          samples.push(sample);
+        }
+      }
+      return samples;
+    },
+    { id: nodeId, frameCount: frames },
+  );
+}
+
+/**
  * Returns cytoscape edge ids exposed by the graph test hook.
  * @param page - Playwright page to inspect.
  * @throws {Error} When the graph edge ids test hook is unavailable.
@@ -705,6 +804,42 @@ export async function dragCompositeParentByModelDelta(
       bridge.dragCompositeParentBy(id, deltaX, deltaY);
     },
     { id: parentId, deltaX: dx, deltaY: dy },
+  );
+}
+
+/**
+ * Resizes a composite from a corner by model-space delta via the same path as overlay handles.
+ * @param page
+ * @param parentId
+ * @param corner
+ * @param dx
+ * @param dy
+ */
+export async function resizeCompositeFromCorner(
+  page: Page,
+  parentId: string,
+  corner: "nw" | "ne" | "sw" | "se",
+  dx: number,
+  dy: number,
+): Promise<void> {
+  await page.evaluate(
+    ({ id, handle, deltaX, deltaY }) => {
+      const bridge = (window as unknown as {
+        __TEST__?: {
+          resizeCompositeFromCorner?: (
+            parentId: string,
+            corner: "nw" | "ne" | "sw" | "se",
+            dx: number,
+            dy: number,
+          ) => void;
+        };
+      }).__TEST__;
+      if (!bridge?.resizeCompositeFromCorner) {
+        throw new Error("composite resize test hook is unavailable");
+      }
+      bridge.resizeCompositeFromCorner(id, handle, deltaX, deltaY);
+    },
+    { id: parentId, handle: corner, deltaX: dx, deltaY: dy },
   );
 }
 

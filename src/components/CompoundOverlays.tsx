@@ -3,10 +3,12 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { applyCompoundLeafCyMetrics } from "../lib/compound-leaf-metrics";
 import { BELLMAN_COMPOUND_GRAPH_THEME } from "../lib/cytoscape-theme";
 import {
   leafDomVisualStyle,
@@ -44,7 +46,9 @@ function buildAllParentVisuals(
   selectedContainerId: string | null,
   referenceZoom: number,
 ): Map<string, ParentDragVisual> {
-  scene.ensureModelFromCy(cy);
+  if (!scene.isChildDragInProgress()) {
+    scene.ensureModelFromCy(cy);
+  }
   const layout = scene.flatLayout();
   const zoom = cy.zoom();
   const pan = cy.pan();
@@ -180,9 +184,16 @@ export function CompoundOverlays({
   const [handleRects, setHandleRects] = useState<
     Map<string, { left: number; top: number; width: number; height: number }>
   >(new Map());
+  const onOverlayChangeRef = useRef(onOverlayChange);
+
+  useEffect(() => {
+    onOverlayChangeRef.current = onOverlayChange;
+  }, [onOverlayChange]);
 
   const refreshOverlays = useCallback(() => {
-    scene.refreshFootprintsFromCy(cy);
+    if (!scene.isChildDragInProgress()) {
+      scene.refreshFootprintsFromCy(cy);
+    }
     const nextChildDragVisual = scene.childDragVisual(cy);
     const nextParentVisuals = buildAllParentVisuals(
       cy,
@@ -201,8 +212,8 @@ export function CompoundOverlays({
         );
       return same ? previous : nextParentVisuals;
     });
-    onOverlayChange?.();
-  }, [cy, onOverlayChange, scene, selectedContainerId]);
+    onOverlayChangeRef.current?.();
+  }, [cy, scene, selectedContainerId]);
 
   const recomputeHandles = useCallback(() => {
     if (!selectedContainerId) {
@@ -223,28 +234,7 @@ export function CompoundOverlays({
     childVisualStyleRef.current = childVisualStyle;
     setChildVisualStyle(childVisualStyle);
     childVisualStyleSignatureRef.current = JSON.stringify(childVisualStyle);
-    targetCy.batch(() => {
-      targetCy.nodes("[kind = 'leaf']").forEach((node) => {
-        node.data("labelFontSize", childVisualStyle.fontSize / referenceZoom);
-        node.data("labelFontFamily", childVisualStyle.fontFamily);
-        node.data("labelFontWeight", childVisualStyle.fontWeight);
-        node.data("labelColor", childVisualStyle.color);
-        node.data("labelOutlineWidth", childVisualStyle.labelOutlineWidth / referenceZoom);
-        node.data("labelOutlineColor", childVisualStyle.labelOutlineColor);
-        node.data(
-          "labelMarginY",
-          (childVisualStyle.labelMarginY + childVisualStyle.labelOutlineWidth) /
-            referenceZoom,
-        );
-        node.data("nodeWidth", childVisualStyle.nodeWidth / referenceZoom);
-        node.data("nodeHeight", childVisualStyle.nodeHeight / referenceZoom);
-        node.data(
-          "selectionOutlineWidth",
-          childVisualStyle.selectionOutlineWidth / referenceZoom,
-        );
-        node.data("selectionOutlineColor", childVisualStyle.selectionOutlineColor);
-      });
-    });
+    applyCompoundLeafCyMetrics(targetCy, referenceZoom, childVisualStyle);
   }, []);
 
   const syncConfiguredChildVisualStyle = useCallback(
@@ -265,11 +255,14 @@ export function CompoundOverlays({
   );
 
   const refreshInteriorClearances = useCallback(() => {
+    if (scene.isChildDragInProgress()) {
+      return;
+    }
     const zoom = cy.zoom();
     if (!(zoom > 0)) {
       return;
     }
-    scene.setEdgeClearance(THEME.childEdgeClearancePx / zoom);
+    scene.setEdgeClearance(Math.max(0, THEME.childEdgeClearancePx) / zoom);
     scene.setNodeOverlapPadding(THEME.nodeOverlapPadding);
   }, [cy, scene]);
 
@@ -288,8 +281,10 @@ export function CompoundOverlays({
       if (!syncConfiguredChildVisualStyle(cy)) {
         return;
       }
-      scene.refreshFootprintsFromCy(cy);
-      scene.ensureModelFromCy(cy);
+      if (!scene.isChildDragInProgress()) {
+        scene.refreshFootprintsFromCy(cy);
+        scene.ensureModelFromCy(cy);
+      }
       refreshInteriorClearances();
       recomputeHandles();
       refreshOverlays();
@@ -308,14 +303,17 @@ export function CompoundOverlays({
     syncConfiguredChildVisualStyle,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     referenceZoomRef.current = referenceZoom > 0 ? referenceZoom : 1;
     applyConfiguredChildVisualStyle(cy);
+  }, [applyConfiguredChildVisualStyle, cy, referenceZoom]);
+
+  useEffect(() => {
     queueMicrotask(() => {
       refreshOverlays();
       recomputeHandles();
     });
-  }, [applyConfiguredChildVisualStyle, cy, referenceZoom, refreshOverlays, recomputeHandles]);
+  }, [refreshOverlays, recomputeHandles]);
 
   useEffect(() => {
     const onRender = () => {
@@ -424,7 +422,8 @@ export function CompoundOverlays({
     [applyResize, finishResize],
   );
 
-  const ghostZoomScale = childDragVisual?.zoomScale ?? 1;
+  const ghostZoomScale =
+    referenceZoom > 0 && cy.zoom() > 0 ? cy.zoom() / referenceZoom : 1;
 
   return (
     <div className="compound-overlays-layer">
@@ -510,6 +509,8 @@ export function CompoundOverlays({
             <div
               className="child-drag-node is-selected"
               style={{
+                width: childVisualStyle.nodeWidth,
+                height: childVisualStyle.nodeHeight,
                 backgroundColor: childDragVisual.color,
                 transform: `translate(-50%, -50%) scale(${ghostZoomScale})`,
               }}
@@ -527,6 +528,8 @@ export function CompoundOverlays({
                 fontFamily: childVisualStyle.fontFamily,
                 fontWeight: childVisualStyle.fontWeight,
                 color: childVisualStyle.color,
+                width: "max-content",
+                maxWidth: childDragVisual.labelMaxWidthPx,
                 transform: `translateX(-50%) scale(${ghostZoomScale})`,
               }}
             >

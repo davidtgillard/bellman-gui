@@ -689,13 +689,17 @@ body {
   --child-label-outline-color: #0f172a;
   position: absolute;
   left: 0;
+  width: max-content;
+  max-width: 120px;
   font-family: "Helvetica Neue", Helvetica, sans-serif;
   font-size: 11px;
   line-height: 1;
   color: #e2e8f0;
   transform-origin: top center;
   text-shadow: 0 0 var(--child-label-outline-width) var(--child-label-outline-color);
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .style-probe {

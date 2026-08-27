@@ -10,10 +10,12 @@ import {
   getCompositeRenderedBox,
   getGraphNodeAbsolutePosition,
   getGraphNodeState,
+  getNodeVisualBox,
   getSubtreeNodeIds,
   isNodeRenderedVisible,
   nodesOverlap,
   openWorkPackageGraph,
+  resizeCompositeFromCorner,
   setupPage,
   tapGraphNode,
   test,
@@ -36,6 +38,10 @@ const COMPOSITE_C_CHILD = {
 };
 const CHILD_A = { id: "project/billing-redesign/wp-child-a", type: "work_package" };
 const CHILD_B = { id: "project/billing-redesign/wp-child-b", type: "work_package" };
+const CHILD_WRAP = {
+  id: "project/billing-redesign/wp-implementation-details-for-invoicing",
+  type: "work_package",
+};
 
 function baseScenario(): Scenario {
   return {
@@ -76,6 +82,39 @@ function baseScenario(): Scenario {
       },
     },
   };
+}
+
+function wrappingChildScenario(): Scenario {
+  const scenario = baseScenario();
+  const state = scenario.states[0]!;
+  state.nodes = [PROJECT, COMPOSITE_PARENT, CHILD_WRAP, CHILD_B];
+  state.links = [
+    {
+      id: "parent_of--invoicing--child-wrap",
+      link_type: "parent_of",
+      source: COMPOSITE_PARENT.id,
+      target: CHILD_WRAP.id,
+    },
+    {
+      id: "parent_of--invoicing--child-b",
+      link_type: "parent_of",
+      source: COMPOSITE_PARENT.id,
+      target: CHILD_B.id,
+    },
+  ];
+  scenario.layout = {
+    version: 1,
+    kind: "bellman-gui-work-package-layout",
+    top_level: {},
+    projects: {
+      "billing-redesign": {
+        [COMPOSITE_PARENT.id]: { x: 0, y: 0, w: 420, h: 280 },
+        [CHILD_WRAP.id]: { x: 0, y: 0 },
+        [CHILD_B.id]: { x: 90, y: -30 },
+      },
+    },
+  };
+  return scenario;
 }
 
 function overlapScenario(): Scenario {
@@ -183,6 +222,35 @@ test.describe("work package layout invariants", () => {
       expect(absAfter.b?.x).toBeCloseTo(absBefore.b?.x ?? 0, 0);
       expect(absAfter.b?.y).toBeCloseTo(absBefore.b?.y ?? 0, 0);
     });
+
+    test("shrinking toward a child does not change the child's size", async ({ page }) => {
+      await openGraph(page, baseScenario());
+      const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
+      const childBoxBefore = await getNodeVisualBox(page, CHILD_B.id);
+      const childSizeBefore = {
+        w: (childBoxBefore?.x2 ?? 0) - (childBoxBefore?.x1 ?? 0),
+        h: (childBoxBefore?.y2 ?? 0) - (childBoxBefore?.y1 ?? 0),
+      };
+      const absBefore = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
+
+      await tapGraphNode(page, COMPOSITE_PARENT.id);
+      await resizeCompositeFromCorner(page, COMPOSITE_PARENT.id, "se", -1000, -1000);
+
+      const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
+      const childBoxAfter = await getNodeVisualBox(page, CHILD_B.id);
+      const parentBoxAfter = await getNodeVisualBox(page, COMPOSITE_PARENT.id);
+      const absAfter = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
+
+      expect(parentAfter?.w ?? 0).toBeLessThan(parentBefore?.w ?? 0);
+      expect(absAfter?.x).toBeCloseTo(absBefore?.x ?? 0, 0);
+      expect(absAfter?.y).toBeCloseTo(absBefore?.y ?? 0, 0);
+      expect((childBoxAfter?.x2 ?? 0) - (childBoxAfter?.x1 ?? 0)).toBeCloseTo(childSizeBefore.w, 0);
+      expect((childBoxAfter?.y2 ?? 0) - (childBoxAfter?.y1 ?? 0)).toBeCloseTo(childSizeBefore.h, 0);
+      expect(parentBoxAfter).not.toBeNull();
+      expect(childBoxAfter).not.toBeNull();
+      expect(parentBoxAfter!.x2).toBeGreaterThanOrEqual(childBoxAfter!.x2);
+      expect(parentBoxAfter!.y2).toBeGreaterThanOrEqual(childBoxAfter!.y2);
+    });
   });
 
   test.describe("req 3 inner move isolation", () => {
@@ -190,11 +258,17 @@ test.describe("work package layout invariants", () => {
       await openGraph(page, baseScenario());
       const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
       const siblingBefore = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
+      const childBoxBefore = await getNodeVisualBox(page, CHILD_A.id);
+      const childSizeBefore = {
+        w: (childBoxBefore?.x2 ?? 0) - (childBoxBefore?.x1 ?? 0),
+        h: (childBoxBefore?.y2 ?? 0) - (childBoxBefore?.y1 ?? 0),
+      };
 
       await dragGraphNode(page, CHILD_A.id, 80, 40, COMPOSITE_PARENT.id);
 
       const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
       const siblingAfter = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
+      const childBoxAfter = await getNodeVisualBox(page, CHILD_A.id);
 
       expect(parentAfter?.x).toBeCloseTo(parentBefore?.x ?? 0, 0);
       expect(parentAfter?.y).toBeCloseTo(parentBefore?.y ?? 0, 0);
@@ -202,6 +276,8 @@ test.describe("work package layout invariants", () => {
       expect(parentAfter?.h).toBe(parentBefore?.h);
       expect(siblingAfter?.x).toBeCloseTo(siblingBefore?.x ?? 0, 0);
       expect(siblingAfter?.y).toBeCloseTo(siblingBefore?.y ?? 0, 0);
+      expect((childBoxAfter?.x2 ?? 0) - (childBoxAfter?.x1 ?? 0)).toBeCloseTo(childSizeBefore.w, 0);
+      expect((childBoxAfter?.y2 ?? 0) - (childBoxAfter?.y1 ?? 0)).toBeCloseTo(childSizeBefore.h, 0);
     });
 
     test("outward child drag clamp keeps parent chrome fixed", async ({ page }) => {
@@ -225,6 +301,46 @@ test.describe("work package layout invariants", () => {
       expect(boxAfter?.y1).toBeCloseTo(boxBefore?.y1 ?? 0, 0);
       expect(siblingAfter?.x).toBeCloseTo(siblingBefore?.x ?? 0, 0);
       expect(siblingAfter?.y).toBeCloseTo(siblingBefore?.y ?? 0, 0);
+    });
+
+    test("wrapping child drag into a wall stays legal and does not move the parent", async ({
+      page,
+    }) => {
+      const scenario = wrappingChildScenario();
+      await setupPage(page, scenario);
+      await openWorkPackageGraph(page, PROJECT.id);
+      await waitForCompoundGraphReady(page, COMPOSITE_PARENT.id, [CHILD_WRAP.id, CHILD_B.id]);
+
+      const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
+      const boxBefore = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
+      const grab = await getGraphNodeAbsolutePosition(page, CHILD_WRAP.id);
+      let lastMidDrag = grab;
+
+      await dragGraphNodeWithSteps(page, CHILD_WRAP.id, -220, -180, 10, async () => {
+        lastMidDrag = await getGraphNodeAbsolutePosition(page, CHILD_WRAP.id);
+      });
+
+      const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
+      const boxAfter = await getCompositeRenderedBox(page, COMPOSITE_PARENT.id);
+      const landed = await getGraphNodeAbsolutePosition(page, CHILD_WRAP.id);
+      const childBox = await getNodeVisualBox(page, CHILD_WRAP.id);
+      const parentBox = await getNodeVisualBox(page, COMPOSITE_PARENT.id);
+
+      expect(parentAfter?.w).toBe(parentBefore?.w);
+      expect(parentAfter?.h).toBe(parentBefore?.h);
+      expect(parentAfter?.x).toBeCloseTo(parentBefore?.x ?? 0, 0);
+      expect(parentAfter?.y).toBeCloseTo(parentBefore?.y ?? 0, 0);
+      expect(boxAfter?.x1).toBeCloseTo(boxBefore?.x1 ?? 0, 0);
+      expect(boxAfter?.y1).toBeCloseTo(boxBefore?.y1 ?? 0, 0);
+      expect(landed?.x).not.toBeCloseTo(grab?.x ?? 0, 0);
+      expect(landed?.x).toBeCloseTo(lastMidDrag?.x ?? 0, 1);
+      expect(landed?.y).toBeCloseTo(lastMidDrag?.y ?? 0, 1);
+      expect(parentBox).not.toBeNull();
+      expect(childBox).not.toBeNull();
+      expect(childBox!.x1).toBeGreaterThanOrEqual(parentBox!.x1 - 1);
+      expect(childBox!.y1).toBeGreaterThanOrEqual(parentBox!.y1 - 1);
+      expect(childBox!.x2).toBeLessThanOrEqual(parentBox!.x2 + 1);
+      expect(childBox!.y2).toBeLessThanOrEqual(parentBox!.y2 + 1);
     });
   });
 
