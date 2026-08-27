@@ -484,22 +484,18 @@ function App() {
   );
 
   const handleNodeResize = useCallback(
-    (nodeId: string, position: NodePosition) => {
-      // A resize gesture reports the composite's new centre and size together;
-      // withNodePosition/withTopLevelNodePosition merge both into the layout.
+    (positions: Record<string, NodePosition>) => {
+      // A resize reports the composite's new centre and size together with the re-based
+      // offsets of everything inside it; they only describe the layout as a set.
       const projectId = currentProjectId(graphViewStack);
-      if (projectId) {
+      for (const [nodeId, position] of Object.entries(positions)) {
         setWorkPackageLayout((current) =>
-          withNodePosition(current, projectId, nodeId, position),
+          projectId
+            ? withNodePosition(current, projectId, nodeId, position)
+            : withTopLevelNodePosition(current, nodeId, position),
         );
         persistNodePosition(projectId, nodeId, position);
-        return;
       }
-
-      setWorkPackageLayout((current) =>
-        withTopLevelNodePosition(current, nodeId, position),
-      );
-      persistNodePosition(null, nodeId, position);
     },
     [graphViewStack, persistNodePosition],
   );

@@ -140,7 +140,8 @@ interface CompoundOverlaysProps {
   referenceZoom: number;
   probeLabel: string;
   selectedContainerId: string | null;
-  onResizeComplete: (nodeId: string, position: NodePosition) => void;
+  /** Every layout entry the resize changed: the container plus its descendants. */
+  onResizeComplete: (positions: Record<string, NodePosition>) => void;
   onOverlayChange?: () => void;
 }
 
@@ -369,10 +370,10 @@ export function CompoundOverlays({
     if (!active?.moved) {
       return;
     }
-    const layout = scene.flatLayout()[active.containerId];
-    if (layout) {
-      onResizeComplete(active.containerId, layout);
-    }
+    // A corner resize moves the container's centre, which re-bases every descendant's
+    // stored parent-relative offset. Saving the container's entry alone re-loads with
+    // the children displaced by half the corner drag.
+    onResizeComplete(scene.flatLayoutForSubtree(active.containerId));
   }, [onResizeComplete, scene]);
 
   const onHandlePointerDown = useCallback(

@@ -111,7 +111,7 @@ interface RoadmapGraphProps {
   draggable?: boolean;
   nodePositions?: Record<string, NodePosition>;
   onNodePositionChange?: (positions: Record<string, NodePosition>) => void;
-  onNodeResize?: (nodeId: string, position: NodePosition) => void;
+  onNodeResize?: (positions: Record<string, NodePosition>) => void;
   onCompoundSizesMeasured?: (
     sizes: Record<string, NodeSize>,
     positions: Record<string, NodePosition>,
@@ -2388,9 +2388,9 @@ export function RoadmapGraph({
           referenceZoom={compoundReferenceZoom}
           probeLabel={overlayProbeLabel}
           selectedContainerId={compositeChromeId}
-          onResizeComplete={(nodeId, position) => {
+          onResizeComplete={(positions) => {
             markSidebarViewportDirtyRef.current();
-            onNodeResizeRef.current?.(nodeId, position);
+            onNodeResizeRef.current?.(positions);
           }}
           onOverlayChange={() => setGraphSelectionRevision((revision) => revision + 1)}
         />
