@@ -166,6 +166,18 @@ function overlapScenario(): Scenario {
   };
 }
 
+function shrinkResizeScenario(): Scenario {
+  const scenario = baseScenario();
+  const layout = scenario.layout!;
+  layout.projects!["billing-redesign"]![COMPOSITE_PARENT.id] = {
+    x: 0,
+    y: 0,
+    w: 560,
+    h: 360,
+  };
+  return scenario;
+}
+
 async function openGraph(page: import("@playwright/test").Page, scenario: Scenario): Promise<void> {
   await setupPage(page, scenario);
   await openWorkPackageGraph(page, PROJECT.id);
@@ -224,7 +236,7 @@ test.describe("work package layout invariants", () => {
     });
 
     test("shrinking toward a child does not change the child's size", async ({ page }) => {
-      await openGraph(page, baseScenario());
+      await openGraph(page, shrinkResizeScenario());
       const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);
       const childBoxBefore = await getNodeVisualBox(page, CHILD_B.id);
       const childSizeBefore = {
@@ -233,15 +245,21 @@ test.describe("work package layout invariants", () => {
       };
       const absBefore = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
 
-      await tapGraphNode(page, COMPOSITE_PARENT.id);
+      // Direct resize hook — no tap/selection needed (avoids overlay refresh racing
+      // ensureModelFromCy against the resize).
       await resizeCompositeFromCorner(page, COMPOSITE_PARENT.id, "se", -1000, -1000);
+
+      const parentBeforeW = parentBefore?.w ?? 0;
+      await expect
+        .poll(async () => (await getGraphNodeState(page, COMPOSITE_PARENT.id))?.w ?? parentBeforeW)
+        .toBeLessThan(parentBeforeW);
 
       const parentAfter = await getGraphNodeState(page, COMPOSITE_PARENT.id);
       const childBoxAfter = await getNodeVisualBox(page, CHILD_B.id);
       const parentBoxAfter = await getNodeVisualBox(page, COMPOSITE_PARENT.id);
       const absAfter = await getGraphNodeAbsolutePosition(page, CHILD_B.id);
 
-      expect(parentAfter?.w ?? 0).toBeLessThan(parentBefore?.w ?? 0);
+      expect(parentAfter?.w ?? 0).toBeLessThan(parentBeforeW);
       expect(absAfter?.x).toBeCloseTo(absBefore?.x ?? 0, 0);
       expect(absAfter?.y).toBeCloseTo(absBefore?.y ?? 0, 0);
       expect((childBoxAfter?.x2 ?? 0) - (childBoxAfter?.x1 ?? 0)).toBeCloseTo(childSizeBefore.w, 0);

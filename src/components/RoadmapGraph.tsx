@@ -108,6 +108,8 @@ interface RoadmapGraphProps {
   /** When true, the node detail sidebar is open and may shrink the graph. */
   nodeDetailOpen?: boolean;
   onNodeClick?: (nodeId: string) => void;
+  /** Returns true when the node detail sidebar was dismissed. */
+  onNodeDetailDismiss?: () => boolean;
   /** Returns true when React selection state was cleared. */
   onSelectionClear?: () => boolean;
   contextMenu?: (event: GraphContextMenuEvent) => ReactNode;
@@ -542,6 +544,7 @@ export function RoadmapGraph({
   selectedNodeId = null,
   nodeDetailOpen = false,
   onNodeClick,
+  onNodeDetailDismiss,
   onSelectionClear,
   contextMenu,
   draggable = false,
@@ -574,6 +577,7 @@ export function RoadmapGraph({
   const lastLayoutSyncTokenRef = useRef(0);
   const visibleNodeIdsRef = useRef(visibleNodeIds);
   const onNodeClickRef = useRef(onNodeClick);
+  const onNodeDetailDismissRef = useRef(onNodeDetailDismiss);
   const onSelectionClearRef = useRef(onSelectionClear);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onNodeResizeRef = useRef(onNodeResize);
@@ -894,6 +898,10 @@ export function RoadmapGraph({
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
   }, [onNodeClick]);
+
+  useEffect(() => {
+    onNodeDetailDismissRef.current = onNodeDetailDismiss;
+  }, [onNodeDetailDismiss]);
 
   useEffect(() => {
     onSelectionClearRef.current = onSelectionClear;
@@ -1363,6 +1371,7 @@ export function RoadmapGraph({
         selectNode?: (nodeId: string) => void;
         selectGraphNodeOnly?: (nodeId: string) => void;
         tapGraphNode?: (nodeId: string) => void;
+        doubleClickGraphNode?: (nodeId: string) => void;
         tapGraphBackground?: () => void;
         getGraphNodeState?: (
           nodeId: string,
@@ -1436,24 +1445,24 @@ export function RoadmapGraph({
           throw new Error(`Graph node not found: ${nodeId}`);
         }
         if (compoundGraphRef.current && node.data("kind") === "leaf") {
-          if (node.selected()) {
-            const cleared = onSelectionClearRef.current?.() ?? false;
-            if (cleared) {
-              cy.nodes().unselect();
-              graphContainerRef.current?.focus({ preventScroll: true });
-            }
-          } else {
-            suppressLeafSelectionRef.current = false;
-            cy.nodes().unselect();
-            node.select();
-            onNodeClickRef.current?.(nodeId);
-            lastSelectedCompoundLeafRef.current = nodeId;
-            graphContainerRef.current?.focus({ preventScroll: true });
-          }
+          compoundLeafTapRef.current?.(nodeId, node.selected());
           return;
         }
         node.trigger("mousedown");
         node.trigger("tap");
+        graphContainerRef.current?.focus({ preventScroll: true });
+      };
+      testWindow.__TEST__.doubleClickGraphNode = (nodeId: string) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          throw new Error(`Graph node not found: ${nodeId}`);
+        }
+        if (compoundGraphRef.current && node.data("kind") === "leaf") {
+          compoundLeafTapRef.current?.(nodeId, false);
+          compoundLeafTapRef.current?.(nodeId, true);
+        } else {
+          openNodeDetail(nodeId);
+        }
         graphContainerRef.current?.focus({ preventScroll: true });
       };
       testWindow.__TEST__.tapGraphBackground = () => {
@@ -1605,8 +1614,10 @@ export function RoadmapGraph({
         if (!scene) {
           throw new Error("compound scene is unavailable");
         }
+        scene.ensureModelFromCy(cy);
         const constraints = scene.computeResizeChildConstraints(cy, parentId);
-        scene.resizeFromCorner(parentId, corner, dx, dy, scene.cloneModel(), constraints);
+        const startModel = scene.cloneModel();
+        scene.resizeFromCorner(parentId, corner, dx, dy, startModel, constraints);
         scene.syncToCy(cy);
         onNodeResizeRef.current?.(scene.flatLayoutForSubtree(parentId));
       };
@@ -1669,6 +1680,25 @@ export function RoadmapGraph({
     }
 
     let selectedNodeIdAtPointerDown: string | null = null;
+    const COMPOUND_LEAF_DOUBLE_CLICK_MS = 400;
+    let lastCompoundLeafTap: { id: string | null; time: number } = {
+      id: null,
+      time: 0,
+    };
+
+    const openNodeDetail = (nodeId: string) => {
+      closeContextMenu();
+      const node = cy.getElementById(nodeId);
+      if (node.empty()) {
+        return;
+      }
+      if (!node.selected()) {
+        cy.nodes().unselect();
+        node.select();
+      }
+      suppressNextTapRef.current = true;
+      onNodeClickRef.current?.(nodeId);
+    };
 
     cy.on("mousedown", "node", (event) => {
       const node = event.target;
@@ -1698,6 +1728,19 @@ export function RoadmapGraph({
     };
 
     compoundLeafTapRef.current = (childId, wasSelected) => {
+      const now = Date.now();
+      if (
+        lastCompoundLeafTap.id === childId &&
+        now - lastCompoundLeafTap.time < COMPOUND_LEAF_DOUBLE_CLICK_MS
+      ) {
+        lastCompoundLeafTap = { id: null, time: 0 };
+        selectedNodeIdAtPointerDown = null;
+        selectCompoundLeaf(childId);
+        openNodeDetail(childId);
+        return;
+      }
+      lastCompoundLeafTap = { id: childId, time: now };
+
       if (wasSelected) {
         selectedNodeIdAtPointerDown = null;
         clearGraphSelectionIfAllowed();
@@ -1781,6 +1824,7 @@ export function RoadmapGraph({
     };
     cy.on("select", "node", (event) => {
       const node = event.target;
+      const nodeId = node.id();
       if (suppressNextTapRef.current) {
         return;
       }
@@ -1794,12 +1838,32 @@ export function RoadmapGraph({
         return;
       }
       if (compoundGraphRef.current && node.data("kind") === "leaf") {
-        lastSelectedCompoundLeafRef.current = node.id();
+        lastSelectedCompoundLeafRef.current = nodeId;
       }
-      onNodeClickRef.current?.(event.target.id());
+      if (nodeDetailOpenRef.current && nodeId !== selectedNodeIdRef.current) {
+        if (!onNodeDetailDismissRef.current?.()) {
+          const previousId = selectedNodeIdRef.current;
+          node.unselect();
+          if (previousId) {
+            const previous = cy.getElementById(previousId);
+            if (!previous.empty()) {
+              previous.select();
+            }
+          }
+          return;
+        }
+      }
       bumpGraphSelection();
     });
     cy.on("unselect", "node", bumpGraphSelection);
+
+    cy.on("dbltap", "node", (event) => {
+      const node = event.target;
+      if (compoundGraphRef.current && node.data("kind") === "leaf") {
+        return;
+      }
+      openNodeDetail(node.id());
+    });
 
     cy.on("tap", "edge", () => {
       closeContextMenu();
@@ -1979,6 +2043,7 @@ export function RoadmapGraph({
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
         delete testWindow.__TEST__.selectNode;
+        delete testWindow.__TEST__.doubleClickGraphNode;
       }
       cy.destroy();
       cyRef.current = null;

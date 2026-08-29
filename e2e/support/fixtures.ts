@@ -77,6 +77,7 @@ interface TestBridge {
   selectNode?: (nodeId: string) => void;
   selectGraphNodeOnly?: (nodeId: string) => void;
   tapGraphNode?: (nodeId: string) => void;
+  doubleClickGraphNode?: (nodeId: string) => void;
   tapGraphBackground?: () => void;
   graphPan?: () => { x: number; y: number };
   graphZoom?: () => number;
@@ -502,6 +503,31 @@ export async function tapGraphNode(page: Page, nodeId: string): Promise<void> {
         }
         try {
           bridge.tapGraphNode(id);
+          return true;
+        } catch {
+          return false;
+        }
+      }, nodeId);
+    })
+    .toBe(true);
+}
+
+/**
+ * Simulates a graph node double-click via the cytoscape test hook.
+ * @param page - Playwright page to interact with.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function doubleClickGraphNode(page: Page, nodeId: string): Promise<void> {
+  await waitForGraph(page);
+  await expect
+    .poll(async () => {
+      return page.evaluate((id) => {
+        const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+        if (!bridge?.doubleClickGraphNode) {
+          return false;
+        }
+        try {
+          bridge.doubleClickGraphNode(id);
           return true;
         } catch {
           return false;

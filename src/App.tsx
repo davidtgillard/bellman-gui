@@ -1280,6 +1280,24 @@ function App() {
     nodeEditDirtyRef.current = false;
   }, []);
 
+  const dismissNodeDetail = useCallback((): boolean => {
+    if (!nodeDetailOpen) {
+      return true;
+    }
+    if (!confirmDiscardIfDirty()) {
+      return false;
+    }
+    setSelectedNodeId(null);
+    setNodeDetailOpen(false);
+    setNodeDetail(null);
+    setNodeDetailError(null);
+    setNodeDetailLoading(false);
+    setNodeEditing(false);
+    setNodeEditError(null);
+    nodeEditDirtyRef.current = false;
+    return true;
+  }, [confirmDiscardIfDirty, nodeDetailOpen]);
+
   const handleNodeClick = useCallback(
     (nodeId: string) => {
       const overflowParent = overflowParentId(nodeId);
@@ -1750,6 +1768,7 @@ function App() {
             selectedNodeId={selectedNodeId}
             nodeDetailOpen={nodeDetailOpen}
             onNodeClick={handleNodeClick}
+            onNodeDetailDismiss={dismissNodeDetail}
             onSelectionClear={handleGraphSelectionClear}
             contextMenu={renderContextMenu}
             emptyMessage={graphEmptyMessage}

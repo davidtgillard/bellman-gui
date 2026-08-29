@@ -3,6 +3,7 @@ import {
   expect,
   getGraphPan,
   getGraphNodeState,
+  doubleClickGraphNode,
   openWorkPackageGraph,
   setupPage,
   tapGraphNode,
@@ -79,7 +80,7 @@ test.describe("composite graph interaction", () => {
   test("clicking the graph background deselects an inner node", async ({ page }) => {
     await openCompoundGraph(page);
 
-    await tapGraphNode(page, CHILD_A.id);
+    await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
     await clickGraphBackground(page);
@@ -90,7 +91,7 @@ test.describe("composite graph interaction", () => {
   test("clicking a selected child again deselects it", async ({ page }) => {
     await openCompoundGraph(page);
 
-    await tapGraphNode(page, CHILD_A.id);
+    await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
     await tapGraphNode(page, CHILD_A.id);
@@ -111,7 +112,7 @@ test.describe("composite graph interaction", () => {
       return bridge.getGraphNodeRenderedCenter(id);
     }, CHILD_A.id);
 
-    await page.mouse.click(center.x, center.y);
+    await page.mouse.dblclick(center.x, center.y);
     await expect
       .poll(async () => page.locator(".node-detail-sidebar").count())
       .toBe(1);
@@ -133,7 +134,7 @@ test.describe("composite graph interaction", () => {
   test("arrow keys pan after selecting an inner node", async ({ page }) => {
     await openCompoundGraph(page);
 
-    await tapGraphNode(page, CHILD_A.id);
+    await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
     await page.locator(".graph-container").focus();
 
@@ -150,7 +151,7 @@ test.describe("composite graph interaction", () => {
   }) => {
     await openCompoundGraph(page);
 
-    await tapGraphNode(page, CHILD_A.id);
+    await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
     await clickGraphBackground(page);
@@ -170,7 +171,7 @@ test.describe("composite graph interaction", () => {
   }) => {
     await openCompoundGraph(page);
 
-    await tapGraphNode(page, CHILD_A.id);
+    await doubleClickGraphNode(page, CHILD_A.id);
     const sidebar = page.locator(".node-detail-sidebar");
     await expect(sidebar).toBeVisible();
     await sidebar.click();
@@ -190,7 +191,7 @@ test.describe("composite graph interaction", () => {
   test("arrow keys pan after sidebar unmounts with stale focus", async ({ page }) => {
     await openCompoundGraph(page);
 
-    await tapGraphNode(page, CHILD_A.id);
+    await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
     await page.evaluate(() => {
@@ -215,8 +216,8 @@ test.describe("composite graph interaction", () => {
 
     await tapGraphNode(page, COMPOSITE_PARENT.id);
     await expect(page.locator(".compound-parent-label")).toBeVisible();
-    // Keep keyboard focus on the graph so arrow pan is allowed while the
-    // node-detail sidebar is open (and keep the page active under parallel workers).
+    // Keep keyboard focus on the graph so arrow pan is allowed (single-click
+    // selects the container without opening the detail sidebar).
     await page.locator(".graph-container").focus();
 
     const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);

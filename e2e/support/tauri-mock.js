@@ -251,6 +251,100 @@
     return nodeIdToGuid.get(nodeId);
   }
 
+  function projectLayoutKey(projectId) {
+    const prefix = "project/";
+    if (projectId.startsWith(prefix)) {
+      const name = projectId.slice(prefix.length);
+      return name.split("/")[0] || name;
+    }
+    const parts = projectId.split("/");
+    return parts[parts.length - 1] || projectId;
+  }
+
+  function defaultLayoutDocument() {
+    return {
+      version: 1,
+      kind: "bellman-gui-work-package-layout",
+      top_level: {},
+      projects: {},
+    };
+  }
+
+  function currentLayoutDocument() {
+    return clone(
+      persistedLayout ||
+        (window.__TEST_SCENARIO__ || scenario).layout ||
+        defaultLayoutDocument(),
+    );
+  }
+
+  function publishLayoutDocument(layout) {
+    persistedLayout = layout;
+    scenario.layout = layout;
+    if (window.__TEST_SCENARIO__) {
+      window.__TEST_SCENARIO__.layout = layout;
+    }
+    return clone(layout);
+  }
+
+  function mergeOptionalNumber(next, existing) {
+    return next === undefined || next === null ? existing : next;
+  }
+
+  function saveWorkPackageNodePosition(request) {
+    const layout = currentLayoutDocument();
+    const projectKey = projectLayoutKey(request.project_id);
+    if (!layout.projects[projectKey] && layout.projects[request.project_id]) {
+      layout.projects[projectKey] = layout.projects[request.project_id];
+      delete layout.projects[request.project_id];
+    }
+    const bucket = layout.projects[projectKey] || (layout.projects[projectKey] = {});
+    const existing = bucket[request.node_id];
+    bucket[request.node_id] = {
+      x: request.x,
+      y: request.y,
+      w: mergeOptionalNumber(request.w, existing?.w),
+      h: mergeOptionalNumber(request.h, existing?.h),
+    };
+    return publishLayoutDocument(layout);
+  }
+
+  function saveTopLevelNodePosition(request) {
+    const layout = currentLayoutDocument();
+    const existing = layout.top_level[request.node_id];
+    layout.top_level[request.node_id] = {
+      x: request.x,
+      y: request.y,
+      w: mergeOptionalNumber(request.w, existing?.w),
+      h: mergeOptionalNumber(request.h, existing?.h),
+    };
+    return publishLayoutDocument(layout);
+  }
+
+  function removeWorkPackageNodePosition(projectId, nodeId) {
+    const layout = currentLayoutDocument();
+    const projectKey = projectLayoutKey(projectId);
+    const bucketKey = layout.projects[projectKey]
+      ? projectKey
+      : layout.projects[projectId]
+        ? projectId
+        : projectKey;
+    const bucket = layout.projects[bucketKey];
+    if (bucket) {
+      delete bucket[nodeId];
+      if (Object.keys(bucket).length === 0) {
+        delete layout.projects[bucketKey];
+      }
+    }
+    return publishLayoutDocument(layout);
+  }
+
+  function removeTopLevelNodePosition(nodeId) {
+    const layout = currentLayoutDocument();
+    delete layout.top_level[nodeId];
+    return publishLayoutDocument(layout);
+  }
+
   function currentNodeDetail(nodeId) {
     if (nodeId && savedNodeDetails.has(nodeId)) {
       return clone(savedNodeDetails.get(nodeId));
@@ -472,18 +566,13 @@
         return layout;
       }
       case "save_work_package_node_position_command":
+        return saveWorkPackageNodePosition(request);
       case "remove_work_package_node_position_command":
+        return removeWorkPackageNodePosition(cmdArgs.projectId, cmdArgs.nodeId);
       case "save_top_level_node_position_command":
+        return saveTopLevelNodePosition(request);
       case "remove_top_level_node_position_command":
-        return clone(
-          persistedLayout ||
-            (window.__TEST_SCENARIO__ || scenario).layout || {
-              version: 1,
-              kind: "bellman-gui-work-package-layout",
-              top_level: {},
-              projects: {},
-            },
-        );
+        return removeTopLevelNodePosition(cmdArgs.nodeId);
       case "load_settings_command": {
         const liveScenario = window.__TEST_SCENARIO__ || {};
         return (
