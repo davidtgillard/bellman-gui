@@ -81,6 +81,7 @@ interface TestBridge {
   tapGraphBackground?: () => void;
   graphPan?: () => { x: number; y: number };
   graphZoom?: () => number;
+  setGraphZoom?: (zoom: number) => void;
   getGraphNodeState?: (
     nodeId: string,
   ) => { x: number; y: number; w?: number; h?: number; x1?: number; y1?: number } | null;
@@ -357,6 +358,23 @@ export async function getGraphZoom(page: Page): Promise<number> {
     }
     return bridge.graphZoom();
   });
+}
+
+/**
+ * Sets the cytoscape zoom via the graph test hook.
+ * @param page - Playwright page to control.
+ * @param zoom - Target zoom level; Cytoscape clamps to min/max.
+ */
+export async function setGraphZoom(page: Page, zoom: number): Promise<void> {
+  await page.evaluate((level) => {
+    const bridge = (window as unknown as {
+      __TEST__?: { setGraphZoom?: (zoom: number) => void };
+    }).__TEST__;
+    if (!bridge?.setGraphZoom) {
+      throw new Error("graph zoom test hook is unavailable");
+    }
+    bridge.setGraphZoom(level);
+  }, zoom);
 }
 
 /**

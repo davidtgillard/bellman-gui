@@ -1366,6 +1366,7 @@ export function RoadmapGraph({
       __TEST__?: {
         graphPan?: () => { x: number; y: number };
         graphZoom?: () => number;
+        setGraphZoom?: (zoom: number) => void;
         graphUserPanningEnabled?: () => boolean;
         openNodeContextMenu?: (nodeId: string) => void;
         selectNode?: (nodeId: string) => void;
@@ -1414,6 +1415,9 @@ export function RoadmapGraph({
         return { x: pan.x, y: pan.y };
       };
       testWindow.__TEST__.graphZoom = () => cy.zoom();
+      testWindow.__TEST__.setGraphZoom = (zoom: number) => {
+        cy.zoom(zoom);
+      };
       testWindow.__TEST__.graphUserPanningEnabled = () => cy.userPanningEnabled();
       testWindow.__TEST__.openNodeContextMenu = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
@@ -2039,6 +2043,7 @@ export function RoadmapGraph({
       if (testWindow.__TEST__) {
         delete testWindow.__TEST__.graphPan;
         delete testWindow.__TEST__.graphZoom;
+        delete testWindow.__TEST__.setGraphZoom;
         delete testWindow.__TEST__.getLeafRenderedDiameterPx;
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;

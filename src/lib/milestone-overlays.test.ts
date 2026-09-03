@@ -54,6 +54,7 @@ describe("buildMilestoneOverlayVisuals", () => {
         date: "2026-09-30",
         screenY: 220,
         selected: false,
+        zoom: 2,
       },
     ]);
   });
@@ -106,5 +107,20 @@ describe("buildMilestoneOverlayVisuals", () => {
     };
 
     expect(buildMilestoneOverlayVisuals(cy as never)).toEqual([]);
+  });
+
+  it("treats a non-positive camera zoom as unit zoom", () => {
+    const milestone = mockMilestoneNode({ id: "milestone/ga", y: 10, label: "ga" });
+    const cy = {
+      pan: () => ({ x: 0, y: 0 }),
+      zoom: () => 0,
+      nodes: () => ({
+        forEach: (fn: (node: typeof milestone) => void) => {
+          fn(milestone);
+        },
+      }),
+    };
+
+    expect(buildMilestoneOverlayVisuals(cy as never)[0]?.zoom).toBe(1);
   });
 });

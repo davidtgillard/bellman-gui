@@ -6,6 +6,8 @@ export interface MilestoneOverlayVisual {
   date: string | null;
   screenY: number;
   selected: boolean;
+  /** Live camera zoom used to scale overlay label font size to match canvas node labels. */
+  zoom: number;
 }
 
 /**
@@ -21,6 +23,7 @@ export function buildMilestoneOverlayVisuals(
 ): MilestoneOverlayVisual[] {
   const pan = cy.pan();
   const zoom = cy.zoom();
+  const zoomScale = zoom > 0 ? zoom : 1;
   const visuals: MilestoneOverlayVisual[] = [];
 
   cy.nodes().forEach((node) => {
@@ -51,6 +54,7 @@ export function buildMilestoneOverlayVisuals(
       date,
       screenY: position.y * zoom + pan.y,
       selected: node.selected(),
+      zoom: zoomScale,
     });
   });
 

@@ -1,5 +1,5 @@
 import type { Core } from "cytoscape";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { NODE_TYPE_COLORS } from "../lib/graph";
 import {
   buildMilestoneOverlayVisuals,
@@ -62,7 +62,12 @@ export function MilestoneOverlays({
         <div
           key={visual.id}
           className={`milestone-overlay${visual.selected ? " is-selected" : ""}`}
-          style={{ top: visual.screenY }}
+          style={
+            {
+              top: visual.screenY,
+              "--milestone-label-zoom-scale": visual.zoom,
+            } as CSSProperties
+          }
         >
           <div className="milestone-band" />
           <div className="milestone-pennant-cluster">

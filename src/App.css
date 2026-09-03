@@ -541,23 +541,23 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.1rem;
-  max-width: 10rem;
+  gap: calc(0.1rem * var(--milestone-label-zoom-scale, 1));
+  max-width: calc(10rem * var(--milestone-label-zoom-scale, 1));
 }
 
 .milestone-overlay-title,
 .milestone-overlay-date {
   font-family: Helvetica, Arial, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--milestone-label-zoom-scale, 1));
   line-height: 1.2;
   color: #e2e8f0;
   text-shadow:
-    0 0 2px #0f172a,
-    0 0 2px #0f172a,
-    1px 0 0 #0f172a,
-    -1px 0 0 #0f172a,
-    0 1px 0 #0f172a,
-    0 -1px 0 #0f172a;
+    0 0 calc(2px * var(--milestone-label-zoom-scale, 1)) #0f172a,
+    0 0 calc(2px * var(--milestone-label-zoom-scale, 1)) #0f172a,
+    calc(1px * var(--milestone-label-zoom-scale, 1)) 0 0 #0f172a,
+    calc(-1px * var(--milestone-label-zoom-scale, 1)) 0 0 #0f172a,
+    0 calc(1px * var(--milestone-label-zoom-scale, 1)) 0 #0f172a,
+    0 calc(-1px * var(--milestone-label-zoom-scale, 1)) 0 #0f172a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -565,7 +565,7 @@ body {
 }
 
 .milestone-overlay-date {
-  font-size: 10px;
+  font-size: calc(10px * var(--milestone-label-zoom-scale, 1));
   color: #fde68a;
 }
 
