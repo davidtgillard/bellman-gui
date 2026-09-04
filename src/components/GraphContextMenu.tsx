@@ -17,6 +17,7 @@ interface GraphContextMenuProps {
   canCreateLink?: boolean;
   onRemoveNode?: (nodeId: string, nodeType: string) => void;
   onRemoveLink?: (linkId: string) => void;
+  removeLinkLabel?: string;
   onClose: () => void;
 }
 
@@ -37,6 +38,7 @@ export function GraphContextMenu({
   canCreateLink = true,
   onRemoveNode,
   onRemoveLink,
+  removeLinkLabel = "Remove link",
   onClose,
 }: GraphContextMenuProps) {
   const items: Array<{
@@ -117,7 +119,7 @@ export function GraphContextMenu({
 
   if (editable && linkId && onRemoveLink) {
     items.push({
-      label: "Remove link",
+      label: removeLinkLabel,
       destructive: true,
       onClick: () => {
         onRemoveLink(linkId);

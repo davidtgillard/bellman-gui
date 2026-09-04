@@ -7,6 +7,7 @@ import {
   type GraphNode,
 } from "./graph";
 import { CYTOSCAPE_STYLESHEET } from "./cytoscape-theme";
+import { edgeDisplayData } from "./link-display";
 
 export { CYTOSCAPE_STYLESHEET };
 
@@ -39,8 +40,39 @@ export function toCytoscapeElements(
         id: link.id,
         source: link.source,
         target: link.target,
-        label: link.linkType,
+        ...edgeDisplayData(link.linkType),
       },
     })),
   };
+}
+
+/**
+ * Merges parsed display fields onto Cytoscape edge elements.
+ * Used after compound-scene `buildElements()`, which only forwards id/source/target/label.
+ * @param elements - Cytoscape node and edge definitions.
+ * @param links - Source links that carry `linkType`.
+ * @returns Elements with edge display data applied.
+ */
+export function withEdgeDisplayData(
+  elements: ElementDefinition[],
+  links: Array<{ id: string; linkType: string }>,
+): ElementDefinition[] {
+  const byId = new Map(links.map((link) => [link.id, link.linkType]));
+  return elements.map((element) => {
+    const data = element.data;
+    if (!data || typeof data.id !== "string" || !("source" in data)) {
+      return element;
+    }
+    const linkType = byId.get(data.id);
+    if (!linkType) {
+      return element;
+    }
+    return {
+      ...element,
+      data: {
+        ...data,
+        ...edgeDisplayData(linkType),
+      },
+    };
+  });
 }

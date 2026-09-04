@@ -106,7 +106,17 @@ describe("parseRoadmapGraph", () => {
         source: expect.any(String),
         target: expect.any(String),
         label: expect.any(String),
+        kind: expect.any(String),
       },
+    });
+    const precedes = elements.edges.find(
+      (edge) => edge.data?.linkType === "precedes_FS_Mandatory",
+    );
+    expect(precedes?.data).toMatchObject({
+      label: "",
+      kind: "precedes",
+      relation: "FS",
+      hardness: "Mandatory",
     });
   });
 

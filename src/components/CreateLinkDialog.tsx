@@ -7,6 +7,18 @@ import {
   type GraphNode,
   type LinkTypeMeta,
 } from "../lib/graph";
+import {
+  compatibleHardnesses,
+  compatibleRelations,
+  inspectRelation,
+  kindLabel,
+  parseCompatibleLinkTypes,
+  resolveLinkTypeId,
+  uniqueCompatibleKinds,
+  type LinkHardness,
+  type LinkKind,
+  type LinkRelation,
+} from "../lib/link-display";
 
 interface CreateLinkDialogProps {
   open: boolean;
@@ -98,7 +110,9 @@ function CreateLinkDialogForm({
   onClose,
   onCreate,
 }: CreateLinkDialogFormProps) {
-  const [linkType, setLinkType] = useState("");
+  const [kind, setKind] = useState<LinkKind | "">("");
+  const [relation, setRelation] = useState<LinkRelation | "">("");
+  const [hardness, setHardness] = useState<LinkHardness | "">("");
   const [source, setSource] = useState(
     () => initialEndpoints(initialNodeId, nodes, linkTypes).source,
   );
@@ -183,10 +197,46 @@ function CreateLinkDialogForm({
     );
   }, [endpointsSelected, finishNode, linkTypes, startNode]);
 
-  const validLinkType =
-    linkType && compatibleTypes.some((item) => item.link_type === linkType)
-      ? linkType
+  const parsedCompatible = useMemo(
+    () => parseCompatibleLinkTypes(compatibleTypes),
+    [compatibleTypes],
+  );
+  const kinds = uniqueCompatibleKinds(parsedCompatible);
+  const validKind =
+    kind && kinds.includes(kind) ? kind : kinds.length === 1 ? kinds[0] : "";
+  const relations =
+    validKind === "precedes" ? compatibleRelations(parsedCompatible, validKind) : [];
+  const validRelation =
+    validKind === "precedes"
+      ? relation && relations.includes(relation)
+        ? relation
+        : relations.length === 1
+          ? relations[0]
+          : ""
       : "";
+  const hardnesses =
+    validKind === "precedes"
+      ? compatibleHardnesses(parsedCompatible, validKind, validRelation || null)
+      : [];
+  const validHardness =
+    validKind === "precedes"
+      ? hardness && hardnesses.includes(hardness)
+        ? hardness
+        : hardnesses.length === 1
+          ? hardnesses[0]
+          : ""
+      : "";
+  const validLinkType =
+    validKind === "precedes"
+      ? resolveLinkTypeId(
+          compatibleTypes,
+          validKind,
+          validRelation || null,
+          validHardness || null,
+        ) ?? ""
+      : validKind
+        ? (resolveLinkTypeId(compatibleTypes, validKind) ?? "")
+        : "";
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -228,6 +278,7 @@ function CreateLinkDialogForm({
                 <div className="link-endpoint-fixed">{renderEndpointValue(startNode)}</div>
               ) : (
                 <select
+                  id="create-link-start"
                   value={source}
                   onChange={(event) => setSource(event.target.value)}
                   required
@@ -264,6 +315,7 @@ function CreateLinkDialogForm({
                 <div className="link-endpoint-fixed">{renderEndpointValue(finishNode)}</div>
               ) : (
                 <select
+                  id="create-link-finish"
                   value={target}
                   onChange={(event) => setTarget(event.target.value)}
                   required
@@ -285,27 +337,79 @@ function CreateLinkDialogForm({
           </div>
 
           <label className="edit-field">
-            <span>Link type</span>
+            <span>Kind</span>
             <select
-              value={validLinkType}
-              onChange={(event) => setLinkType(event.target.value)}
+              id="create-link-kind"
+              value={validKind}
+              onChange={(event) => {
+                setKind(event.target.value as LinkKind);
+                setRelation("");
+                setHardness("");
+              }}
               required
-              disabled={!endpointsSelected || compatibleTypes.length === 0}
+              disabled={!endpointsSelected || kinds.length === 0}
             >
               <option value="" disabled>
                 {!endpointsSelected
                   ? "Select start and finish nodes first"
-                  : compatibleTypes.length === 0
+                  : kinds.length === 0
                     ? "No compatible link types"
-                    : "Select link type…"}
+                    : "Select kind…"}
               </option>
-              {compatibleTypes.map((item) => (
-                <option key={item.link_type} value={item.link_type}>
-                  {item.link_type}
+              {kinds.map((item) => (
+                <option key={item} value={item}>
+                  {kindLabel(item)}
                 </option>
               ))}
             </select>
           </label>
+
+          {validKind === "precedes" ? (
+            <>
+              <label className="edit-field">
+                <span>Relation</span>
+                <select
+                  id="create-link-relation"
+                  value={validRelation}
+                  onChange={(event) =>
+                    setRelation(event.target.value as LinkRelation)
+                  }
+                  required
+                  disabled={relations.length === 0}
+                >
+                  <option value="" disabled>
+                    Select relation…
+                  </option>
+                  {relations.map((item) => (
+                    <option key={item} value={item}>
+                      {inspectRelation(item)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="edit-field">
+                <span>Hardness</span>
+                <select
+                  id="create-link-hardness"
+                  value={validHardness}
+                  onChange={(event) =>
+                    setHardness(event.target.value as LinkHardness)
+                  }
+                  required
+                  disabled={hardnesses.length === 0}
+                >
+                  <option value="" disabled>
+                    Select hardness…
+                  </option>
+                  {hardnesses.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
 
           <footer className="edit-dialog-actions">
             <button type="button" onClick={onClose} disabled={saving}>

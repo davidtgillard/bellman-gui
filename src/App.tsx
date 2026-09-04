@@ -6,6 +6,7 @@ import { GraphViewBreadcrumb } from "./components/GraphViewBreadcrumb";
 import { NodeDetailSidebar } from "./components/NodeDetailSidebar";
 import { CreateLinkDialog } from "./components/CreateLinkDialog";
 import { CreateNodeDialog } from "./components/CreateNodeDialog";
+import { LinkDetailPanel } from "./components/LinkDetailPanel";
 import { NodeDetailPanel } from "./components/NodeDetailPanel";
 import { RoadmapGraph as RoadmapGraphView } from "./components/RoadmapGraph";
 import { NodeTypeLegend } from "./components/NodeTypeLegend";
@@ -27,6 +28,13 @@ import {
   type RoadmapGraphDto,
   type NodeKind,
 } from "./lib/graph";
+import {
+  canvasLabel,
+  inspectTitle,
+  parseLinkType,
+  presentLinkKinds,
+  removeLinkMenuLabel,
+} from "./lib/link-display";
 import {
   graphEmptyMessageFor,
   loadBundledExampleGraph,
@@ -166,6 +174,7 @@ function App() {
   const [graphViewStack, setGraphViewStack] =
     useState<GraphViewFrame[]>(INITIAL_GRAPH_VIEW_STACK);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [nodeDetailOpen, setNodeDetailOpen] = useState(false);
   const [nodeDetail, setNodeDetail] = useState<NodeDetail | null>(null);
   const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
@@ -222,6 +231,7 @@ function App() {
       setFocusNodeId(null);
       setGraphViewStack(INITIAL_GRAPH_VIEW_STACK);
       setSelectedNodeId(null);
+      setSelectedLinkId(null);
       setNodeDetailOpen(false);
       setNodeDetail(null);
       setNodeDetailError(null);
@@ -943,6 +953,10 @@ function App() {
     async (linkId: string) => {
       const snapshot = links;
       setLinks(graphWithoutLink(links, linkId));
+      if (selectedLinkId === linkId) {
+        setSelectedLinkId(null);
+        setNodeDetailOpen(false);
+      }
       setSaving(true);
       setError(null);
 
@@ -960,7 +974,7 @@ function App() {
         setSaving(false);
       }
     },
-    [applyGraph, links, refreshUndoState, roadmapRoot],
+    [applyGraph, links, refreshUndoState, roadmapRoot, selectedLinkId],
   );
 
   useEffect(() => {
@@ -1221,7 +1235,8 @@ function App() {
           id: link.id,
           source: link.source,
           target: link.target,
-          label: link.linkType,
+          linkType: link.linkType,
+          label: canvasLabel(parseLinkType(link.linkType)),
         })),
     [displayGraph.links, displayNodeIds],
   );
@@ -1271,6 +1286,7 @@ function App() {
   const clearGraphSelection = useCallback(() => {
     setFocusNodeId(null);
     setSelectedNodeId(null);
+    setSelectedLinkId(null);
     setNodeDetailOpen(false);
     setNodeDetail(null);
     setNodeDetailError(null);
@@ -1288,6 +1304,7 @@ function App() {
       return false;
     }
     setSelectedNodeId(null);
+    setSelectedLinkId(null);
     setNodeDetailOpen(false);
     setNodeDetail(null);
     setNodeDetailError(null);
@@ -1325,6 +1342,7 @@ function App() {
       }
 
       const node = nodes.find((item) => item.id === nodeId);
+      setSelectedLinkId(null);
       setSelectedNodeId(nodeId);
       setNodeEditing(false);
       setNodeEditError(null);
@@ -1362,6 +1380,28 @@ function App() {
         });
     },
     [clearGraphSelection, confirmDiscardIfDirty, nodes, roadmapRoot, selectedNodeId],
+  );
+
+  const handleEdgeClick = useCallback(
+    (linkId: string) => {
+      if (linkId === selectedLinkId) {
+        return;
+      }
+      if (!confirmDiscardIfDirty()) {
+        return;
+      }
+
+      setSelectedNodeId(null);
+      setSelectedLinkId(linkId);
+      setNodeEditing(false);
+      setNodeEditError(null);
+      setNodeDetailOpen(true);
+      setNodeDetail(null);
+      setNodeDetailError(null);
+      setNodeDetailLoading(false);
+      nodeEditDirtyRef.current = false;
+    },
+    [confirmDiscardIfDirty, selectedLinkId],
   );
 
   const handleShowInnerGraph = useCallback(
@@ -1467,10 +1507,16 @@ function App() {
           return null;
         }
 
+        const edgeLink = links.find((item) => item.id === event.data.id);
         return (
           <GraphContextMenu
             editable={editable}
             linkId={event.data.id}
+            removeLinkLabel={
+              edgeLink
+                ? removeLinkMenuLabel(parseLinkType(edgeLink.linkType))
+                : "Remove link"
+            }
             onRemoveLink={(linkId) => void handleRemoveLink(linkId)}
             onClose={event.onClose}
           />
@@ -1552,6 +1598,7 @@ function App() {
     }
     setNodeDetailOpen(false);
     setSelectedNodeId(null);
+    setSelectedLinkId(null);
     setNodeDetail(null);
     setNodeDetailError(null);
     setNodeDetailLoading(false);
@@ -1638,29 +1685,44 @@ function App() {
   const selectedNode = selectedNodeId
     ? nodes.find((item) => item.id === selectedNodeId)
     : undefined;
+  const selectedLink = selectedLinkId
+    ? links.find((item) => item.id === selectedLinkId)
+    : undefined;
+  const effectiveSelectedLinkId = selectedLink?.id ?? null;
   const missingNodeError =
     nodeDetailOpen && selectedNodeId && !selectedNode
       ? "Selected node is not available in the current graph."
       : null;
 
-  const detailTitle = selectedNodeId ? nodeLabel(selectedNodeId) : "Node details";
+  const detailTitle = selectedLink
+    ? inspectTitle(parseLinkType(selectedLink.linkType))
+    : selectedNodeId
+      ? nodeLabel(selectedNodeId)
+      : "Node details";
+  const detailAriaLabel = selectedLink ? "Link details" : "Node details";
+  const detailOpen =
+    nodeDetailOpen && (selectedLink !== undefined || selectedNodeId !== null);
 
   useEffect(() => {
-    if (!nodeDetailOpen) {
+    if (!detailOpen) {
       return;
     }
     const timer = window.setTimeout(() => {
       window.dispatchEvent(new Event("resize"));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [nodeDetailOpen]);
+  }, [detailOpen]);
+
+  const legendMounted =
+    displayGraph.nodes.length > 0 &&
+    (inWorkPackageGraph || nodeTypes.length > 0);
 
   const graphAreaLayout = useGraphAreaLayout(
     graphAreaRef,
     legendMeasureRef,
-    nodeDetailOpen,
-    nodeDetailOpen ? appliedSidebarWidth : 0,
-    !inWorkPackageGraph && nodeTypes.length > 0,
+    detailOpen,
+    detailOpen ? appliedSidebarWidth : 0,
+    legendMounted,
   );
 
   return (
@@ -1766,8 +1828,10 @@ function App() {
             visibleNodeIds={visibleNodeIds}
             focusNodeId={focusNodeId}
             selectedNodeId={selectedNodeId}
+            selectedLinkId={effectiveSelectedLinkId}
             nodeDetailOpen={nodeDetailOpen}
             onNodeClick={handleNodeClick}
+            onEdgeClick={handleEdgeClick}
             onNodeDetailDismiss={dismissNodeDetail}
             onSelectionClear={handleGraphSelectionClear}
             contextMenu={renderContextMenu}
@@ -1805,42 +1869,55 @@ function App() {
             }
             onAutoLayoutComplete={handleAutoLayoutComplete}
           />
-          {!inWorkPackageGraph ? (
+          {legendMounted ? (
             <NodeTypeLegend
               ref={legendMeasureRef}
-              types={nodeTypes}
+              types={inWorkPackageGraph ? [] : nodeTypes}
               visibleTypes={visibleTypes}
               onToggleType={handleToggleType}
               fits={graphAreaLayout.legendFits}
+              linkKinds={presentLinkKinds(
+                graphViewLinks.map((link) => link.linkType ?? ""),
+              )}
+              showHardness
             />
           ) : null}
         </div>
-        {nodeDetailOpen ? (
+        {detailOpen ? (
           <NodeDetailSidebar
             title={detailTitle}
+            ariaLabel={detailAriaLabel}
             onClose={handleDetailClose}
             maxWidthPx={graphAreaLayout.maxSidebarWidth}
             onAppliedWidthChange={handleAppliedSidebarWidthChange}
           >
-            <NodeDetailPanel
-              detail={nodeDetail}
-              loading={nodeDetailLoading}
-              error={missingNodeError ?? nodeDetailError}
-              editable={editable && roadmapRoot !== "example"}
-              editing={nodeEditing}
-              saving={nodeEditSaving}
-              saveError={nodeEditError}
-              dependencyWarnings={dependencyWarnings}
-              syncSkipped={syncSkipped}
-              roadmapRoot={roadmapRoot}
-              onStartEdit={handleStartNodeEdit}
-              onCancelEdit={handleCancelNodeEdit}
-              onSaveMarkdown={(markdown, options) =>
-                void handleSaveNodeMarkdown(markdown, options)
-              }
-              onSaveWorkPackage={(input) => void handleSaveWorkPackage(input)}
-              onDirtyChange={handleNodeEditDirtyChange}
-            />
+            {selectedLink ? (
+              <LinkDetailPanel
+                link={selectedLink}
+                editable={editable && roadmapRoot !== "example"}
+                onRemove={(linkId) => void handleRemoveLink(linkId)}
+              />
+            ) : (
+              <NodeDetailPanel
+                detail={nodeDetail}
+                loading={nodeDetailLoading}
+                error={missingNodeError ?? nodeDetailError}
+                editable={editable && roadmapRoot !== "example"}
+                editing={nodeEditing}
+                saving={nodeEditSaving}
+                saveError={nodeEditError}
+                dependencyWarnings={dependencyWarnings}
+                syncSkipped={syncSkipped}
+                roadmapRoot={roadmapRoot}
+                onStartEdit={handleStartNodeEdit}
+                onCancelEdit={handleCancelNodeEdit}
+                onSaveMarkdown={(markdown, options) =>
+                  void handleSaveNodeMarkdown(markdown, options)
+                }
+                onSaveWorkPackage={(input) => void handleSaveWorkPackage(input)}
+                onDirtyChange={handleNodeEditDirtyChange}
+              />
+            )}
           </NodeDetailSidebar>
         ) : null}
       </div>

@@ -8,6 +8,7 @@ import { clampSidebarWidth } from "../lib/graph-area-layout";
 
 interface NodeDetailSidebarProps {
   title: string;
+  ariaLabel?: string;
   onClose: () => void;
   children: ReactNode;
   /** Derived max width so the graph dock keeps the legend (or CSS) footprint. */
@@ -31,6 +32,7 @@ function loadStoredWidth(): number {
 
 export function NodeDetailSidebar({
   title,
+  ariaLabel = "Node details",
   onClose,
   children,
   maxWidthPx,
@@ -79,7 +81,7 @@ export function NodeDetailSidebar({
   return (
     <aside
       className="node-detail-sidebar"
-      aria-label="Node details"
+      aria-label={ariaLabel}
       style={{ flexBasis: `${width}px`, width: `${width}px` }}
     >
       <div
@@ -95,7 +97,7 @@ export function NodeDetailSidebar({
           type="button"
           className="node-detail-sidebar-close"
           onClick={onClose}
-          aria-label="Close node details"
+          aria-label={`Close ${ariaLabel.toLowerCase()}`}
         >
           ×
         </button>

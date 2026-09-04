@@ -107,6 +107,8 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
       "target-arrow-color": "#64748b",
       "target-arrow-shape": "triangle",
       "curve-style": "bezier",
+      "line-style": "solid",
+      "line-opacity": 1,
       label: "data(label)",
       "font-size": 9,
       color: "#94a3b8",
@@ -117,11 +119,64 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
+    selector: "edge[kind = 'supports']",
+    style: {
+      "line-color": "#a855f7",
+      "target-arrow-color": "#a855f7",
+    },
+  },
+  {
+    selector: "edge[kind = 'targets']",
+    style: {
+      "line-color": "#eab308",
+      "target-arrow-color": "#eab308",
+    },
+  },
+  {
+    selector: "edge[kind = 'promoted_from']",
+    style: {
+      "line-color": "#3b82f6",
+      "target-arrow-color": "#3b82f6",
+    },
+  },
+  {
+    selector: "edge[kind = 'parent_of']",
+    style: {
+      "line-color": "#94a3b8",
+      "target-arrow-color": "#94a3b8",
+    },
+  },
+  {
+    selector: "edge[hardness = 'Mandatory']",
+    style: {
+      "line-style": "solid",
+      width: 2.5,
+      "line-opacity": 1,
+    },
+  },
+  {
+    selector: "edge[hardness = 'Discretionary']",
+    style: {
+      "line-style": "dashed",
+      width: 2,
+      "line-opacity": 0.85,
+    },
+  },
+  {
+    selector: "edge[hardness = 'Optional']",
+    style: {
+      "line-style": "dotted",
+      width: 1.5,
+      "line-opacity": 0.7,
+    },
+  },
+  {
     selector: "edge:selected",
     style: {
       "line-color": "#38bdf8",
       "target-arrow-color": "#38bdf8",
       width: 3,
+      "line-opacity": 1,
     },
   },
 ];

@@ -901,6 +901,70 @@ body {
   font-size: 0.875rem;
 }
 
+.node-legend-title-follow {
+  margin-top: 0.75rem;
+}
+
+.node-legend-key {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  user-select: none;
+}
+
+.node-legend-stroke {
+  flex-shrink: 0;
+  width: 1.5rem;
+  border-top: 2.5px solid #64748b;
+}
+
+.link-detail-preview {
+  width: 100%;
+  margin: 0 0 1rem;
+  border-top: 2.5px solid #64748b;
+}
+
+.link-detail-fields {
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.link-detail-field {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.link-detail-field dt {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.link-detail-field dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.link-detail-remove {
+  margin-top: 1.25rem;
+  border: 1px solid #7f1d1d;
+  border-radius: 0.5rem;
+  background: #7f1d1d;
+  color: #fecaca;
+  padding: 0.375rem 0.875rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-detail-remove:hover {
+  background: #991b1b;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;

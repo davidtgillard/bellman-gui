@@ -16,6 +16,8 @@ import {
   GRAPH_NODE_LABEL_TYPOGRAPHY,
   workPackageGraphStylesheet,
 } from "../lib/cytoscape-theme";
+import { withEdgeDisplayData } from "../lib/cytoscape-graph";
+import { edgeDisplayData } from "../lib/link-display";
 import {
   buildCompoundGraphScene,
   isCompoundGraphNodes,
@@ -81,6 +83,7 @@ interface GraphViewLink {
   source: string;
   target: string;
   label?: string;
+  linkType: string;
 }
 
 export interface GraphContextMenuEvent {
@@ -105,9 +108,11 @@ interface RoadmapGraphProps {
   emptyAction?: { label: string; onClick: () => void };
   focusNodeId?: string | null;
   selectedNodeId?: string | null;
+  selectedLinkId?: string | null;
   /** When true, the node detail sidebar is open and may shrink the graph. */
   nodeDetailOpen?: boolean;
   onNodeClick?: (nodeId: string) => void;
+  onEdgeClick?: (linkId: string) => void;
   /** Returns true when the node detail sidebar was dismissed. */
   onNodeDetailDismiss?: () => boolean;
   /** Returns true when React selection state was cleared. */
@@ -395,7 +400,7 @@ function toElementDefinitions(
         id: link.id,
         source: link.source,
         target: link.target,
-        label: link.label ?? "",
+        ...edgeDisplayData(link.linkType),
       },
     });
   }
@@ -542,8 +547,10 @@ export function RoadmapGraph({
   emptyAction,
   focusNodeId = null,
   selectedNodeId = null,
+  selectedLinkId = null,
   nodeDetailOpen = false,
   onNodeClick,
+  onEdgeClick,
   onNodeDetailDismiss,
   onSelectionClear,
   contextMenu,
@@ -577,6 +584,7 @@ export function RoadmapGraph({
   const lastLayoutSyncTokenRef = useRef(0);
   const visibleNodeIdsRef = useRef(visibleNodeIds);
   const onNodeClickRef = useRef(onNodeClick);
+  const onEdgeClickRef = useRef(onEdgeClick);
   const onNodeDetailDismissRef = useRef(onNodeDetailDismiss);
   const onSelectionClearRef = useRef(onSelectionClear);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
@@ -587,6 +595,7 @@ export function RoadmapGraph({
   const layoutReadyRef = useRef(layoutReady);
   const compoundGraphRef = useRef(compoundGraph);
   const selectedNodeIdRef = useRef(selectedNodeId);
+  const selectedLinkIdRef = useRef(selectedLinkId);
   const nodeDetailOpenRef = useRef(nodeDetailOpen);
   const sidebarViewportSessionRef = useRef<SidebarViewportSession>(createSidebarViewportSession());
   const sidebarRevealAnimatingRef = useRef(false);
@@ -900,6 +909,10 @@ export function RoadmapGraph({
   }, [onNodeClick]);
 
   useEffect(() => {
+    onEdgeClickRef.current = onEdgeClick;
+  }, [onEdgeClick]);
+
+  useEffect(() => {
     onNodeDetailDismissRef.current = onNodeDetailDismiss;
   }, [onNodeDetailDismiss]);
 
@@ -1001,6 +1014,10 @@ export function RoadmapGraph({
   useLayoutEffect(() => {
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
+
+  useLayoutEffect(() => {
+    selectedLinkIdRef.current = selectedLinkId;
+  }, [selectedLinkId]);
 
   const revealSelectedNodeForSidebar = useCallback((cy: Core, container: HTMLElement, nodeId: string) => {
     if (!nodeDetailOpenRef.current) {
@@ -1407,6 +1424,7 @@ export function RoadmapGraph({
         getSubtreeNodeIds?: (rootId: string) => string[];
         getGraphEdgeIds?: () => string[];
         getSelectedGraphNodeId?: () => string | null;
+        selectEdge?: (linkId: string) => void;
       };
     };
     if (testWindow.__TEST__) {
@@ -1681,6 +1699,15 @@ export function RoadmapGraph({
         const selected = cy.nodes(":selected");
         return selected.length > 0 ? selected[0].id() : null;
       };
+      testWindow.__TEST__.selectEdge = (linkId) => {
+        const edge = cy.getElementById(linkId);
+        if (edge.empty() || !edge.isEdge()) {
+          throw new Error(`Graph edge not found: ${linkId}`);
+        }
+        cy.elements().unselect();
+        edge.select();
+        onEdgeClickRef.current?.(edge.id());
+      };
     }
 
     let selectedNodeIdAtPointerDown: string | null = null;
@@ -1869,9 +1896,9 @@ export function RoadmapGraph({
       openNodeDetail(node.id());
     });
 
-    cy.on("tap", "edge", () => {
+    cy.on("tap", "edge", (event) => {
       closeContextMenu();
-      clearGraphSelectionIfAllowed();
+      onEdgeClickRef.current?.(event.target.id());
     });
 
     cy.on("tap", (event) => {
@@ -2048,6 +2075,7 @@ export function RoadmapGraph({
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
         delete testWindow.__TEST__.selectNode;
+        delete testWindow.__TEST__.selectEdge;
         delete testWindow.__TEST__.doubleClickGraphNode;
       }
       cy.destroy();
@@ -2099,7 +2127,7 @@ export function RoadmapGraph({
         if (compoundGraph && isCompoundGraphNodes(nodes)) {
           const scene = rebuildScene(nodePositions);
           if (scene) {
-            cy.add(scene.buildElements());
+            cy.add(withEdgeDisplayData(scene.buildElements(), links));
           }
         } else {
           cy.add(toElementDefinitions(nodes, links, nodePositions));
@@ -2455,7 +2483,7 @@ export function RoadmapGraph({
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || !selectedNodeId) {
-      if (cy) {
+      if (cy && !selectedLinkId) {
         cy.nodes().unselect();
       }
       return;
@@ -2463,10 +2491,26 @@ export function RoadmapGraph({
 
     const node = cy.getElementById(selectedNodeId);
     if (node.nonempty() && !node.selected()) {
-      cy.nodes().unselect();
+      cy.elements().unselect();
       node.select();
     }
-  }, [selectedNodeId, cyReady]);
+  }, [selectedNodeId, selectedLinkId, cyReady]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !selectedLinkId) {
+      if (cy && !selectedNodeId) {
+        cy.edges().unselect();
+      }
+      return;
+    }
+
+    const edge = cy.getElementById(selectedLinkId);
+    if (edge.nonempty() && edge.isEdge() && !edge.selected()) {
+      cy.elements().unselect();
+      edge.select();
+    }
+  }, [selectedLinkId, selectedNodeId, cyReady]);
 
   useLayoutEffect(() => {
     const cy = cyRef.current;

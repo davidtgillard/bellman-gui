@@ -29,6 +29,7 @@ export interface CompoundGraphViewLink {
   source: string;
   target: string;
   label?: string;
+  linkType?: string;
 }
 
 function nodeLabelText(node: CompoundGraphViewNode): string {

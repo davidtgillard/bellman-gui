@@ -75,6 +75,7 @@ interface TestBridge {
     redo_label: string | null;
   };
   selectNode?: (nodeId: string) => void;
+  selectEdge?: (linkId: string) => void;
   selectGraphNodeOnly?: (nodeId: string) => void;
   tapGraphNode?: (nodeId: string) => void;
   doubleClickGraphNode?: (nodeId: string) => void;
@@ -503,6 +504,32 @@ export async function selectNode(
   if (options.waitForEdit) {
     await waitForNodeDetailReady(page);
   }
+}
+
+/**
+ * Selects a graph edge via the cytoscape test hook and waits for the inspector.
+ * @param page - Playwright page to interact with.
+ * @param linkId - Roadmap link identifier.
+ */
+export async function selectEdge(page: Page, linkId: string): Promise<void> {
+  await waitForGraph(page);
+  await expect
+    .poll(async () => {
+      return page.evaluate((id) => {
+        const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+        if (!bridge?.selectEdge) {
+          return false;
+        }
+        try {
+          bridge.selectEdge(id);
+          return true;
+        } catch {
+          return false;
+        }
+      }, linkId);
+    })
+    .toBe(true);
+  await expect(page.getByRole("complementary", { name: "Link details" })).toBeVisible();
 }
 
 /**
