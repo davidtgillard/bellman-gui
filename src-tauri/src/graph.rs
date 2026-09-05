@@ -162,11 +162,33 @@ fn deduplicate_graph_nodes(
     (canonical_nodes, id_aliases)
 }
 
-/// Builds `parent/…/name` from registry parent links.
+const TYPE_QUALIFIED_KINDS: &[&str] = &["initiative", "project", "milestone", "goal"];
+
+/// Builds the Bellman logical id for a live registry instance.
+///
+/// Initiatives and projects nest under the shared `work_scope` kind-root, but
+/// callers still address them as `initiative/{name}` / `project/{name}`.
+/// Work packages stay `project/{project}/{slug}`.
 pub fn logical_path_for_instance(
     inst: &RegistryInstance,
     by_guid: &HashMap<String, RegistryInstance>,
 ) -> String {
+    if TYPE_QUALIFIED_KINDS.contains(&inst.type_name.as_str()) {
+        if inst.name.contains('/') {
+            return inst.name.clone();
+        }
+        if inst.parent_guid.is_some() {
+            return format!("{}/{}", inst.type_name, inst.name);
+        }
+    }
+    if inst.type_name == "work_package" {
+        if let Some(parent_id) = inst.parent_guid.as_deref() {
+            if let Some(parent) = by_guid.get(parent_id) {
+                return format!("project/{}/{}", parent.name, inst.name);
+            }
+        }
+    }
+
     let mut segments: Vec<&str> = vec![inst.name.as_str()];
     let mut parent_guid = inst.parent_guid.as_deref();
     let mut seen = std::collections::HashSet::from([inst.guid.as_str()]);
@@ -517,6 +539,57 @@ mod tests {
         assert_eq!(
             aliases.get("usv-lars-p2"),
             Some(&"project/usv-lars-p2".to_string())
+        );
+    }
+
+    #[test]
+    fn work_scope_parented_entities_keep_type_qualified_ids() {
+        let work_scope = RegistryInstance {
+            guid: "ws".to_string(),
+            name: "work_scope".to_string(),
+            type_name: "kind".to_string(),
+            kind: "node".to_string(),
+            parent_guid: None,
+        };
+        let initiative = RegistryInstance {
+            guid: "init-1".to_string(),
+            name: "settings-manager".to_string(),
+            type_name: "initiative".to_string(),
+            kind: "node".to_string(),
+            parent_guid: Some("ws".to_string()),
+        };
+        let project = RegistryInstance {
+            guid: "proj-1".to_string(),
+            name: "image-tools".to_string(),
+            type_name: "project".to_string(),
+            kind: "node".to_string(),
+            parent_guid: Some("ws".to_string()),
+        };
+        let work_package = RegistryInstance {
+            guid: "wp-1".to_string(),
+            name: "export".to_string(),
+            type_name: "work_package".to_string(),
+            kind: "node".to_string(),
+            parent_guid: Some("proj-1".to_string()),
+        };
+        let by_guid = HashMap::from([
+            (work_scope.guid.clone(), work_scope),
+            (initiative.guid.clone(), initiative.clone()),
+            (project.guid.clone(), project.clone()),
+            (work_package.guid.clone(), work_package.clone()),
+        ]);
+
+        assert_eq!(
+            logical_path_for_instance(&initiative, &by_guid),
+            "initiative/settings-manager"
+        );
+        assert_eq!(
+            logical_path_for_instance(&project, &by_guid),
+            "project/image-tools"
+        );
+        assert_eq!(
+            logical_path_for_instance(&work_package, &by_guid),
+            "project/image-tools/export"
         );
     }
 }

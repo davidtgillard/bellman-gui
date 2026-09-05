@@ -7,6 +7,7 @@ import {
   graphWithoutLink,
   graphWithoutNode,
   innerGraphForProject,
+  logicalPathForInstance,
   nodeLabel,
   nodeTypeColor,
   nodeTypeLabel,
@@ -17,6 +18,7 @@ import {
   topLevelGraphNodes,
   workPackageBelongsToProject,
   workPackageProjectName,
+  type RegistryInstance,
 } from "./graph";
 import { loadBundledExampleGraph } from "./example-roadmap";
 import { toCytoscapeElements } from "./cytoscape-graph";
@@ -209,5 +211,51 @@ describe("parseRoadmapGraph", () => {
 
     expect(nodes).toHaveLength(1);
     expect(links[0].source).toBe("project/usv-lars-p2");
+  });
+});
+
+describe("logicalPathForInstance", () => {
+  it("keeps type-qualified ids when initiatives and projects share work_scope", () => {
+    const workScope: RegistryInstance = {
+      guid: "ws",
+      name: "work_scope",
+      type: "kind",
+      kind: "node",
+    };
+    const initiative: RegistryInstance = {
+      guid: "init-1",
+      name: "settings-manager",
+      type: "initiative",
+      kind: "node",
+      parent_guid: "ws",
+    };
+    const project: RegistryInstance = {
+      guid: "proj-1",
+      name: "image-tools",
+      type: "project",
+      kind: "node",
+      parent_guid: "ws",
+    };
+    const workPackage: RegistryInstance = {
+      guid: "wp-1",
+      name: "export",
+      type: "work_package",
+      kind: "node",
+      parent_guid: "proj-1",
+    };
+    const byGuid = new Map(
+      [workScope, initiative, project, workPackage].map((instance) => [
+        instance.guid,
+        instance,
+      ]),
+    );
+
+    expect(logicalPathForInstance(initiative, byGuid)).toBe(
+      "initiative/settings-manager",
+    );
+    expect(logicalPathForInstance(project, byGuid)).toBe("project/image-tools");
+    expect(logicalPathForInstance(workPackage, byGuid)).toBe(
+      "project/image-tools/export",
+    );
   });
 });

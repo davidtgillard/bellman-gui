@@ -12,6 +12,11 @@ const linkTypes: LinkTypeMeta[] = [
   { link_type: "parent_of", in_type: "work_package", out_type: "work_package" },
   { link_type: "supports", in_type: "work_scope", out_type: "goal" },
   { link_type: "precedes_FS_Mandatory", in_type: "work_package", out_type: "work_package" },
+  {
+    link_type: "precedes_FS_Mandatory_scope",
+    in_type: "project",
+    out_type: "project",
+  },
 ];
 
 const nodes: GraphNode[] = [
@@ -26,6 +31,20 @@ describe("link type compatibility", () => {
     expect(nodeMatchesLinkEndpoint("initiative", "work_scope")).toBe(true);
     expect(nodeMatchesLinkEndpoint("project", "work_scope")).toBe(true);
     expect(nodeMatchesLinkEndpoint("work_package", "work_scope")).toBe(false);
+  });
+
+  it("matches initiatives to project-typed scope-precedence endpoints", () => {
+    expect(nodeMatchesLinkEndpoint("initiative", "project")).toBe(true);
+    expect(
+      compatibleLinkTypes(linkTypes, "initiative", "project").map(
+        (item) => item.link_type,
+      ),
+    ).toEqual(["precedes_FS_Mandatory_scope"]);
+    expect(
+      compatibleLinkTypes(linkTypes, "project", "initiative").map(
+        (item) => item.link_type,
+      ),
+    ).toEqual(["precedes_FS_Mandatory_scope"]);
   });
 
   it("filters link types for selected node types", () => {

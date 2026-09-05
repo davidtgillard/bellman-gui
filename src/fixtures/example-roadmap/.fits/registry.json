@@ -265,7 +265,7 @@
     }
   ],
   "nested_scopes": {
-    "fe60011f-b4a7-4bb9-9c62-4e079754a0ae": {
+    "85efc093-31d1-4162-99f2-0d33c871066a": {
       "parent_of": {
         "next": 2,
         "tombstones": []
@@ -278,80 +278,87 @@
   },
   "instances": [
     {
-      "guid": "2302b392-a541-4a50-99f8-18373d4be58c",
+      "guid": "2ce402a6-844f-441e-8016-06866cc4af10",
       "name": "goal",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "36a41e69-0a45-4db7-8741-c6bb0d76b4a3",
+      "guid": "51986622-a48a-43ca-9cea-46566a56d67e",
       "name": "initiative",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "39785cef-647a-4905-bf17-8d9e9a8e1fd5",
+      "guid": "f960f3d9-eef7-4e6e-a416-341da5cf3066",
       "name": "project",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "4e512abb-8009-4492-85f8-badd5a29144a",
+      "guid": "e06054f7-94d7-4bca-8023-d65c6384669c",
       "name": "milestone",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "57642866-56cd-4d04-826b-ce257054f4f6",
+      "guid": "d3f004c8-9cf2-4bf3-862a-2f79b3f68c34",
+      "name": "work_scope",
+      "type": "kind",
+      "kind": "node",
+      "scope": "root"
+    },
+    {
+      "guid": "acbee277-32be-4ec8-8974-a8122c718e1b",
       "name": "explore-ml-ranking",
       "type": "initiative",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "36a41e69-0a45-4db7-8741-c6bb0d76b4a3"
+      "parent_guid": "d3f004c8-9cf2-4bf3-862a-2f79b3f68c34"
     },
     {
-      "guid": "fe60011f-b4a7-4bb9-9c62-4e079754a0ae",
+      "guid": "85efc093-31d1-4162-99f2-0d33c871066a",
       "name": "billing-redesign",
       "type": "project",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "39785cef-647a-4905-bf17-8d9e9a8e1fd5"
+      "parent_guid": "d3f004c8-9cf2-4bf3-862a-2f79b3f68c34"
     },
     {
-      "guid": "198d55c4-1a8c-4b57-aabf-55ee7d49c360",
+      "guid": "435403b0-0914-4cd2-b98c-62ad4dc872b0",
       "name": "wp-invoicing",
       "type": "work_package",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "fe60011f-b4a7-4bb9-9c62-4e079754a0ae"
+      "parent_guid": "85efc093-31d1-4162-99f2-0d33c871066a"
     },
     {
-      "guid": "060a51c5-a2cc-45f5-9cb5-9cde98bc8248",
+      "guid": "07c31952-a7d9-48d7-a9c5-06007e404d98",
       "name": "wp-pdf-export",
       "type": "work_package",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "fe60011f-b4a7-4bb9-9c62-4e079754a0ae"
+      "parent_guid": "85efc093-31d1-4162-99f2-0d33c871066a"
     },
     {
-      "guid": "f06b4f6b-b15f-499f-8368-bad4a78dccb0",
+      "guid": "d77fec45-fe23-4291-b401-c31c7dd794bb",
       "name": "ga-release",
       "type": "milestone",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "4e512abb-8009-4492-85f8-badd5a29144a"
+      "parent_guid": "e06054f7-94d7-4bca-8023-d65c6384669c"
     },
     {
-      "guid": "e19c7fb6-3156-49b2-a2d7-77f3bb5e54e9",
+      "guid": "4197e22a-621e-461c-8895-9ab4d4dcf276",
       "name": "reduce-churn",
       "type": "goal",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "2302b392-a541-4a50-99f8-18373d4be58c"
+      "parent_guid": "2ce402a6-844f-441e-8016-06866cc4af10"
     }
   ],
   "instance_renames": []

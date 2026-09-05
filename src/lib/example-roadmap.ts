@@ -1,10 +1,9 @@
 import exampleRegistry from "../fixtures/example-roadmap/.fits/registry.json";
 import rootLinksRaw from "../fixtures/example-roadmap/links/links.jsonc?raw";
 import goalSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/goal goal/.fits/subgraph.jsonc?raw";
-import initiativeSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/initiative initiative/.fits/subgraph.jsonc?raw";
 import milestoneSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/milestone milestone/.fits/subgraph.jsonc?raw";
-import projectKindSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/project project/.fits/subgraph.jsonc?raw";
-import billingSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/project project/billing-redesign/.fits/subgraph.jsonc?raw";
+import workScopeSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/work_scope work_scope/.fits/subgraph.jsonc?raw";
+import billingSubgraphRaw from "../fixtures/example-roadmap/nodes/kind/work_scope work_scope/billing-redesign/.fits/subgraph.jsonc?raw";
 import {
   parseRoadmapGraph,
   type LinkRecord,
@@ -19,9 +18,8 @@ interface SubgraphDocument {
 
 const EXAMPLE_SUBGRAPH_RAW = [
   goalSubgraphRaw,
-  initiativeSubgraphRaw,
   milestoneSubgraphRaw,
-  projectKindSubgraphRaw,
+  workScopeSubgraphRaw,
   billingSubgraphRaw,
 ] as const;
 

@@ -85,7 +85,7 @@ Node ids in the UI are slash-qualified logical paths (for example `project/billi
 
 Run `bellman init` and `bellman sync` in your roadmap repo before opening it here if the graph artifacts are missing.
 
-After upgrading to a bellman release that uses libfits GUID wire ids (protocol v2), re-initialize each roadmap's pyfits tree: remove `.fits/`, `nodes/`, and `links/`, then run `bellman init .` and `bellman sync .`. Markdown remains the source of truth.
+After upgrading bellman, re-sync each roadmap so `.fits/` matches the current schema. Recent releases nest initiatives and projects under a shared `work_scope` kind-root so mixed scope links survive promotion; `bellman sync` migrates that automatically. If sync reports a protocol or schema problem, remove `.fits/`, `nodes/`, and `links/`, then run `bellman init .` and `bellman sync .`. Markdown remains the source of truth.
 
 ## Features
 

@@ -208,8 +208,19 @@ export function nodeLabel(nodeId: string): string {
   return nodeId;
 }
 
+const TYPE_QUALIFIED_KINDS = new Set([
+  "initiative",
+  "project",
+  "milestone",
+  "goal",
+]);
+
 /**
- * Builds a slash-qualified logical path from registry parent links.
+ * Builds a slash-qualified logical path matching bellman identity rules.
+ *
+ * Initiatives and projects nest under a shared `work_scope` kind-root, but
+ * callers still address them as `initiative/{name}` / `project/{name}`.
+ * Work packages stay `project/{project}/{slug}`.
  * @param instance - Live registry node instance.
  * @param byGuid - Map of node GUID to instance.
  * @returns Logical path such as `project/billing-redesign/wp-invoicing`.
@@ -218,6 +229,21 @@ export function logicalPathForInstance(
   instance: RegistryInstance,
   byGuid: Map<string, RegistryInstance>,
 ): string {
+  if (TYPE_QUALIFIED_KINDS.has(instance.type)) {
+    if (instance.name.includes("/")) {
+      return instance.name;
+    }
+    if (instance.parent_guid) {
+      return `${instance.type}/${instance.name}`;
+    }
+  }
+  if (instance.type === "work_package" && instance.parent_guid) {
+    const parent = byGuid.get(instance.parent_guid);
+    if (parent) {
+      return `project/${parent.name}/${instance.name}`;
+    }
+  }
+
   const segments: string[] = [instance.name];
   let parentGuid = instance.parent_guid ?? null;
   const seen = new Set<string>([instance.guid]);
@@ -444,9 +470,11 @@ export function nodeMatchesLinkEndpoint(
   if (nodeType === endpointType) {
     return true;
   }
+  const isWorkScope = nodeType === "initiative" || nodeType === "project";
+  // Scope-precedence links are registered as project→project, but initiatives
+  // and projects now share the work_scope kind-root so mixed pairs are valid.
   return (
-    endpointType === "work_scope" &&
-    (nodeType === "initiative" || nodeType === "project")
+    isWorkScope && (endpointType === "work_scope" || endpointType === "project")
   );
 }
 

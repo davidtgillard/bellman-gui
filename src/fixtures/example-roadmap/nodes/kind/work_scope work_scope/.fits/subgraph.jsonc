@@ -1,0 +1,1 @@
+{"description":"Nested nodes and links scoped to one container parent. Do not edit by hand; use libfits nested APIs.","version":1,"kind":"fits-subgraph-v1","parent_guid":"d3f004c8-9cf2-4bf3-862a-2f79b3f68c34","nodes":[{"guid":"acbee277-32be-4ec8-8974-a8122c718e1b","type":"initiative"},{"guid":"85efc093-31d1-4162-99f2-0d33c871066a","type":"project"}],"links":[]}

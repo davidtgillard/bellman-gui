@@ -28,7 +28,8 @@ fn read_registry_index(root: &Path) -> Result<RegistryIndex, String> {
 
 fn node_matches_endpoint(node_type: &str, endpoint_type: &str) -> bool {
     node_type == endpoint_type
-        || (endpoint_type == "work_scope" && (node_type == "initiative" || node_type == "project"))
+        || ((endpoint_type == "work_scope" || endpoint_type == "project")
+            && (node_type == "initiative" || node_type == "project"))
 }
 
 fn find_node<'a>(
@@ -1507,9 +1508,9 @@ mod tests {
     fn removes_link_from_fixture_subgraph() {
         let _guard = fixture_lock();
         let root = fixture_root();
-        let link_id = "3a150a65-6676-444f-96ce-37d40be1c004";
+        let link_id = "b7376ad8-67e8-4256-adc0-b71a7b64a745";
         let subgraph = root.join(
-            "nodes/kind/project project/billing-redesign/.fits/subgraph.jsonc",
+            "nodes/kind/work_scope work_scope/billing-redesign/.fits/subgraph.jsonc",
         );
         let backup = fs::read_to_string(&subgraph).expect("read subgraph");
 
