@@ -125,6 +125,31 @@ export function isRenameableNodeType(type: string): boolean {
   return RENAMEABLE_NODE_TYPES.has(type);
 }
 
+export interface ConvertScopeRequest {
+  roadmap_root: string;
+  node_id: string;
+  node_type: string;
+}
+
+/**
+ * Returns the logical id after converting an initiative to a project or back.
+ * @param nodeId - Current node identifier, typically `initiative/{name}` or `project/{name}`.
+ * @param fromType - Current work-scope type.
+ * @param toType - Target work-scope type.
+ * @returns Type-qualified id using `toType` and the same name.
+ */
+export function convertedWorkScopeId(
+  nodeId: string,
+  fromType: string,
+  toType: string,
+): string {
+  const prefix = `${fromType}/`;
+  if (nodeId.startsWith(prefix)) {
+    return `${toType}/${nodeId.slice(prefix.length)}`;
+  }
+  return `${toType}/${nodeId}`;
+}
+
 export interface RoadmapGraphDto {
   root: string;
   editable: boolean;

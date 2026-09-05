@@ -465,6 +465,68 @@
           new_node_id: newId,
         };
       }
+      case "promote_node_command":
+      case "demote_node_command": {
+        const next = clone(states[index]);
+        const oldId = request.node_id;
+        const fromType =
+          request.node_type ||
+          (cmd === "promote_node_command" ? "initiative" : "project");
+        const toType = cmd === "promote_node_command" ? "project" : "initiative";
+        const slashPrefix = `${fromType}/`;
+        const name = oldId.startsWith(slashPrefix)
+          ? oldId.slice(slashPrefix.length).split("/").pop()
+          : oldId.split("/").pop();
+        const newId = `${toType}/${name}`;
+        const nestedPrefix = `${oldId}/`;
+        next.nodes = next.nodes
+          .filter(
+            (node) =>
+              cmd === "promote_node_command" || !node.id.startsWith(nestedPrefix),
+          )
+          .map((node) =>
+            node.id === oldId ? { ...node, id: newId, type: toType } : node,
+          );
+        next.links = next.links
+          .filter((link) => {
+            if (cmd === "promote_node_command") {
+              return true;
+            }
+            return (
+              !link.source.startsWith(nestedPrefix) &&
+              !link.target.startsWith(nestedPrefix)
+            );
+          })
+          .map((link) => ({
+            ...link,
+            source: link.source === oldId ? newId : link.source,
+            target: link.target === oldId ? newId : link.target,
+          }));
+        next.label =
+          cmd === "promote_node_command"
+            ? `promote initiative ${name}`
+            : `demote project ${name}`;
+        if (nodeIdToGuid.has(oldId)) {
+          const guid = nodeIdToGuid.get(oldId);
+          nodeIdToGuid.delete(oldId);
+          nodeIdToGuid.set(newId, guid);
+          persistEditorHistory();
+        }
+        if (savedNodeDetails.has(oldId)) {
+          const detail = savedNodeDetails.get(oldId);
+          savedNodeDetails.delete(oldId);
+          savedNodeDetails.set(newId, {
+            ...detail,
+            node_id: newId,
+            node_type: toType,
+          });
+        }
+        pushState(next);
+        return {
+          graph: currentGraph(),
+          new_node_id: newId,
+        };
+      }
       case "load_node_detail_command":
         return currentNodeDetail(request.node_id);
       case "load_node_editor_history_command": {

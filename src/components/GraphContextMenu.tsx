@@ -16,6 +16,8 @@ interface GraphContextMenuProps {
   onCreateLink?: (nodeId: string) => void;
   canCreateLink?: boolean;
   onRemoveNode?: (nodeId: string, nodeType: string) => void;
+  onConvertToProject?: (nodeId: string, nodeType: string) => void;
+  onConvertToInitiative?: (nodeId: string, nodeType: string) => void;
   onRemoveLink?: (linkId: string) => void;
   removeLinkLabel?: string;
   onClose: () => void;
@@ -37,6 +39,8 @@ export function GraphContextMenu({
   onCreateLink,
   canCreateLink = true,
   onRemoveNode,
+  onConvertToProject,
+  onConvertToInitiative,
   onRemoveLink,
   removeLinkLabel = "Remove link",
   onClose,
@@ -101,6 +105,38 @@ export function GraphContextMenu({
         : "This work package has no sub-packages",
       onClick: () => {
         onShowWorkPackageInnerGraph(nodeId);
+        onClose();
+      },
+    });
+  }
+
+  if (
+    editable &&
+    nodeId &&
+    nodeType === "initiative" &&
+    onConvertToProject &&
+    !isOverflowNodeId(nodeId)
+  ) {
+    items.push({
+      label: "Convert to project",
+      onClick: () => {
+        onConvertToProject(nodeId, nodeType);
+        onClose();
+      },
+    });
+  }
+
+  if (
+    editable &&
+    nodeId &&
+    nodeType === "project" &&
+    onConvertToInitiative &&
+    !isOverflowNodeId(nodeId)
+  ) {
+    items.push({
+      label: "Convert to initiative",
+      onClick: () => {
+        onConvertToInitiative(nodeId, nodeType);
         onClose();
       },
     });

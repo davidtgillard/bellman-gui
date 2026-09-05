@@ -1374,6 +1374,63 @@ pub struct RenameNodeResponse {
     pub new_node_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ConvertScopeRequest {
+    pub roadmap_root: String,
+    pub node_id: String,
+    pub node_type: String,
+}
+
+async fn convert_scope(
+    app: &AppHandle,
+    request: ConvertScopeRequest,
+    expected_type: &str,
+    command: &str,
+    result_type: &str,
+) -> Result<String, String> {
+    let root = PathBuf::from(&request.roadmap_root);
+    if !registry_path(&root).is_file() {
+        return Err(format!(
+            "roadmap root is not editable: {}",
+            request.roadmap_root
+        ));
+    }
+
+    if request.node_type != expected_type {
+        return Err(format!(
+            "cannot {command} node type {:?}",
+            request.node_type
+        ));
+    }
+
+    let index = read_registry_index(&root)?;
+    find_node(&index, &request.node_id)?;
+    let name = bellman_entity_name(&request.node_id, expected_type);
+
+    run_bellman_for_request(
+        app,
+        &[command, "--path", &request.roadmap_root, &name],
+    )
+    .await?;
+
+    let updated = read_registry_index(&root)?;
+    find_node_id_by_type_and_name(&updated, result_type, &name)
+}
+
+pub async fn promote_node(
+    app: &AppHandle,
+    request: ConvertScopeRequest,
+) -> Result<String, String> {
+    convert_scope(app, request, "initiative", "promote", "project").await
+}
+
+pub async fn demote_node(
+    app: &AppHandle,
+    request: ConvertScopeRequest,
+) -> Result<String, String> {
+    convert_scope(app, request, "project", "demote", "initiative").await
+}
+
 fn find_node_id_by_type_and_name(
     index: &RegistryIndex,
     node_type: &str,

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   fromRoadmapGraphDto,
+  type ConvertScopeRequest,
   type CreateLinkRequest,
   type CreateNodeRequest,
   type RemoveLinkRequest,
@@ -58,6 +59,32 @@ export async function removeNode(request: RemoveNodeRequest) {
  */
 export async function renameNode(request: RenameNodeRequest): Promise<RenameNodeResponse> {
   const dto = await invoke<RenameNodeResponseDto>("rename_node_command", { request });
+  return {
+    graph: fromRoadmapGraphDto(dto.graph),
+    newNodeId: dto.new_node_id,
+  };
+}
+
+/**
+ * Promotes an initiative to a project via the bellman sidecar and returns the updated graph.
+ * @param request - Scope conversion payload for the backend.
+ * @returns Updated roadmap graph and the new project node id.
+ */
+export async function promoteNode(request: ConvertScopeRequest): Promise<RenameNodeResponse> {
+  const dto = await invoke<RenameNodeResponseDto>("promote_node_command", { request });
+  return {
+    graph: fromRoadmapGraphDto(dto.graph),
+    newNodeId: dto.new_node_id,
+  };
+}
+
+/**
+ * Demotes a project to an initiative via the bellman sidecar and returns the updated graph.
+ * @param request - Scope conversion payload for the backend.
+ * @returns Updated roadmap graph and the new initiative node id.
+ */
+export async function demoteNode(request: ConvertScopeRequest): Promise<RenameNodeResponse> {
+  const dto = await invoke<RenameNodeResponseDto>("demote_node_command", { request });
   return {
     graph: fromRoadmapGraphDto(dto.graph),
     newNodeId: dto.new_node_id,

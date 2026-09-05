@@ -42,6 +42,8 @@ import {
 import {
   createLink,
   createNode,
+  demoteNode,
+  promoteNode,
   removeLink,
   removeNode,
   renameNode,
@@ -874,6 +876,97 @@ function App() {
     ],
   );
 
+  const handleConvertScope = useCallback(
+    async (nodeId: string, nodeType: string, direction: "promote" | "demote") => {
+      if (direction === "demote") {
+        const hasWorkPackages =
+          innerGraphForProject(nodes, links, nodeId).nodes.length > 0;
+        if (hasWorkPackages) {
+          const confirmed = window.confirm(
+            "Convert this project to an initiative? Its work packages will be parked and hidden until you convert it back.",
+          );
+          if (!confirmed) {
+            return;
+          }
+        }
+      }
+
+      setSaving(true);
+      setError(null);
+
+      try {
+        const convert = direction === "promote" ? promoteNode : demoteNode;
+        const { graph, newNodeId } = await convert({
+          roadmap_root: roadmapRoot,
+          node_id: nodeId,
+          node_type: nodeType,
+        });
+
+        let savedLayout: WorkPackageLayout | undefined;
+        if (
+          roadmapLayoutPersistable(roadmapRoot, graph.editable) &&
+          nodeId !== newNodeId
+        ) {
+          const position = workPackageLayout.topLevel[nodeId];
+          if (position) {
+            const nextLayout = withTopLevelNodePosition(
+              withoutTopLevelNodePosition(workPackageLayout, nodeId),
+              newNodeId,
+              position,
+            );
+            savedLayout = await saveGraphLayout(roadmapRoot, nextLayout);
+          }
+        }
+
+        if (direction === "demote") {
+          const projectId = currentProjectId(graphViewStack);
+          if (projectId === nodeId) {
+            setGraphViewStack(INITIAL_GRAPH_VIEW_STACK);
+          }
+        }
+
+        if (selectedNodeId === nodeId) {
+          setSelectedNodeId(newNodeId);
+          const node = graph.nodes.find((item) => item.id === newNodeId);
+          setNodeDetail(null);
+          setNodeDetailError(null);
+          if (node) {
+            setNodeDetailLoading(true);
+            void loadNodeDetail(roadmapRoot, newNodeId, node.type)
+              .then((detail) => {
+                setNodeDetail(detail);
+                setNodeDetailError(null);
+              })
+              .catch((caught) => setNodeDetailError(String(caught)))
+              .finally(() => setNodeDetailLoading(false));
+          } else {
+            setNodeDetailLoading(false);
+          }
+        }
+
+        applyGraph(graph, {
+          revealNodeId: newNodeId,
+          ...(savedLayout ? { layout: savedLayout } : {}),
+        });
+        void refreshUndoState(graph.root, graph.editable);
+      } catch (caught) {
+        setError(String(caught));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [
+      applyGraph,
+      graphViewStack,
+      links,
+      nodes,
+      refreshUndoState,
+      roadmapRoot,
+      selectedNodeId,
+      workPackageLayout,
+    ],
+  );
+
   const handleRemoveNode = useCallback(
     async (nodeId: string, nodeType: string) => {
       const projectId = currentProjectId(graphViewStack);
@@ -1558,6 +1651,18 @@ function App() {
           }}
           onShowInnerGraph={handleShowInnerGraph}
           onShowWorkPackageInnerGraph={handleShowWorkPackageInnerGraph}
+          onConvertToProject={
+            inWorkPackageGraph
+              ? undefined
+              : (convertNodeId, type) =>
+                  void handleConvertScope(convertNodeId, type, "promote")
+          }
+          onConvertToInitiative={
+            inWorkPackageGraph
+              ? undefined
+              : (convertNodeId, type) =>
+                  void handleConvertScope(convertNodeId, type, "demote")
+          }
           onRemoveNode={(removeNodeId, type) => void handleRemoveNode(removeNodeId, type)}
           onClose={event.onClose}
         />
@@ -1567,6 +1672,7 @@ function App() {
       activeWorkPackageFocus,
       compoundView,
       editable,
+      handleConvertScope,
       handleRemoveLink,
       handleRemoveNode,
       handleShowInnerGraph,

@@ -24,9 +24,10 @@ use graph_layout::{
 };
 use node_detail::load_node_detail_command;
 use roadmap_edit::{
-    create_link, create_node, remove_link, remove_node, rename_node, update_work_package,
-    CreateLinkRequest, CreateNodeRequest, RemoveLinkRequest, RemoveNodeRequest, RenameNodeRequest,
-    RenameNodeResponse, UpdateWorkPackageRequest,
+    create_link, create_node, demote_node, promote_node, remove_link, remove_node, rename_node,
+    update_work_package, ConvertScopeRequest, CreateLinkRequest, CreateNodeRequest,
+    RemoveLinkRequest, RemoveNodeRequest, RenameNodeRequest, RenameNodeResponse,
+    UpdateWorkPackageRequest,
 };
 use settings::{
     clear_last_roadmap_command, load_settings, load_settings_command, set_last_roadmap_root,
@@ -180,6 +181,46 @@ async fn rename_node_command(
     let label = format!("rename {node_type} {old_name} -> {new_name}");
     let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
     let new_node_id = rename_node(&app, request).await?;
+    record_edit(&state, &roadmap_root, label, before);
+    let graph = load_roadmap_graph(PathBuf::from(&roadmap_root).as_path())?;
+    Ok(RenameNodeResponse {
+        graph,
+        new_node_id,
+    })
+}
+
+#[tauri::command]
+async fn promote_node_command(
+    app: tauri::AppHandle,
+    request: ConvertScopeRequest,
+    state: tauri::State<'_, UndoState>,
+) -> Result<RenameNodeResponse, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    let node_type = request.node_type.clone();
+    let name = roadmap_edit::bellman_entity_name(&request.node_id, &node_type);
+    let label = format!("promote {node_type} {name}");
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
+    let new_node_id = promote_node(&app, request).await?;
+    record_edit(&state, &roadmap_root, label, before);
+    let graph = load_roadmap_graph(PathBuf::from(&roadmap_root).as_path())?;
+    Ok(RenameNodeResponse {
+        graph,
+        new_node_id,
+    })
+}
+
+#[tauri::command]
+async fn demote_node_command(
+    app: tauri::AppHandle,
+    request: ConvertScopeRequest,
+    state: tauri::State<'_, UndoState>,
+) -> Result<RenameNodeResponse, String> {
+    let roadmap_root = request.roadmap_root.clone();
+    let node_type = request.node_type.clone();
+    let name = roadmap_edit::bellman_entity_name(&request.node_id, &node_type);
+    let label = format!("demote {node_type} {name}");
+    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
+    let new_node_id = demote_node(&app, request).await?;
     record_edit(&state, &roadmap_root, label, before);
     let graph = load_roadmap_graph(PathBuf::from(&roadmap_root).as_path())?;
     Ok(RenameNodeResponse {
@@ -482,6 +523,8 @@ pub fn run() {
             remove_link_command,
             remove_node_command,
             rename_node_command,
+            promote_node_command,
+            demote_node_command,
             save_node_markdown_command,
             load_node_editor_history_command,
             save_node_editor_history_command,

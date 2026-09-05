@@ -85,7 +85,7 @@ Node ids in the UI are slash-qualified logical paths (for example `project/billi
 
 Run `bellman init` and `bellman sync` in your roadmap repo before opening it here if the graph artifacts are missing.
 
-After upgrading bellman, re-sync each roadmap so `.fits/` matches the current schema. Recent releases nest initiatives and projects under a shared `work_scope` kind-root so mixed scope links survive promotion; `bellman sync` migrates that automatically. If sync reports a protocol or schema problem, remove `.fits/`, `nodes/`, and `links/`, then run `bellman init .` and `bellman sync .`. Markdown remains the source of truth.
+After upgrading bellman, re-sync each roadmap so `.fits/` matches the current schema. Recent releases nest initiatives and projects under a shared `work_scope` kind-root so mixed scope links survive promotion and demotion; `bellman sync` migrates that automatically. If sync reports a protocol or schema problem, remove `.fits/`, `nodes/`, and `links/`, then run `bellman init .` and `bellman sync .`. Markdown remains the source of truth.
 
 ## Features
 
@@ -97,6 +97,7 @@ Each undo step reverses one **structural** edit:
 
 - Create or remove a node
 - Create or remove a link
+- Convert an initiative to a project, or a project to an initiative
 
 Node drag positions are saved separately and are **not** part of the undo stack. Undoing a node deletion does restore its saved layout position when one exists.
 

@@ -3,6 +3,7 @@ import {
   canBeLinkFinish,
   canBeLinkStart,
   canCreateLinkFromNode,
+  convertedWorkScopeId,
   findAddedNodeId,
   graphWithoutLink,
   graphWithoutNode,
@@ -257,5 +258,23 @@ describe("logicalPathForInstance", () => {
     expect(logicalPathForInstance(workPackage, byGuid)).toBe(
       "project/image-tools/export",
     );
+  });
+});
+
+describe("convertedWorkScopeId", () => {
+  it("rewrites initiative ids to project ids", () => {
+    expect(
+      convertedWorkScopeId(
+        "initiative/explore-ml-ranking",
+        "initiative",
+        "project",
+      ),
+    ).toBe("project/explore-ml-ranking");
+  });
+
+  it("rewrites project ids to initiative ids", () => {
+    expect(
+      convertedWorkScopeId("project/billing-redesign", "project", "initiative"),
+    ).toBe("initiative/billing-redesign");
   });
 });
