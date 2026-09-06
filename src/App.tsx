@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphContextMenu } from "./components/GraphContextMenu";
 import { GraphViewBreadcrumb } from "./components/GraphViewBreadcrumb";
 import { NodeDetailSidebar } from "./components/NodeDetailSidebar";
-import { CreateLinkDialog } from "./components/CreateLinkDialog";
+import { CreateLinkTypePopover } from "./components/CreateLinkTypePopover";
 import { CreateNodeDialog } from "./components/CreateNodeDialog";
 import { LinkDetailPanel } from "./components/LinkDetailPanel";
 import { NodeDetailPanel } from "./components/NodeDetailPanel";
@@ -13,11 +13,14 @@ import { NodeTypeLegend } from "./components/NodeTypeLegend";
 import { useGraphAreaLayout } from "./hooks/useGraphAreaLayout";
 import {
   canCreateLinkFromNode,
+  compatibleLinkTypes,
   findAddedNodeId,
   fromRoadmapGraphDto,
   graphWithoutLink,
   graphWithoutNode,
   innerGraphForProject,
+  linkEndpointsForPick,
+  linkTargetsForOrigin,
   nodeLabel,
   nodeTypeColor,
   topLevelGraphNodes,
@@ -157,10 +160,11 @@ function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
-  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  const [linkDialogInitialNodeId, setLinkDialogInitialNodeId] = useState<string | null>(
-    null,
-  );
+  const [linkingOriginId, setLinkingOriginId] = useState<string | null>(null);
+  const [pendingLink, setPendingLink] = useState<{
+    source: string;
+    target: string;
+  } | null>(null);
   const [pendingNodePlacement, setPendingNodePlacement] = useState<{
     preferred: NodePosition;
     existingPositions: Record<string, NodePosition>;
@@ -783,8 +787,8 @@ function App() {
         });
         applyGraph(graph);
         void refreshUndoState(graph.root, graph.editable);
-        setLinkDialogOpen(false);
-        setLinkDialogInitialNodeId(null);
+        setPendingLink(null);
+        setLinkingOriginId(null);
       } catch (caught) {
         setError(String(caught));
       } finally {
@@ -1271,6 +1275,33 @@ function App() {
     [filteredNodes],
   );
 
+  const linkingTargets = useMemo(() => {
+    if (!linkingOriginId) {
+      return null;
+    }
+    const origin = displayGraph.nodes.find((node) => node.id === linkingOriginId);
+    if (!origin) {
+      return null;
+    }
+    const result = linkTargetsForOrigin(origin, displayGraph.nodes, linkTypes);
+    return {
+      originRole: result.originRole,
+      targets: result.targets.filter((node) => visibleNodeIds.has(node.id)),
+    };
+  }, [displayGraph.nodes, linkTypes, linkingOriginId, visibleNodeIds]);
+
+  const linkingMode = useMemo(() => {
+    if (!linkingOriginId || !linkingTargets) {
+      return null;
+    }
+    return {
+      originId: linkingOriginId,
+      originLabel: nodeLabel(linkingOriginId),
+      targetIds: new Set(linkingTargets.targets.map((node) => node.id)),
+      typePicking: pendingLink !== null,
+    };
+  }, [linkingOriginId, linkingTargets, pendingLink]);
+
   const displayNodeIds = useMemo(
     () => new Set(displayGraph.nodes.map((node) => node.id)),
     [displayGraph.nodes],
@@ -1407,6 +1438,85 @@ function App() {
     nodeEditDirtyRef.current = false;
     return true;
   }, [confirmDiscardIfDirty, nodeDetailOpen]);
+
+  const closeNodeDetailKeepSelection = useCallback((): boolean => {
+    if (!confirmDiscardIfDirty()) {
+      return false;
+    }
+    setSelectedLinkId(null);
+    setNodeDetailOpen(false);
+    setNodeDetail(null);
+    setNodeDetailError(null);
+    setNodeDetailLoading(false);
+    setNodeEditing(false);
+    setNodeEditError(null);
+    nodeEditDirtyRef.current = false;
+    return true;
+  }, [confirmDiscardIfDirty]);
+
+  const cancelLinking = useCallback(() => {
+    setPendingLink(null);
+    setLinkingOriginId(null);
+  }, []);
+
+  const beginLinkingFromNode = useCallback(
+    (originId: string) => {
+      if (!closeNodeDetailKeepSelection()) {
+        return;
+      }
+      setPendingLink(null);
+      setSelectedNodeId(originId);
+      setLinkingOriginId(originId);
+    },
+    [closeNodeDetailKeepSelection],
+  );
+
+  const handleLinkTargetPick = useCallback(
+    (pickedId: string) => {
+      if (!linkingOriginId || !linkingTargets) {
+        return;
+      }
+      if (!linkingTargets.targets.some((node) => node.id === pickedId)) {
+        return;
+      }
+      const endpoints = linkEndpointsForPick(
+        linkingOriginId,
+        linkingTargets.originRole,
+        pickedId,
+      );
+      const start = displayGraph.nodes.find((node) => node.id === endpoints.source);
+      const finish = displayGraph.nodes.find((node) => node.id === endpoints.target);
+      if (!start || !finish) {
+        return;
+      }
+      const types = compatibleLinkTypes(linkTypes, start.type, finish.type);
+      if (types.length === 1) {
+        void handleCreateLink({
+          linkType: types[0].link_type,
+          source: endpoints.source,
+          target: endpoints.target,
+        });
+        return;
+      }
+      setPendingLink(endpoints);
+    },
+    [displayGraph.nodes, handleCreateLink, linkTypes, linkingOriginId, linkingTargets],
+  );
+
+  useEffect(() => {
+    if (!pendingLink) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      setPendingLink(null);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [pendingLink]);
 
   const handleNodeClick = useCallback(
     (nodeId: string) => {
@@ -1645,10 +1755,7 @@ function App() {
             compoundView !== null &&
             workPackageHasChildren(nodeId, compoundView.childrenByParent)
           }
-          onCreateLink={(startNodeId) => {
-            setLinkDialogInitialNodeId(startNodeId);
-            setLinkDialogOpen(true);
-          }}
+          onCreateLink={beginLinkingFromNode}
           onShowInnerGraph={handleShowInnerGraph}
           onShowWorkPackageInnerGraph={handleShowWorkPackageInnerGraph}
           onConvertToProject={
@@ -1681,6 +1788,7 @@ function App() {
       linkTypes,
       links,
       nodes,
+      beginLinkingFromNode,
     ],
   );
 
@@ -1941,6 +2049,9 @@ function App() {
             onNodeDetailDismiss={dismissNodeDetail}
             onSelectionClear={handleGraphSelectionClear}
             contextMenu={renderContextMenu}
+            linking={linkingMode}
+            onLinkTargetPick={handleLinkTargetPick}
+            onLinkingCancel={cancelLinking}
             emptyMessage={graphEmptyMessage}
             emptyAction={
               showExampleEmptyAction
@@ -1975,6 +2086,17 @@ function App() {
             }
             onAutoLayoutComplete={handleAutoLayoutComplete}
           />
+          {pendingLink ? (
+            <CreateLinkTypePopover
+              source={pendingLink.source}
+              target={pendingLink.target}
+              nodes={displayGraph.nodes}
+              linkTypes={linkTypes}
+              saving={saving}
+              onClose={() => setPendingLink(null)}
+              onCreate={(input) => void handleCreateLink(input)}
+            />
+          ) : null}
           {legendMounted ? (
             <NodeTypeLegend
               ref={legendMeasureRef}
@@ -2037,19 +2159,6 @@ function App() {
           setError(null);
         }}
         onCreate={(input) => void handleCreateNode(input)}
-      />
-      <CreateLinkDialog
-        open={linkDialogOpen}
-        nodes={nodes}
-        linkTypes={linkTypes}
-        saving={saving}
-        initialNodeId={linkDialogInitialNodeId}
-        onClose={() => {
-          setLinkDialogOpen(false);
-          setLinkDialogInitialNodeId(null);
-          setError(null);
-        }}
-        onCreate={(input) => void handleCreateLink(input)}
       />
     </main>
   );

@@ -3,6 +3,8 @@ import {
   compatibleLinkTypes,
   compatibleSourceNodes,
   compatibleTargetNodes,
+  linkEndpointsForPick,
+  linkTargetsForOrigin,
   nodeMatchesLinkEndpoint,
   type GraphNode,
   type LinkTypeMeta,
@@ -86,5 +88,51 @@ describe("link type compatibility", () => {
     expect(compatibleTargetNodes(nodes, parentOf).map((node) => node.id)).toEqual([
       "project/beta/wp-gamma",
     ]);
+  });
+});
+
+describe("linkTargetsForOrigin", () => {
+  it("prefers the origin as start and lists compatible finishes", () => {
+    const origin = nodes[0];
+    const result = linkTargetsForOrigin(origin, nodes, linkTypes);
+
+    expect(result.originRole).toBe("start");
+    expect(result.targets.map((node) => node.id).sort()).toEqual([
+      "goal/delta",
+      "project/beta",
+    ]);
+    expect(linkEndpointsForPick(origin.id, result.originRole, "goal/delta")).toEqual({
+      source: "initiative/alpha",
+      target: "goal/delta",
+    });
+  });
+
+  it("uses the origin as finish when it cannot start a link", () => {
+    const origin = nodes[3];
+    const result = linkTargetsForOrigin(origin, nodes, linkTypes);
+
+    expect(origin.type).toBe("goal");
+    expect(result.originRole).toBe("finish");
+    expect(result.targets.map((node) => node.id).sort()).toEqual([
+      "initiative/alpha",
+      "project/beta",
+    ]);
+    expect(linkEndpointsForPick(origin.id, result.originRole, "project/beta")).toEqual({
+      source: "project/beta",
+      target: "goal/delta",
+    });
+  });
+
+  it("skips synthetic overflow nodes as counterparts", () => {
+    const withOverflow: GraphNode[] = [
+      ...nodes,
+      { id: "__overflow__:project/beta/wp-gamma", type: "work_package" },
+    ];
+    const origin = withOverflow[2];
+    const result = linkTargetsForOrigin(origin, withOverflow, linkTypes);
+
+    expect(result.targets.some((node) => node.id.startsWith("__overflow__:"))).toBe(
+      false,
+    );
   });
 });

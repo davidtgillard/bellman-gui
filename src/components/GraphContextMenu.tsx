@@ -70,7 +70,7 @@ export function GraphContextMenu({
     !isOverflowNodeId(nodeId)
   ) {
     items.push({
-      label: "New link…",
+      label: "New link",
       disabled: !canCreateLink,
       title: canCreateLink
         ? undefined

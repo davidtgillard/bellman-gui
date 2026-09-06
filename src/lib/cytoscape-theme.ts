@@ -93,6 +93,26 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
+    selector: "node.link-dimmed",
+    style: {
+      opacity: 0.3,
+    },
+  },
+  {
+    selector: "edge.link-dimmed",
+    style: {
+      opacity: 0.2,
+    },
+  },
+  {
+    selector: "node.link-origin:childless:not([kind = 'leaf'])",
+    style: {
+      "border-width": 3,
+      "border-color": "#38bdf8",
+      "border-opacity": 1,
+    },
+  },
+  {
     selector: "node:active:childless:not([kind = 'leaf'])",
     style: {
       "overlay-opacity": 0.15,

@@ -1,11 +1,15 @@
 import type { Core } from "cytoscape";
 
+export type MilestoneLinkingRole = "origin" | "target" | "dimmed" | null;
+
 export interface MilestoneOverlayVisual {
   id: string;
   label: string;
   date: string | null;
   screenY: number;
   selected: boolean;
+  /** Click-to-connect role when a linking session is active. */
+  linkingRole: MilestoneLinkingRole;
   /** Live camera zoom used to scale overlay label font size to match canvas node labels. */
   zoom: number;
 }
@@ -48,12 +52,21 @@ export function buildMilestoneOverlayVisuals(
     // Cytoscape label may include "\n" + date; prefer the primary line for the title.
     const label = labelData.split("\n")[0]?.trim() || id;
 
+    const linkingRole: MilestoneLinkingRole = node.hasClass("link-origin")
+      ? "origin"
+      : node.hasClass("link-target")
+        ? "target"
+        : node.hasClass("link-dimmed")
+          ? "dimmed"
+          : null;
+
     visuals.push({
       id,
       label,
       date,
       screenY: position.y * zoom + pan.y,
       selected: node.selected(),
+      linkingRole,
       zoom: zoomScale,
     });
   });

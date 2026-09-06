@@ -608,6 +608,76 @@ export function canCreateLinkFromNode(
   );
 }
 
+/** Synthetic overflow nodes are not valid link endpoints. */
+const SYNTHETIC_OVERFLOW_PREFIX = "__overflow__:";
+
+/** Whether the origin is the start or finish of the new link. */
+export type LinkOriginRole = "start" | "finish";
+
+/** Compatible counterparts for click-to-connect from an origin node. */
+export interface LinkTargetsForOrigin {
+  originRole: LinkOriginRole;
+  targets: GraphNode[];
+}
+
+/**
+ * Lists nodes that can be linked to an origin in click-to-connect mode.
+ * Prefers the origin as start; uses finish when the origin cannot start a link.
+ * @param origin - Node the user started linking from.
+ * @param nodes - Graph nodes in the current view.
+ * @param linkTypes - Link type metadata from the registry.
+ * @returns Origin role and compatible counterpart nodes.
+ */
+export function linkTargetsForOrigin(
+  origin: GraphNode,
+  nodes: GraphNode[],
+  linkTypes: LinkTypeMeta[],
+): LinkTargetsForOrigin {
+  const candidates = nodes.filter(
+    (node) =>
+      node.id !== origin.id && !node.id.startsWith(SYNTHETIC_OVERFLOW_PREFIX),
+  );
+
+  const asStart = canBeLinkStart(origin, nodes, linkTypes);
+  const asFinish = canBeLinkFinish(origin, nodes, linkTypes);
+
+  if (!asStart && asFinish) {
+    return {
+      originRole: "finish",
+      targets: candidates.filter(
+        (node) =>
+          compatibleLinkTypes(linkTypes, node.type, origin.type).length > 0,
+      ),
+    };
+  }
+
+  return {
+    originRole: "start",
+    targets: candidates.filter(
+      (node) =>
+        compatibleLinkTypes(linkTypes, origin.type, node.type).length > 0,
+    ),
+  };
+}
+
+/**
+ * Resolves source and target ids after the user picks a counterpart node.
+ * @param originId - Node the linking session started from.
+ * @param originRole - Whether the origin is start or finish.
+ * @param pickedId - Node chosen on the canvas.
+ * @returns Ordered endpoints for create-link.
+ */
+export function linkEndpointsForPick(
+  originId: string,
+  originRole: LinkOriginRole,
+  pickedId: string,
+): { source: string; target: string } {
+  if (originRole === "start") {
+    return { source: originId, target: pickedId };
+  }
+  return { source: pickedId, target: originId };
+}
+
 /**
  * Lists project names derived from project node ids.
  * @param nodes - Graph nodes from the current roadmap.

@@ -4,6 +4,7 @@ import {
   openNodeContextMenu,
   selectEdge,
   setupPage,
+  tapGraphNode,
   test,
   type Scenario,
 } from "./support/fixtures";
@@ -90,17 +91,16 @@ test.describe("link display", () => {
     await expect(page.getByText("precedes_FS_Mandatory_scope")).toHaveCount(0);
   });
 
-  test("create-link dialog uses kind, relation, and hardness instead of raw ids", async ({
+  test("create-link popover uses kind, relation, and hardness instead of raw ids", async ({
     page,
   }) => {
     await setupPage(page, createLinkScenario());
     await openNodeContextMenu(page, INITIATIVE_A.id);
-    await page.getByRole("button", { name: "New link…" }).click();
+    await page.getByRole("button", { name: "New link" }).click();
+    await tapGraphNode(page, INITIATIVE_B.id);
 
-    const dialog = page.getByRole("dialog", { name: "New link" });
+    const dialog = page.getByRole("dialog", { name: "Link type" });
     await expect(dialog).toBeVisible();
-    await dialog.locator("#create-link-finish").selectOption(INITIATIVE_B.id);
-
     await expect(dialog.locator("#create-link-kind")).toHaveValue("precedes");
     await expect(dialog.locator("#create-link-relation")).toBeVisible();
     await expect(dialog.locator("#create-link-hardness")).toBeVisible();

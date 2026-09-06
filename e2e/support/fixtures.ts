@@ -104,6 +104,7 @@ interface TestBridge {
   isNodeRenderedVisible?: (nodeId: string) => boolean;
   getSubtreeNodeIds?: (rootId: string) => string[];
   getGraphEdgeIds?: () => string[];
+  graphNodeClasses?: (nodeId: string) => string[];
 }
 
 export interface GraphNodeState {
@@ -719,6 +720,25 @@ export async function getGraphEdgeIds(page: Page): Promise<string[]> {
     }
     return bridge.getGraphEdgeIds();
   });
+}
+
+/**
+ * Returns Cytoscape classes on a graph node via the test hook.
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Roadmap node identifier.
+ * @throws {Error} When the graph node classes test hook is unavailable.
+ */
+export async function getGraphNodeClasses(
+  page: Page,
+  nodeId: string,
+): Promise<string[]> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__: TestBridge }).__TEST__;
+    if (!bridge?.graphNodeClasses) {
+      throw new Error("graph node classes test hook is unavailable");
+    }
+    return bridge.graphNodeClasses(id);
+  }, nodeId);
 }
 
 /**

@@ -26,6 +26,7 @@ function mockMilestoneNode(options: {
     style: (key: string) => (key === "display" ? (options.display ?? "element") : ""),
     position: () => ({ x: 0, y: options.y }),
     selected: () => options.selected ?? false,
+    hasClass: () => false,
   };
 }
 
@@ -54,6 +55,7 @@ describe("buildMilestoneOverlayVisuals", () => {
         date: "2026-09-30",
         screenY: 220,
         selected: false,
+        linkingRole: null,
         zoom: 2,
       },
     ]);
@@ -95,6 +97,7 @@ describe("buildMilestoneOverlayVisuals", () => {
       style: () => "element",
       position: () => ({ x: 0, y: 0 }),
       selected: () => false,
+      hasClass: () => false,
     };
     const cy = {
       pan: () => ({ x: 0, y: 0 }),

@@ -52,6 +52,7 @@ import {
 } from "../lib/cytoscape-layout";
 import { CompoundOverlays } from "./CompoundOverlays";
 import { MilestoneOverlays } from "./MilestoneOverlays";
+import { LinkTargetOverlays } from "./LinkTargetOverlays";
 import { defaultNodePosition, type NodePosition, type NodeSize } from "../lib/graph-layout";
 import { graphNodeDisplayLabel, isRenameableNodeType, nodeLabel } from "../lib/graph";
 import { slugify } from "../lib/node-content-validation";
@@ -65,6 +66,7 @@ import {
   shouldAllowKeyboardPan,
 } from "../lib/keyboard-pan";
 import { DEFAULT_MAX_PAN_SPEED, loadSettings } from "../lib/settings";
+import { applyLinkingModeClasses } from "../lib/linking-mode";
 
 cytoscape.use(fcose);
 
@@ -100,6 +102,14 @@ export interface GraphContextMenuEvent {
   onClose: () => void;
 }
 
+/** Click-to-connect session passed into the canvas graph. */
+export interface GraphLinkingMode {
+  originId: string;
+  originLabel: string;
+  targetIds: ReadonlySet<string>;
+  typePicking?: boolean;
+}
+
 interface RoadmapGraphProps {
   nodes: GraphViewNode[];
   links: GraphViewLink[];
@@ -118,6 +128,12 @@ interface RoadmapGraphProps {
   /** Returns true when React selection state was cleared. */
   onSelectionClear?: () => boolean;
   contextMenu?: (event: GraphContextMenuEvent) => ReactNode;
+  /** Active click-to-connect session, or null when not linking. */
+  linking?: GraphLinkingMode | null;
+  /** Called when a compatible target node is tapped. */
+  onLinkTargetPick?: (nodeId: string) => void;
+  /** Called when the user cancels click-to-connect. */
+  onLinkingCancel?: () => void;
   draggable?: boolean;
   nodePositions?: Record<string, NodePosition>;
   onNodePositionChange?: (positions: Record<string, NodePosition>) => void;
@@ -554,6 +570,9 @@ export function RoadmapGraph({
   onNodeDetailDismiss,
   onSelectionClear,
   contextMenu,
+  linking = null,
+  onLinkTargetPick,
+  onLinkingCancel,
   draggable = false,
   nodePositions,
   onNodePositionChange,
@@ -587,6 +606,9 @@ export function RoadmapGraph({
   const onEdgeClickRef = useRef(onEdgeClick);
   const onNodeDetailDismissRef = useRef(onNodeDetailDismiss);
   const onSelectionClearRef = useRef(onSelectionClear);
+  const onLinkTargetPickRef = useRef(onLinkTargetPick);
+  const onLinkingCancelRef = useRef(onLinkingCancel);
+  const linkingModeRef = useRef(linking);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onNodeResizeRef = useRef(onNodeResize);
   const onCompoundSizesMeasuredRef = useRef(onCompoundSizesMeasured);
@@ -921,6 +943,18 @@ export function RoadmapGraph({
   }, [onSelectionClear]);
 
   useEffect(() => {
+    onLinkTargetPickRef.current = onLinkTargetPick;
+  }, [onLinkTargetPick]);
+
+  useEffect(() => {
+    onLinkingCancelRef.current = onLinkingCancel;
+  }, [onLinkingCancel]);
+
+  useEffect(() => {
+    linkingModeRef.current = linking;
+  }, [linking]);
+
+  useEffect(() => {
     editableRef.current = editable;
   }, [editable]);
 
@@ -1251,6 +1285,16 @@ export function RoadmapGraph({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        const linkingMode = linkingModeRef.current;
+        if (linkingMode) {
+          if (linkingMode.typePicking) {
+            return;
+          }
+          event.preventDefault();
+          onLinkingCancelRef.current?.();
+          return;
+        }
+
         const cy = cyRef.current;
         if (
           cy &&
@@ -1423,6 +1467,7 @@ export function RoadmapGraph({
         isNodeRenderedVisible?: (nodeId: string) => boolean;
         getSubtreeNodeIds?: (rootId: string) => string[];
         getGraphEdgeIds?: () => string[];
+        graphNodeClasses?: (nodeId: string) => string[];
         getSelectedGraphNodeId?: () => string | null;
         selectEdge?: (linkId: string) => void;
       };
@@ -1489,6 +1534,11 @@ export function RoadmapGraph({
       };
       testWindow.__TEST__.tapGraphBackground = () => {
         closeContextMenu();
+        if (linkingModeRef.current) {
+          onLinkingCancelRef.current?.();
+          graphContainerRef.current?.focus({ preventScroll: true });
+          return;
+        }
         const cleared = onSelectionClearRef.current?.() ?? false;
         if (cleared) {
           cy.nodes().unselect();
@@ -1695,6 +1745,13 @@ export function RoadmapGraph({
         return collectSubtreeIds(model, rootId);
       };
       testWindow.__TEST__.getGraphEdgeIds = () => cy.edges().map((edge) => edge.id());
+      testWindow.__TEST__.graphNodeClasses = (nodeId: string) => {
+        const node = cy.getElementById(nodeId);
+        if (node.empty()) {
+          throw new Error(`Graph node not found: ${nodeId}`);
+        }
+        return node.classes();
+      };
       testWindow.__TEST__.getSelectedGraphNodeId = () => {
         const selected = cy.nodes(":selected");
         return selected.length > 0 ? selected[0].id() : null;
@@ -1746,6 +1803,17 @@ export function RoadmapGraph({
       return cleared;
     };
 
+    const consumeLinkingTap = (nodeId: string): boolean => {
+      const linkingMode = linkingModeRef.current;
+      if (!linkingMode) {
+        return false;
+      }
+      if (linkingMode.targetIds.has(nodeId)) {
+        onLinkTargetPickRef.current?.(nodeId);
+      }
+      return true;
+    };
+
     const selectCompoundLeaf = (childId: string) => {
       suppressLeafSelectionRef.current = false;
       closeContextMenu();
@@ -1759,6 +1827,9 @@ export function RoadmapGraph({
     };
 
     compoundLeafTapRef.current = (childId, wasSelected) => {
+      if (consumeLinkingTap(childId)) {
+        return;
+      }
       const now = Date.now();
       if (
         lastCompoundLeafTap.id === childId &&
@@ -1796,6 +1867,18 @@ export function RoadmapGraph({
       }
       const node = event.target;
       const nodeId = node.id();
+      if (linkingModeRef.current) {
+        if (
+          compoundGraphRef.current &&
+          node.data("kind") === "leaf" &&
+          compoundLeafClickHandledRef.current
+        ) {
+          compoundLeafClickHandledRef.current = false;
+          return;
+        }
+        consumeLinkingTap(nodeId);
+        return;
+      }
 
       if (compoundGraphRef.current && node.data("kind") === "leaf") {
         if (compoundLeafClickHandledRef.current) {
@@ -1889,6 +1972,9 @@ export function RoadmapGraph({
     cy.on("unselect", "node", bumpGraphSelection);
 
     cy.on("dbltap", "node", (event) => {
+      if (linkingModeRef.current) {
+        return;
+      }
       const node = event.target;
       if (compoundGraphRef.current && node.data("kind") === "leaf") {
         return;
@@ -1898,6 +1984,9 @@ export function RoadmapGraph({
 
     cy.on("tap", "edge", (event) => {
       closeContextMenu();
+      if (linkingModeRef.current) {
+        return;
+      }
       onEdgeClickRef.current?.(event.target.id());
     });
 
@@ -1907,6 +1996,10 @@ export function RoadmapGraph({
           return;
         }
         closeContextMenu();
+        if (linkingModeRef.current) {
+          onLinkingCancelRef.current?.();
+          return;
+        }
         clearGraphSelectionIfAllowed();
       }
     });
@@ -2074,6 +2167,8 @@ export function RoadmapGraph({
         delete testWindow.__TEST__.getLeafRenderedDiameterPx;
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
+        delete testWindow.__TEST__.getGraphEdgeIds;
+        delete testWindow.__TEST__.graphNodeClasses;
         delete testWindow.__TEST__.selectNode;
         delete testWindow.__TEST__.selectEdge;
         delete testWindow.__TEST__.doubleClickGraphNode;
@@ -2380,6 +2475,9 @@ export function RoadmapGraph({
     }
 
     const onLabelDblClick = (event: MouseEvent) => {
+      if (linkingModeRef.current) {
+        return;
+      }
       if (!editableRef.current || !onNodeRenameRef.current || compoundGraphRef.current) {
         return;
       }
@@ -2512,6 +2610,31 @@ export function RoadmapGraph({
     }
   }, [selectedLinkId, selectedNodeId, cyReady]);
 
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cyReady || !cy) {
+      return;
+    }
+
+    applyLinkingModeClasses(
+      cy,
+      linking
+        ? { originId: linking.originId, targetIds: linking.targetIds }
+        : null,
+    );
+
+    if (linking) {
+      const origin = cy.getElementById(linking.originId);
+      if (origin.nonempty()) {
+        cy.nodes().unselect();
+        origin.select();
+      }
+      graphContainerRef.current?.focus({ preventScroll: true });
+    }
+
+    setGraphSelectionRevision((revision) => revision + 1);
+  }, [cyReady, linking, nodes, links]);
+
   useLayoutEffect(() => {
     const cy = cyRef.current;
     const container = containerRef.current;
@@ -2589,6 +2712,31 @@ export function RoadmapGraph({
           visibleNodeIds={visibleNodeIds}
           revision={graphSelectionRevision}
         />
+      ) : null}
+      {linking && cyInstance && cyReady ? (
+        <LinkTargetOverlays
+          cy={cyInstance}
+          targetIds={linking.targetIds}
+          revision={graphSelectionRevision}
+        />
+      ) : null}
+      {linking ? (
+        <div className="graph-link-mode-chip" role="status" aria-live="polite">
+          <span className="graph-link-mode-chip-text">
+            Choose a node to link
+            {linking.originLabel ? (
+              <>
+                {" "}
+                <span className="graph-link-mode-chip-origin">
+                  from {linking.originLabel}
+                </span>
+              </>
+            ) : null}
+          </span>
+          <button type="button" onClick={() => onLinkingCancel?.()}>
+            Cancel
+          </button>
+        </div>
       ) : null}
       {nodes.length === 0 || allTypesHidden ? (
         <div className="graph-empty graph-empty-overlay" aria-live="polite">

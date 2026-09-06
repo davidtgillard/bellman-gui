@@ -61,7 +61,9 @@ export function MilestoneOverlays({
       {visuals.map((visual) => (
         <div
           key={visual.id}
-          className={`milestone-overlay${visual.selected ? " is-selected" : ""}`}
+          className={`milestone-overlay${visual.selected ? " is-selected" : ""}${
+            visual.linkingRole ? ` is-linking-${visual.linkingRole}` : ""
+          }`}
           style={
             {
               top: visual.screenY,
