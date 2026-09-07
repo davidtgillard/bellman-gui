@@ -153,13 +153,6 @@ export const CYTOSCAPE_BASE_STYLESHEET: StylesheetStyle[] = [
     },
   },
   {
-    selector: "edge[kind = 'promoted_from']",
-    style: {
-      "line-color": "#3b82f6",
-      "target-arrow-color": "#3b82f6",
-    },
-  },
-  {
     selector: "edge[kind = 'parent_of']",
     style: {
       "line-color": "#94a3b8",

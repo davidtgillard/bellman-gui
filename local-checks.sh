@@ -54,13 +54,23 @@ run_check() {
 # Checks — add, remove, or reorder entries below.
 # Each line is: run_check "display name" command [args...]
 # ---------------------------------------------------------------------------
+run_e2e_tests() {
+  # Cursor/agent sandboxes point PLAYWRIGHT_BROWSERS_PATH at a per-invocation
+  # temp directory, so a previous Chromium install does not carry over.
+  if [ -z "${CI:-}" ]; then
+    export PLAYWRIGHT_BROWSERS_PATH="${HOME}/.cache/ms-playwright"
+    npx playwright install chromium
+  fi
+  npm run test:e2e
+}
+
 run_check "run lint" npm run lint
 run_check "run type-check" npm run type-check
 run_check "run lint:throws-diff" npm run lint:throws-diff
 run_check "run test" npm run test
 run_check "cargo test" cargo test --manifest-path src-tauri/Cargo.toml
 run_check "cargo clippy" cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-run_check "run test e2e" npm run test:e2e
+run_check "run test e2e" run_e2e_tests
 run_check "audit" npm audit
 
 if [ -n "$failed_checks" ]; then

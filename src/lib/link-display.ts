@@ -5,7 +5,6 @@ export type LinkKind =
   | "parent_of"
   | "supports"
   | "targets"
-  | "promoted_from"
   | "other";
 
 export type LinkRelation = "FS" | "FF" | "SS" | "SF";
@@ -24,7 +23,6 @@ export const LINK_KIND_ORDER: LinkKind[] = [
   "parent_of",
   "supports",
   "targets",
-  "promoted_from",
   "other",
 ];
 
@@ -41,7 +39,6 @@ export const LINK_KIND_COLORS: Record<LinkKind, string> = {
   parent_of: "#94a3b8",
   supports: "#a855f7",
   targets: "#eab308",
-  promoted_from: "#3b82f6",
   other: "#64748b",
 };
 
@@ -66,7 +63,6 @@ const KIND_LABEL: Record<Exclude<LinkKind, "other">, string> = {
   parent_of: "Parent of",
   supports: "Supports",
   targets: "Targets",
-  promoted_from: "Promoted from",
 };
 
 /**
@@ -102,16 +98,6 @@ export function parseLinkType(linkType: string): ParsedLinkType {
       scoped: false,
     };
   }
-  if (linkType === "promoted_from") {
-    return {
-      linkType,
-      kind: "promoted_from",
-      relation: null,
-      hardness: null,
-      scoped: false,
-    };
-  }
-
   const precedes = parsePrecedesLinkType(linkType);
   if (precedes) {
     return precedes;

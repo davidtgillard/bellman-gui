@@ -384,16 +384,23 @@ export async function setGraphZoom(page: Page, zoom: number): Promise<void> {
  * @param page - Playwright page to wait on.
  */
 export async function waitForGraph(page: Page): Promise<void> {
-  await expect(page.locator(".graph-viewport canvas").first()).toBeVisible();
   await expect
-    .poll(async () => {
-      return page.evaluate(() => {
-        const bridge = (window as unknown as {
-          __TEST__?: { graphPan?: () => { x: number; y: number } };
-        }).__TEST__;
-        return typeof bridge?.graphPan === "function";
-      });
-    })
+    .poll(
+      async () => {
+        return page.evaluate(() => {
+          const bridge = (window as unknown as {
+            __TEST__?: { graphPan?: () => { x: number; y: number } };
+          }).__TEST__;
+          try {
+            const pan = bridge?.graphPan?.();
+            return Number.isFinite(pan?.x) && Number.isFinite(pan?.y);
+          } catch {
+            return false;
+          }
+        });
+      },
+      { timeout: 15_000 },
+    )
     .toBe(true);
 }
 
@@ -402,21 +409,29 @@ export async function waitForGraph(page: Page): Promise<void> {
  * @param page - Playwright page to interact with.
  */
 export async function dragGraphBackground(page: Page): Promise<void> {
+  await waitForGraph(page);
   const canvas = page.locator(".graph-viewport canvas").first();
   const box = await canvas.boundingBox();
   if (!box) {
     throw new Error("graph canvas is not visible");
   }
 
-  const startX = box.x + box.width * 0.08;
-  const startY = box.y + box.height * 0.08;
-  const endX = startX + 140;
+  // Top-right: the legend sits bottom-left, and fitted nodes cluster near center.
+  const startX = box.x + box.width * 0.92;
+  const startY = box.y + box.height * 0.12;
+  const endX = startX - 140;
   const endY = startY + 90;
 
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(endX, endY, { steps: 12 });
-  await page.mouse.up();
+  try {
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    // Cytoscape only starts a pan after a short drag threshold; a single
+    // teleport is ignored. Keep the step count low — long interpolations can
+    // hang Playwright when the test timeout is already nearly spent.
+    await page.mouse.move(endX, endY, { steps: 4 });
+  } finally {
+    await page.mouse.up();
+  }
 }
 
 /**

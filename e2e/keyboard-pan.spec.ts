@@ -4,6 +4,7 @@ import {
   reloadApp,
   setupPage,
   test,
+  waitForGraph,
   type Scenario,
 } from "./support/fixtures";
 
@@ -27,24 +28,10 @@ function graphScenario(settings?: Scenario["settings"]): Scenario {
   };
 }
 
-async function waitForGraphPan(page: import("@playwright/test").Page) {
-  await expect(page.locator(".graph-viewport canvas").first()).toBeVisible();
-  await expect
-    .poll(async () => {
-      return page.evaluate(() => {
-        const bridge = (window as unknown as {
-          __TEST__?: { graphPan?: () => { x: number; y: number } };
-        }).__TEST__;
-        return typeof bridge?.graphPan === "function";
-      });
-    })
-    .toBe(true);
-}
-
 test.describe("keyboard pan", () => {
   test("arrow keys pan the graph", async ({ page }) => {
     await setupPage(page, graphScenario());
-    await waitForGraphPan(page);
+    await waitForGraph(page);
 
     const before = await getGraphPan(page);
 
@@ -60,7 +47,7 @@ test.describe("keyboard pan", () => {
     page,
   }) => {
     await setupPage(page, graphScenario({ max_pan_speed: 1200 }));
-    await waitForGraphPan(page);
+    await waitForGraph(page);
 
     await page.keyboard.down("ArrowRight");
 
@@ -81,7 +68,7 @@ test.describe("keyboard pan", () => {
 
   test("max pan speed comes from global settings", async ({ page }) => {
     await setupPage(page, graphScenario({ max_pan_speed: 180 }));
-    await waitForGraphPan(page);
+    await waitForGraph(page);
     await page.locator(".graph-viewport").click();
 
     const slowBefore = await getGraphPan(page);
@@ -93,7 +80,7 @@ test.describe("keyboard pan", () => {
     expect(slowDistance).toBeGreaterThan(0);
 
     await reloadApp(page, graphScenario({ max_pan_speed: 1800 }));
-    await waitForGraphPan(page);
+    await waitForGraph(page);
     await expect
       .poll(async () => {
         const calls = await page.evaluate(() => {

@@ -9,6 +9,7 @@ import {
   setupPage,
   tapGraphNode,
   test,
+  waitForGraph,
   waitForUndoReady,
   type Scenario,
 } from "./support/fixtures";
@@ -148,16 +149,7 @@ test.describe("click-to-connect links", () => {
     await setupPage(page, createLinkScenario());
     await startLinkingFrom(page, INITIATIVE_A.id);
 
-    await expect
-      .poll(async () => {
-        return page.evaluate(() => {
-          const bridge = (window as unknown as {
-            __TEST__?: { graphPan?: () => { x: number; y: number } };
-          }).__TEST__;
-          return typeof bridge?.graphPan === "function";
-        });
-      })
-      .toBe(true);
+    await waitForGraph(page);
 
     const before = await getGraphPan(page);
     await page.keyboard.down("ArrowRight");

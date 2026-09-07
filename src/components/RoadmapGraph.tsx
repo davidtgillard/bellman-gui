@@ -1745,6 +1745,12 @@ export function RoadmapGraph({
         return collectSubtreeIds(model, rootId);
       };
       testWindow.__TEST__.getGraphEdgeIds = () => cy.edges().map((edge) => edge.id());
+      /**
+       * Returns Cytoscape classes on a graph node for e2e assertions.
+       * @param nodeId - Graph node id.
+       * @returns Class names currently on the node.
+       * @throws {Error} When no node with that id exists.
+       */
       testWindow.__TEST__.graphNodeClasses = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
         if (node.empty()) {

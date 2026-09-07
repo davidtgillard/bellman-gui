@@ -47,7 +47,10 @@ describe("parseLinkType", () => {
 
   it("maps named non-precedence types", () => {
     expect(parseLinkType("parent_of").kind).toBe("parent_of");
-    expect(parseLinkType("promoted_from").kind).toBe("promoted_from");
+  });
+
+  it("treats retired promoted_from as other", () => {
+    expect(parseLinkType("promoted_from").kind).toBe("other");
   });
 
   it("falls back to other for unknown ids", () => {
@@ -72,7 +75,6 @@ describe("link display labels", () => {
       "Discretionary start-to-finish",
     );
     expect(inspectTitle(parseLinkType("supports_wp"))).toBe("Supports");
-    expect(inspectTitle(parseLinkType("promoted_from"))).toBe("Promoted from");
     expect(inspectTitle(parseLinkType("custom_edge"))).toBe("Custom Edge");
   });
 
