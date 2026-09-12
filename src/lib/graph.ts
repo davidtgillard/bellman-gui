@@ -72,6 +72,10 @@ export interface CreateNodeRequest {
   name: string;
   project?: string;
   description?: string;
+  /** Parent work-package title or fully qualified id when nesting on create. */
+  parent?: string;
+  /** Optimistic / likely / pessimistic duration tokens. */
+  estimate?: [string, string, string] | null;
 }
 
 export interface CreateLinkRequest {

@@ -6,6 +6,8 @@ interface GraphContextMenuProps {
   nodeType?: string;
   linkId?: string;
   background?: boolean;
+  /** When true, restrict create actions to work packages. */
+  workPackageGraph?: boolean;
   showInnerGraph?: boolean;
   innerGraphAvailable?: boolean;
   showWorkPackageInnerGraph?: boolean;
@@ -13,6 +15,7 @@ interface GraphContextMenuProps {
   onShowInnerGraph?: (projectId: string) => void;
   onShowWorkPackageInnerGraph?: (workPackageId: string) => void;
   onCreateNode?: () => void;
+  onCreateChildWorkPackage?: (parentNodeId: string) => void;
   onCreateLink?: (nodeId: string) => void;
   canCreateLink?: boolean;
   onRemoveNode?: (nodeId: string, nodeType: string) => void;
@@ -29,6 +32,7 @@ export function GraphContextMenu({
   nodeType = "",
   linkId,
   background = false,
+  workPackageGraph = false,
   showInnerGraph = false,
   innerGraphAvailable = true,
   showWorkPackageInnerGraph = false,
@@ -36,6 +40,7 @@ export function GraphContextMenu({
   onShowInnerGraph,
   onShowWorkPackageInnerGraph,
   onCreateNode,
+  onCreateChildWorkPackage,
   onCreateLink,
   canCreateLink = true,
   onRemoveNode,
@@ -55,9 +60,26 @@ export function GraphContextMenu({
 
   if (editable && background && onCreateNode) {
     items.push({
-      label: "New node…",
+      label: workPackageGraph ? "New work package…" : "New node…",
       onClick: () => {
         onCreateNode();
+        onClose();
+      },
+    });
+  }
+
+  if (
+    editable &&
+    workPackageGraph &&
+    nodeId &&
+    nodeType === "work_package" &&
+    onCreateChildWorkPackage &&
+    !isOverflowNodeId(nodeId)
+  ) {
+    items.push({
+      label: "New child work package…",
+      onClick: () => {
+        onCreateChildWorkPackage(nodeId);
         onClose();
       },
     });

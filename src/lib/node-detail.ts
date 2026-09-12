@@ -12,6 +12,8 @@ export interface WorkPackageDetail {
   description: string;
   dependencies: string[];
   availableTitles: string[];
+  /** Optimistic / likely / pessimistic duration tokens when present. */
+  estimate: [string, string, string] | null;
 }
 
 export interface NodeDetail {
@@ -41,6 +43,7 @@ interface WorkPackageDetailDto {
   description: string;
   dependencies: string[];
   available_titles: string[];
+  estimate: [string, string, string] | null;
 }
 
 interface NodeDetailDto {
@@ -99,6 +102,7 @@ function fromDto(dto: NodeDetailDto): NodeDetail {
           description: dto.work_package.description,
           dependencies: dto.work_package.dependencies,
           availableTitles: dto.work_package.available_titles,
+          estimate: dto.work_package.estimate ?? null,
         }
       : null,
   };

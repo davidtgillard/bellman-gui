@@ -381,7 +381,45 @@
         const next = clone(states[index]);
         const kind = request.node_kind || "goal";
         const name = request.name || "new-node";
-        next.nodes.push({ id: `${kind}--${name}`, type: kind });
+        let id;
+        if (kind === "work_package") {
+          const project = request.project || "unknown";
+          id = `project/${project}/${name}`;
+          if (request.parent) {
+            const parentRaw = String(request.parent);
+            const parentId = parentRaw.includes("/")
+              ? parentRaw
+              : `project/${project}/${parentRaw}`;
+            const parentTitle = parentId.split("/").pop();
+            next.links.push({
+              id: `parent_of--${parentTitle}--${name}`,
+              link_type: "parent_of",
+              source: parentId,
+              target: id,
+            });
+          }
+          savedNodeDetails.set(id, {
+            node_id: id,
+            node_type: "work_package",
+            title: name,
+            markdown: `# ${name}\n\n${request.description || "TBD."}`,
+            source_path: `/roadmap/projects/${project}/work-packages.yaml`,
+            work_package: {
+              project,
+              title: name,
+              description: request.description || "TBD.",
+              dependencies: [],
+              available_titles: next.nodes
+                .filter((node) => node.type === "work_package")
+                .map((node) => node.id.split("/").pop())
+                .concat([name]),
+              estimate: request.estimate || null,
+            },
+          });
+        } else {
+          id = `${kind}--${name}`;
+        }
+        next.nodes.push({ id, type: kind });
         next.label = `create ${kind} ${name}`;
         pushState(next);
         return currentGraph();
@@ -592,6 +630,10 @@
               ...base.work_package,
               description: request.description,
               dependencies: request.dependencies,
+              estimate:
+                request.estimate === undefined
+                  ? base.work_package.estimate ?? null
+                  : request.estimate,
             },
           };
           savedNodeDetails.set(request.node_id, clone(updated));

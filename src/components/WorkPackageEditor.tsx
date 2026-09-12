@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import type { WorkPackageDetail } from "../lib/node-detail";
+import {
+  estimateToFieldValues,
+  sameEstimate,
+  validateWorkPackageEstimate,
+  type WorkPackageEstimate,
+} from "../lib/work-package-estimate";
+import { WorkPackageEstimateFields } from "./WorkPackageEstimateFields";
 
 interface WorkPackageEditorProps {
   workPackage: WorkPackageDetail;
   saving: boolean;
   backendError: string | null;
-  onSave: (input: { description: string; dependencies: string[] }) => void;
+  onSave: (input: {
+    description: string;
+    dependencies: string[];
+    estimate: WorkPackageEstimate | null;
+  }) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
 }
@@ -30,15 +41,42 @@ export function WorkPackageEditor({
   const [dependencies, setDependencies] = useState<string[]>(
     workPackage.dependencies,
   );
+  const [estimateValues, setEstimateValues] = useState(() =>
+    estimateToFieldValues(workPackage.estimate),
+  );
 
   const options = useMemo(
     () => workPackage.availableTitles.filter((title) => title !== workPackage.title),
     [workPackage.availableTitles, workPackage.title],
   );
 
+  const originalEstimateFields = useMemo(
+    () => estimateToFieldValues(workPackage.estimate),
+    [workPackage.estimate],
+  );
+
+  const estimateValidation = useMemo(
+    () => validateWorkPackageEstimate(estimateValues),
+    [estimateValues],
+  );
+
+  const estimateDirty = !sameEstimate(
+    [
+      estimateValues.optimistic,
+      estimateValues.likely,
+      estimateValues.pessimistic,
+    ],
+    [
+      originalEstimateFields.optimistic,
+      originalEstimateFields.likely,
+      originalEstimateFields.pessimistic,
+    ],
+  );
+
   const dirty =
     description !== workPackage.description ||
-    !sameMembers(dependencies, workPackage.dependencies);
+    !sameMembers(dependencies, workPackage.dependencies) ||
+    estimateDirty;
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -53,10 +91,14 @@ export function WorkPackageEditor({
   };
 
   const handleSave = () => {
-    if (saving || !dirty) {
+    if (saving || !dirty || !estimateValidation.ok) {
       return;
     }
-    onSave({ description: description.trim() || "TBD.", dependencies });
+    onSave({
+      description: description.trim() || "TBD.",
+      dependencies,
+      estimate: estimateValidation.estimate,
+    });
   };
 
   return (
@@ -69,6 +111,13 @@ export function WorkPackageEditor({
           rows={4}
         />
       </label>
+
+      <WorkPackageEstimateFields
+        values={estimateValues}
+        errors={estimateValidation.errors}
+        disabled={saving}
+        onChange={setEstimateValues}
+      />
 
       <fieldset className="wp-dependencies">
         <legend>Dependencies</legend>
@@ -104,7 +153,7 @@ export function WorkPackageEditor({
           type="button"
           className="node-editor-save"
           onClick={handleSave}
-          disabled={saving || !dirty}
+          disabled={saving || !dirty || !estimateValidation.ok}
         >
           {saving ? "Saving…" : "Save"}
         </button>

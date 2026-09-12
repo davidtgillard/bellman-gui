@@ -9,6 +9,7 @@ mod roadmap_edit;
 mod settings;
 mod undo;
 mod update_state;
+mod work_package_estimate;
 
 use bellman_cmd::{run_bellman, run_bellman_capture};
 use bellman_validate::{

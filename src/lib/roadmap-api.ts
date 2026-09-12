@@ -96,6 +96,8 @@ export interface UpdateWorkPackageRequest {
   node_id: string;
   description: string;
   dependencies: string[];
+  /** Optimistic / likely / pessimistic duration tokens, or null to clear. */
+  estimate?: [string, string, string] | null;
 }
 
 /**

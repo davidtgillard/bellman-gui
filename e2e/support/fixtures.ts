@@ -29,6 +29,7 @@ export interface NodeDetailFixture {
     description: string;
     dependencies: string[];
     available_titles: string[];
+    estimate?: [string, string, string] | null;
   } | null;
 }
 
@@ -473,6 +474,33 @@ export async function openNodeContextMenu(page: Page, nodeId: string): Promise<v
           return false;
         }
       }, nodeId);
+    })
+    .toBe(true);
+  await expect(page.locator(".graph-context-menu")).toBeVisible();
+}
+
+/**
+ * Opens the graph background context menu via the cytoscape test hook.
+ * @param page - Playwright page to interact with.
+ */
+export async function openBackgroundContextMenu(page: Page): Promise<void> {
+  await waitForGraph(page);
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const bridge = (window as unknown as {
+          __TEST__?: { openBackgroundContextMenu?: () => void };
+        }).__TEST__;
+        if (!bridge?.openBackgroundContextMenu) {
+          return false;
+        }
+        try {
+          bridge.openBackgroundContextMenu();
+          return true;
+        } catch {
+          return false;
+        }
+      });
     })
     .toBe(true);
   await expect(page.locator(".graph-context-menu")).toBeVisible();

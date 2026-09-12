@@ -94,7 +94,7 @@ export interface GraphContextMenuEvent {
     source?: string;
     target?: string;
     data?: { type?: string };
-    position?: unknown;
+    position?: NodePosition;
     background?: boolean;
     graphPosition?: NodePosition;
     nodePositions?: Record<string, NodePosition>;
@@ -1430,6 +1430,7 @@ export function RoadmapGraph({
         setGraphZoom?: (zoom: number) => void;
         graphUserPanningEnabled?: () => boolean;
         openNodeContextMenu?: (nodeId: string) => void;
+        openBackgroundContextMenu?: (position?: { x: number; y: number }) => void;
         selectNode?: (nodeId: string) => void;
         selectGraphNodeOnly?: (nodeId: string) => void;
         tapGraphNode?: (nodeId: string) => void;
@@ -1488,6 +1489,28 @@ export function RoadmapGraph({
           throw new Error(`Graph node not found: ${nodeId}`);
         }
         node.trigger("cxttap");
+      };
+      testWindow.__TEST__.openBackgroundContextMenu = (position) => {
+        const renderContextMenu = contextMenuRef.current;
+        if (!renderContextMenu) {
+          throw new Error("Context menu renderer is unavailable");
+        }
+        const graphPosition = position ?? { x: 0, y: 0 };
+        const menuEvent: GraphContextMenuEvent = {
+          data: {
+            id: "",
+            background: true,
+            graphPosition,
+            nodePositions: snapshotNodePositions(cy),
+          },
+          onClose: closeContextMenu,
+        };
+        const rect = container.getBoundingClientRect();
+        setContextMenuState({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          event: menuEvent,
+        });
       };
       testWindow.__TEST__.selectNode = (nodeId: string) => {
         const node = cy.getElementById(nodeId);
@@ -2043,6 +2066,7 @@ export function RoadmapGraph({
           id: node.id(),
           data: { type: String(node.data("type") ?? "") },
           position: node.position(),
+          nodePositions: snapshotNodePositions(cy),
         },
         onClose: closeContextMenu,
       };
@@ -2173,6 +2197,7 @@ export function RoadmapGraph({
         delete testWindow.__TEST__.getLeafRenderedDiameterPx;
         delete testWindow.__TEST__.graphUserPanningEnabled;
         delete testWindow.__TEST__.openNodeContextMenu;
+        delete testWindow.__TEST__.openBackgroundContextMenu;
         delete testWindow.__TEST__.getGraphEdgeIds;
         delete testWindow.__TEST__.graphNodeClasses;
         delete testWindow.__TEST__.selectNode;

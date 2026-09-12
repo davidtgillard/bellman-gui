@@ -11,6 +11,9 @@ use crate::graph::{
     all_link_artifact_paths, build_registry_index, load_registry_document, registry_path,
     resolve_link_file_for_endpoints, IndexedInstance, RegistryIndex, RoadmapGraphDto,
 };
+use crate::work_package_estimate::{
+    estimate_yaml_value, validate_work_package_estimate, WorkPackageEstimate,
+};
 
 const LINKS_TEMPLATE: &str = r#"{
   "description": "Directed links between issued object ids. Edit by hand or via fits CLI; validate with fits validate.",
@@ -297,6 +300,79 @@ fn scrub_dependency_refs(packages: &mut [YamlValue], title: &str) {
     }
 }
 
+fn is_kebab_case_title(title: &str) -> bool {
+    let mut chars = title.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_lowercase() || first.is_ascii_digit() => {}
+        _ => return false,
+    }
+    let mut prev_hyphen = false;
+    for ch in chars {
+        if ch == '-' {
+            if prev_hyphen {
+                return false;
+            }
+            prev_hyphen = true;
+            continue;
+        }
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            prev_hyphen = false;
+            continue;
+        }
+        return false;
+    }
+    !prev_hyphen
+}
+
+fn validate_work_package_title(title: &str) -> Result<(), String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() || !is_kebab_case_title(trimmed) {
+        return Err(
+            "work package title must be lowercase kebab-case (letters, digits, single hyphens)"
+                .to_string(),
+        );
+    }
+    if trimmed != title {
+        return Err(
+            "work package title must be lowercase kebab-case (letters, digits, single hyphens)"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn insert_work_package_entry(
+    work_packages: &mut Vec<YamlValue>,
+    entry: YamlValue,
+    parent_title: Option<&str>,
+    project: &str,
+) -> Result<(), String> {
+    let Some(parent_title) = parent_title.filter(|value| !value.is_empty()) else {
+        work_packages.push(entry);
+        return Ok(());
+    };
+
+    let parent_path = find_work_package_path(work_packages, parent_title).ok_or_else(|| {
+        format!("work package {parent_title:?} not found in project {project:?}")
+    })?;
+    let parent_entry = work_package_at_path(work_packages, &parent_path).ok_or_else(|| {
+        format!("work package {parent_title:?} not found in project {project:?}")
+    })?;
+    let parent_map = parent_entry
+        .as_mapping_mut()
+        .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
+
+    if parent_map.get(YamlValue::from("sub_packages")).is_none() {
+        parent_map.insert(YamlValue::from("sub_packages"), YamlValue::Sequence(vec![]));
+    }
+    let subs = parent_map
+        .get_mut(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| format!("sub_packages for {parent_title:?} must be a list"))?;
+    subs.push(entry);
+    Ok(())
+}
+
 fn dependency_yaml_values(dependencies: &[String]) -> Vec<YamlValue> {
     dependencies
         .iter()
@@ -315,7 +391,10 @@ pub fn append_work_package(
     project: &str,
     title: &str,
     description: &str,
+    estimate: Option<&WorkPackageEstimate>,
+    parent_title: Option<&str>,
 ) -> Result<(), String> {
+    validate_work_package_title(title)?;
     let index = read_registry_index(root)?;
     let project_id = format!("project/{project}");
     find_node(&index, &project_id)?;
@@ -359,8 +438,16 @@ pub fn append_work_package(
     let mut entry = Mapping::new();
     entry.insert(YamlValue::from("title"), YamlValue::from(title));
     entry.insert(YamlValue::from("description"), YamlValue::from(description));
+    if let Some(estimate) = estimate {
+        entry.insert(YamlValue::from("estimate"), estimate_yaml_value(estimate));
+    }
     entry.insert(YamlValue::from("dependencies"), YamlValue::Sequence(vec![]));
-    work_packages.push(YamlValue::Mapping(entry));
+    insert_work_package_entry(
+        work_packages,
+        YamlValue::Mapping(entry),
+        parent_title,
+        project,
+    )?;
 
     let formatted = serde_yaml::to_string(&document)
         .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
@@ -420,6 +507,7 @@ pub fn set_work_package_fields(
     title: &str,
     description: &str,
     dependencies: &[String],
+    estimate: Option<&WorkPackageEstimate>,
 ) -> Result<(), String> {
     let index = read_registry_index(root)?;
     let project_id = format!("project/{project}");
@@ -466,6 +554,14 @@ pub fn set_work_package_fields(
         YamlValue::from("dependencies"),
         YamlValue::Sequence(dependency_yaml_values(dependencies)),
     );
+    match estimate {
+        Some(estimate) => {
+            mapping.insert(YamlValue::from("estimate"), estimate_yaml_value(estimate));
+        }
+        None => {
+            mapping.remove(YamlValue::from("estimate"));
+        }
+    }
 
     let formatted = serde_yaml::to_string(&document)
         .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
@@ -1167,6 +1263,10 @@ pub struct CreateNodeRequest {
     pub name: String,
     pub project: Option<String>,
     pub description: Option<String>,
+    /// Parent work-package title or fully qualified id when nesting on create.
+    pub parent: Option<String>,
+    /// Optimistic / likely / pessimistic duration tokens.
+    pub estimate: Option<[String; 3]>,
 }
 
 pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<(), String> {
@@ -1239,7 +1339,25 @@ pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<
                 .description
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| "TBD.".to_string());
-            append_work_package(&root, &project, &request.name, &description)?;
+            let estimate = request
+                .estimate
+                .as_ref()
+                .map(validate_work_package_estimate)
+                .transpose()?;
+            let parent_title = request
+                .parent
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(|parent| parent.rsplit('/').next().unwrap_or(parent).to_string());
+            append_work_package(
+                &root,
+                &project,
+                &request.name,
+                &description,
+                estimate.as_ref(),
+                parent_title.as_deref(),
+            )?;
             run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
         }
     }
@@ -1358,6 +1476,8 @@ pub struct UpdateWorkPackageRequest {
     pub node_id: String,
     pub description: String,
     pub dependencies: Vec<String>,
+    /// Optimistic / likely / pessimistic duration tokens, or null/omitted to clear.
+    pub estimate: Option<[String; 3]>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1517,12 +1637,19 @@ pub async fn update_work_package(
     let (name, project) = node_delete_target(&request.node_id, "work_package")?;
     let project = project.ok_or_else(|| "project is required for work packages".to_string())?;
 
+    let estimate = request
+        .estimate
+        .as_ref()
+        .map(validate_work_package_estimate)
+        .transpose()?;
+
     set_work_package_fields(
         &root,
         &project,
         &name,
         &request.description,
         &request.dependencies,
+        estimate.as_ref(),
     )?;
     run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
 
@@ -1636,6 +1763,7 @@ mod tests {
             "wp-one",
             "New description.",
             &["wp-two".to_string()],
+            None,
         )
         .unwrap();
 
@@ -1645,6 +1773,125 @@ mod tests {
         assert!(raw.contains("wp-two"));
         assert!(raw.contains("predecessor:"));
         assert!(!raw.contains("after:"));
+    }
+
+    #[test]
+    fn set_work_package_fields_writes_and_clears_estimate() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Old.\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        set_work_package_fields(
+            root,
+            "billing",
+            "wp-one",
+            "Old.",
+            &[],
+            Some(&["1w".into(), "2w".into(), "4w".into()]),
+        )
+        .unwrap();
+        let with_estimate =
+            fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(with_estimate.contains("estimate:"));
+        assert!(with_estimate.contains("1w"));
+
+        set_work_package_fields(root, "billing", "wp-one", "Old.", &[], None).unwrap();
+        let cleared =
+            fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(!cleared.contains("estimate:"));
+    }
+
+    #[test]
+    fn append_work_package_nests_under_parent() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-parent\n    description: Parent.\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        append_work_package(root, "billing", "wp-child", "Child.", None, Some("wp-parent")).unwrap();
+
+        let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        let document: YamlValue = serde_yaml::from_str(&raw).unwrap();
+        let work_packages = document
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("work_packages")))
+            .and_then(YamlValue::as_sequence)
+            .unwrap();
+        assert_eq!(work_packages.len(), 1);
+        let parent = work_packages[0].as_mapping().unwrap();
+        assert_eq!(
+            parent
+                .get(YamlValue::from("title"))
+                .and_then(YamlValue::as_str),
+            Some("wp-parent")
+        );
+        let subs = parent
+            .get(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence)
+            .unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(
+            subs[0]
+                .as_mapping()
+                .and_then(|map| map.get(YamlValue::from("title")))
+                .and_then(YamlValue::as_str),
+            Some("wp-child")
+        );
+    }
+
+    #[test]
+    fn append_work_package_missing_parent_does_not_write() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-parent\n    description: Parent.\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        let result = append_work_package(
+            root,
+            "billing",
+            "wp-child",
+            "Child.",
+            None,
+            Some("ghost"),
+        );
+        assert!(result.is_err());
+        let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(!raw.contains("wp-child"));
+    }
+
+    #[test]
+    fn append_work_package_rejects_invalid_title() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages: []\n",
+        )
+        .unwrap();
+
+        let result = append_work_package(root, "billing", "Not Valid", "Child.", None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("kebab-case"));
+        let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(!raw.contains("Not Valid"));
     }
 
     #[test]
@@ -1659,7 +1906,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = set_work_package_fields(root, "billing", "ghost", "x", &[]);
+        let result = set_work_package_fields(root, "billing", "ghost", "x", &[], None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
     }

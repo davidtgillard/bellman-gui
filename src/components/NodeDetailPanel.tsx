@@ -22,7 +22,11 @@ interface NodeDetailPanelProps {
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveMarkdown: (markdown: string, options?: SaveMarkdownOptions) => void;
-  onSaveWorkPackage: (input: { description: string; dependencies: string[] }) => void;
+  onSaveWorkPackage: (input: {
+    description: string;
+    dependencies: string[];
+    estimate: [string, string, string] | null;
+  }) => void;
   onDirtyChange: (dirty: boolean) => void;
 }
 

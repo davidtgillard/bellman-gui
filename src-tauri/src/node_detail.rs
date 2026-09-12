@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::graph::{load_roadmap_graph, node_label};
+use crate::work_package_estimate::parse_estimate_yaml;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct WorkPackageDetailDto {
@@ -12,6 +13,7 @@ pub struct WorkPackageDetailDto {
     pub description: String,
     pub dependencies: Vec<String>,
     pub available_titles: Vec<String>,
+    pub estimate: Option<[String; 3]>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -206,6 +208,12 @@ fn work_package_detail(
         .map(|items| items.iter().filter_map(dependency_label).collect())
         .unwrap_or_default();
 
+    let estimate = parse_estimate_yaml(
+        entry
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("estimate"))),
+    );
+
     let mut markdown = format!("# {package_title}\n\n{description}");
     if !dependencies.is_empty() {
         markdown.push_str("\n\n## Dependencies\n\n");
@@ -226,6 +234,7 @@ fn work_package_detail(
             description,
             dependencies,
             available_titles,
+            estimate,
         },
     })
 }
@@ -387,6 +396,65 @@ mod tests {
         assert_eq!(wp.description, "Do the thing.");
         assert_eq!(wp.dependencies, vec!["wp-zero".to_string()]);
         assert!(wp.available_titles.contains(&"wp-one".to_string()));
+        assert!(wp.estimate.is_none());
+    }
+
+    #[test]
+    fn work_package_detail_includes_estimate() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    estimate: [1w, 2w, 4w]\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
+        let wp = detail.work_package.expect("work package detail");
+        assert_eq!(
+            wp.estimate,
+            Some(["1w".into(), "2w".into(), "4w".into()])
+        );
+    }
+
+    #[test]
+    fn work_package_detail_survives_malformed_estimate() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    estimate: [1w, 2w]\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
+        let wp = detail.work_package.expect("work package detail");
+        assert_eq!(wp.description, "Do the thing.");
+        assert!(wp.estimate.is_none());
+    }
+
+    #[test]
+    fn work_package_detail_keeps_invalid_estimate_tokens() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Do the thing.\n    estimate: [4w, 2w, 1w]\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
+        let wp = detail.work_package.expect("work package detail");
+        assert_eq!(
+            wp.estimate,
+            Some(["4w".into(), "2w".into(), "1w".into()])
+        );
     }
 
     #[test]

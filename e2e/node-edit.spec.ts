@@ -86,6 +86,7 @@ const WP_DETAIL: NodeDetailFixture = {
     description: "Rebuild invoicing.",
     dependencies: [],
     available_titles: ["wp-invoicing", "wp-pdf-export"],
+    estimate: null,
   },
 };
 
@@ -461,7 +462,7 @@ Intro.
     await selectNode(page, WP_INVOICING.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
-    const description = page.getByRole("textbox");
+    const description = page.getByRole("textbox", { name: "Description" });
     await description.fill("Rebuild invoicing with credits.");
 
     const saveButton = page.getByRole("button", { name: "Save" });

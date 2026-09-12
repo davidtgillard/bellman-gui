@@ -8,7 +8,10 @@ import { CreateLinkTypePopover } from "./components/CreateLinkTypePopover";
 import { CreateNodeDialog } from "./components/CreateNodeDialog";
 import { LinkDetailPanel } from "./components/LinkDetailPanel";
 import { NodeDetailPanel } from "./components/NodeDetailPanel";
-import { RoadmapGraph as RoadmapGraphView } from "./components/RoadmapGraph";
+import {
+  RoadmapGraph as RoadmapGraphView,
+  type GraphContextMenuEvent,
+} from "./components/RoadmapGraph";
 import { NodeTypeLegend } from "./components/NodeTypeLegend";
 import { useGraphAreaLayout } from "./hooks/useGraphAreaLayout";
 import {
@@ -130,6 +133,22 @@ function roadmapLayoutPersistable(root: string, editable: boolean): boolean {
   return editable && root !== "example";
 }
 
+function placementFromContextMenu(event: GraphContextMenuEvent): {
+  preferred: NodePosition;
+  existingPositions: Record<string, NodePosition>;
+} | null {
+  const preferred = event.data.graphPosition ?? event.data.position;
+  const existingPositions = event.data.nodePositions ?? {};
+  if (
+    preferred &&
+    Number.isFinite(preferred.x) &&
+    Number.isFinite(preferred.y)
+  ) {
+    return { preferred, existingPositions };
+  }
+  return null;
+}
+
 function readTestScenarioLayout(): WorkPackageLayout | undefined {
   const scenario = (
     window as typeof window & { __TEST_SCENARIO__?: { layout?: Parameters<typeof fromWorkPackageLayoutDto>[0] } }
@@ -169,6 +188,9 @@ function App() {
     preferred: NodePosition;
     existingPositions: Record<string, NodePosition>;
   } | null>(null);
+  const [pendingCreateParentId, setPendingCreateParentId] = useState<string | null>(
+    null,
+  );
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(() =>
     resolveVisibleTypes(
       exampleGraph.nodes.map((node) => node.type),
@@ -711,6 +733,7 @@ function App() {
       name: string;
       project?: string;
       description?: string;
+      estimate?: [string, string, string] | null;
     }) => {
       setSaving(true);
       setError(null);
@@ -721,15 +744,20 @@ function App() {
       const placementScope = inProjectGraph && projectId
         ? ({ kind: "project" as const, projectId })
         : ({ kind: "top_level" as const });
+      const lockedProjectName =
+        inProjectGraph && projectId ? nodeLabel(projectId) : undefined;
+      const parentId = inProjectGraph ? pendingCreateParentId : null;
 
       try {
         const previousNodes = nodes;
         const graph = await createNode({
           roadmap_root: roadmapRoot,
-          node_kind: input.nodeKind,
+          node_kind: inProjectGraph ? "work_package" : input.nodeKind,
           name: input.name,
-          project: input.project,
+          project: inProjectGraph ? lockedProjectName : input.project,
           description: input.description,
+          parent: parentId ?? undefined,
+          estimate: input.estimate ?? undefined,
         });
         const revealNodeId = findAddedNodeId(previousNodes, graph.nodes);
         let savedLayout: WorkPackageLayout | undefined;
@@ -755,6 +783,7 @@ function App() {
         });
         void refreshUndoState(graph.root, graph.editable);
         setPendingNodePlacement(null);
+        setPendingCreateParentId(null);
         setNodeDialogOpen(false);
       } catch (caught) {
         setError(String(caught));
@@ -766,6 +795,7 @@ function App() {
       applyGraph,
       graphViewStack,
       nodes,
+      pendingCreateParentId,
       pendingNodePlacement,
       refreshUndoState,
       roadmapRoot,
@@ -1657,19 +1687,7 @@ function App() {
   }, [clearGraphSelection, confirmDiscardIfDirty]);
 
   const renderContextMenu = useCallback(
-    (event: {
-      data: {
-        id: string;
-        source?: string;
-        target?: string;
-        data?: { type?: string };
-        position?: unknown;
-        background?: boolean;
-        graphPosition?: NodePosition;
-        nodePositions?: Record<string, NodePosition>;
-      };
-      onClose: () => void;
-    }) => {
+    (event: GraphContextMenuEvent) => {
       const isBackground = event.data.background === true;
 
       const isEdge =
@@ -1687,17 +1705,12 @@ function App() {
           <GraphContextMenu
             editable={editable}
             background
+            workPackageGraph={inWorkPackageGraph}
             onCreateNode={() => {
-              const graphPosition = event.data.graphPosition;
-              const nodePositions = event.data.nodePositions;
-              if (graphPosition && nodePositions) {
-                setPendingNodePlacement({
-                  preferred: graphPosition,
-                  existingPositions: nodePositions,
-                });
-              } else {
-                setPendingNodePlacement(null);
-              }
+              setPendingNodePlacement(placementFromContextMenu(event));
+              setPendingCreateParentId(
+                inWorkPackageGraph ? activeWorkPackageFocus : null,
+              );
               setNodeDialogOpen(true);
             }}
             onClose={event.onClose}
@@ -1739,6 +1752,7 @@ function App() {
           editable={editable}
           nodeId={nodeId}
           nodeType={nodeType}
+          workPackageGraph={inWorkPackageGraph}
           canCreateLink={canCreateLink}
           showInnerGraph={!inWorkPackageGraph && nodeType === "project"}
           innerGraphAvailable={
@@ -1755,6 +1769,11 @@ function App() {
             compoundView !== null &&
             workPackageHasChildren(nodeId, compoundView.childrenByParent)
           }
+          onCreateChildWorkPackage={(parentNodeId) => {
+            setPendingNodePlacement(placementFromContextMenu(event));
+            setPendingCreateParentId(parentNodeId);
+            setNodeDialogOpen(true);
+          }}
           onCreateLink={beginLinkingFromNode}
           onShowInnerGraph={handleShowInnerGraph}
           onShowWorkPackageInnerGraph={handleShowWorkPackageInnerGraph}
@@ -1866,7 +1885,11 @@ function App() {
   );
 
   const handleSaveWorkPackage = useCallback(
-    async (input: { description: string; dependencies: string[] }) => {
+    async (input: {
+      description: string;
+      dependencies: string[];
+      estimate: [string, string, string] | null;
+    }) => {
       if (!nodeDetail || !nodeDetail.workPackage) {
         return;
       }
@@ -1880,6 +1903,7 @@ function App() {
           node_id: nodeId,
           description: input.description,
           dependencies: input.dependencies,
+          estimate: input.estimate,
         });
         applyGraph(graph);
         const detail = await loadNodeDetail(graph.root, nodeId, nodeType);
@@ -2150,12 +2174,27 @@ function App() {
         ) : null}
       </div>
       <CreateNodeDialog
+        key={
+          nodeDialogOpen
+            ? `create-${pendingCreateParentId ?? "root"}-${inWorkPackageGraph ? "wp" : "top"}`
+            : "create-closed"
+        }
         open={nodeDialogOpen}
         nodes={nodes}
         saving={saving}
+        mode={inWorkPackageGraph ? "work_package" : "top_level"}
+        parentLabel={
+          pendingCreateParentId ? nodeLabel(pendingCreateParentId) : null
+        }
+        lockedProject={
+          inWorkPackageGraph && activeProjectId
+            ? nodeLabel(activeProjectId)
+            : null
+        }
         onClose={() => {
           setNodeDialogOpen(false);
           setPendingNodePlacement(null);
+          setPendingCreateParentId(null);
           setError(null);
         }}
         onCreate={(input) => void handleCreateNode(input)}
