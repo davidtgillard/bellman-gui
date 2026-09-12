@@ -1755,9 +1755,6 @@ function App() {
           workPackageGraph={inWorkPackageGraph}
           canCreateLink={canCreateLink}
           showInnerGraph={!inWorkPackageGraph && nodeType === "project"}
-          innerGraphAvailable={
-            innerGraphForProject(nodes, links, nodeId).nodes.length > 0
-          }
           showWorkPackageInnerGraph={
             inWorkPackageGraph &&
             nodeType === "work_package" &&

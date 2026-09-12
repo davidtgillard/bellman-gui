@@ -9,7 +9,6 @@ interface GraphContextMenuProps {
   /** When true, restrict create actions to work packages. */
   workPackageGraph?: boolean;
   showInnerGraph?: boolean;
-  innerGraphAvailable?: boolean;
   showWorkPackageInnerGraph?: boolean;
   workPackageInnerGraphAvailable?: boolean;
   onShowInnerGraph?: (projectId: string) => void;
@@ -34,7 +33,6 @@ export function GraphContextMenu({
   background = false,
   workPackageGraph = false,
   showInnerGraph = false,
-  innerGraphAvailable = true,
   showWorkPackageInnerGraph = false,
   workPackageInnerGraphAvailable = true,
   onShowInnerGraph,
@@ -107,10 +105,6 @@ export function GraphContextMenu({
   if (showInnerGraph && nodeId && onShowInnerGraph) {
     items.push({
       label: "Show work package graph",
-      disabled: !innerGraphAvailable,
-      title: innerGraphAvailable
-        ? undefined
-        : "This project has no work packages",
       onClick: () => {
         onShowInnerGraph(nodeId);
         onClose();

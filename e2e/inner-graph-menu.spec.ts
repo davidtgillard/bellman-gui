@@ -48,7 +48,7 @@ function innerGraphMenuScenario(): Scenario {
 }
 
 test.describe("inner graph context menu", () => {
-  test("disables work package graph for projects with no work packages", async ({
+  test("opens work package graph for projects with no work packages", async ({
     page,
   }) => {
     await setupPage(page, innerGraphMenuScenario());
@@ -56,10 +56,14 @@ test.describe("inner graph context menu", () => {
 
     const menuItem = page.getByRole("button", { name: "Show work package graph" });
     await expect(menuItem).toBeVisible();
-    await expect(menuItem).toBeDisabled();
-    await expect(menuItem).toHaveAttribute(
-      "title",
-      "This project has no work packages",
+    await expect(menuItem).toBeEnabled();
+    await menuItem.click();
+
+    await expect(page.locator(".graph-view-breadcrumb")).toContainText(
+      "empty work packages",
+    );
+    await expect(page.locator(".graph-empty")).toContainText(
+      "Project empty has no work packages to display.",
     );
   });
 
@@ -72,7 +76,6 @@ test.describe("inner graph context menu", () => {
     const menuItem = page.getByRole("button", { name: "Show work package graph" });
     await expect(menuItem).toBeVisible();
     await expect(menuItem).toBeEnabled();
-    await expect(menuItem).not.toHaveAttribute("title");
   });
 
   test("opens the work package graph when the menu item is enabled", async ({
