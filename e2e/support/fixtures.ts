@@ -23,14 +23,25 @@ export interface NodeDetailFixture {
   title: string;
   markdown: string;
   source_path: string | null;
-  work_package: {
-    project: string;
-    title: string;
-    description: string;
-    dependencies: string[];
-    available_titles: string[];
-    estimate?: [string, string, string] | null;
-  } | null;
+  work_package:
+    | {
+        role: "leaf";
+        project: string;
+        title: string;
+        description: string;
+        dependencies: string[];
+        available_titles: string[];
+        estimate: [string, string, string] | "unknown";
+      }
+    | {
+        role: "parent";
+        project: string;
+        title: string;
+        description: string;
+        dependencies: string[];
+        available_titles: string[];
+      }
+    | null;
 }
 
 export interface Scenario {

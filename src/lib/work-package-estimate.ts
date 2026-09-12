@@ -1,4 +1,14 @@
-export type WorkPackageEstimate = [string, string, string];
+export const None = "None" as const;
+// eslint-disable-next-line no-redeclare -- const and type share the None name by design
+export type None = typeof None;
+
+export type WorkPackageEstimateTriple = [string, string, string];
+
+/** A 3-point duration triple, or the explicit `None` sentinel (YAML/IPC `"unknown"`). */
+export type WorkPackageEstimate = WorkPackageEstimateTriple | None;
+
+/** Estimate as sent over Tauri IPC and stored in YAML. */
+export type WorkPackageEstimateWire = WorkPackageEstimateTriple | "unknown";
 
 export interface EstimateFieldValues {
   optimistic: string;
@@ -6,17 +16,17 @@ export interface EstimateFieldValues {
   pessimistic: string;
 }
 
-export interface EstimateValidationResult {
-  ok: boolean;
-  estimate: WorkPackageEstimate | null;
-  errors: {
-    optimistic?: string;
-    likely?: string;
-    pessimistic?: string;
-    order?: string;
-    units?: string;
-  };
+export interface EstimateFieldErrors {
+  optimistic?: string;
+  likely?: string;
+  pessimistic?: string;
+  order?: string;
+  units?: string;
 }
+
+export type EstimateValidationResult =
+  | { ok: true; estimate: WorkPackageEstimate; errors: EstimateFieldErrors }
+  | { ok: false; errors: EstimateFieldErrors };
 
 export interface ParsedDuration {
   amount: number;
@@ -93,7 +103,7 @@ export function durationFieldError(raw: string): string | null {
 
 /**
  * Validates an optimistic / likely / pessimistic estimate triple.
- * All empty omits the estimate; any filled requires all three and ordered amounts.
+ * All empty yields `None`; any filled requires all three and ordered amounts.
  * @param values - Field values from the form.
  * @returns Validation result with normalized estimate or field errors.
  */
@@ -106,10 +116,10 @@ export function validateWorkPackageEstimate(
   const anyFilled = Boolean(optimisticRaw || likelyRaw || pessimisticRaw);
 
   if (!anyFilled) {
-    return { ok: true, estimate: null, errors: {} };
+    return { ok: true, estimate: None, errors: {} };
   }
 
-  const errors: EstimateValidationResult["errors"] = {};
+  const errors: EstimateFieldErrors = {};
 
   const optimistic = parseDurationToken(optimisticRaw);
   const likely = parseDurationToken(likelyRaw);
@@ -162,7 +172,7 @@ export function validateWorkPackageEstimate(
   }
 
   if (Object.keys(errors).length > 0) {
-    return { ok: false, estimate: null, errors };
+    return { ok: false, errors };
   }
 
   return {
@@ -173,38 +183,60 @@ export function validateWorkPackageEstimate(
 }
 
 /**
- * Converts a stored estimate array into form field values.
- * @param estimate - Triple from the DTO, or null/undefined when absent.
- * @returns Empty strings when no estimate is present.
+ * Converts a stored estimate into form field values.
+ * @param estimate - Triple or `None`.
+ * @returns Empty strings when the estimate is `None`.
  */
 export function estimateToFieldValues(
-  estimate: WorkPackageEstimate | null | undefined,
+  estimate: WorkPackageEstimate,
 ): EstimateFieldValues {
-  if (!estimate) {
+  if (estimate === None) {
     return { optimistic: "", likely: "", pessimistic: "" };
   }
   return {
-    optimistic: estimate[0] ?? "",
-    likely: estimate[1] ?? "",
-    pessimistic: estimate[2] ?? "",
+    optimistic: estimate[0],
+    likely: estimate[1],
+    pessimistic: estimate[2],
   };
 }
 
 /**
- * Returns whether two estimate triples are equal (including both null).
+ * Returns whether two estimates are equal.
  * @param left - First estimate.
  * @param right - Second estimate.
  * @returns Whether both sides match.
  */
 export function sameEstimate(
-  left: WorkPackageEstimate | null | undefined,
-  right: WorkPackageEstimate | null | undefined,
+  left: WorkPackageEstimate,
+  right: WorkPackageEstimate,
 ): boolean {
-  if (!left && !right) {
+  if (left === None && right === None) {
     return true;
   }
-  if (!left || !right) {
+  if (left === None || right === None) {
     return false;
   }
   return left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
+}
+
+/**
+ * Maps a domain estimate to the IPC/YAML wire value.
+ * @param estimate - Triple or `None`.
+ * @returns Triple or `"unknown"`.
+ */
+export function toEstimateWire(
+  estimate: WorkPackageEstimate,
+): WorkPackageEstimateWire {
+  return estimate === None ? "unknown" : estimate;
+}
+
+/**
+ * Maps an IPC/YAML wire value to the domain estimate.
+ * @param value - Triple or `"unknown"`.
+ * @returns Triple or `None`.
+ */
+export function fromEstimateWire(
+  value: WorkPackageEstimateWire,
+): WorkPackageEstimate {
+  return value === "unknown" ? None : value;
 }

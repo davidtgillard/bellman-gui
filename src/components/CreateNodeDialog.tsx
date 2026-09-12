@@ -31,7 +31,7 @@ interface CreateNodeDialogProps {
     name: string;
     project?: string;
     description?: string;
-    estimate?: WorkPackageEstimate | null;
+    estimate?: WorkPackageEstimate;
   }) => void;
 }
 
@@ -77,11 +77,8 @@ export function CreateNodeDialog({
     : nameMissing;
 
   const estimateValidation = useMemo(
-    () =>
-      isWorkPackage
-        ? validateWorkPackageEstimate(estimateValues)
-        : { ok: true, estimate: null, errors: {} },
-    [estimateValues, isWorkPackage],
+    () => validateWorkPackageEstimate(estimateValues),
+    [estimateValues],
   );
 
   if (!open) {

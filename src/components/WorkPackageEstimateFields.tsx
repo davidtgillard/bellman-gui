@@ -1,8 +1,8 @@
-import type { EstimateFieldValues, EstimateValidationResult } from "../lib/work-package-estimate";
+import type { EstimateFieldValues, EstimateFieldErrors } from "../lib/work-package-estimate";
 
 interface WorkPackageEstimateFieldsProps {
   values: EstimateFieldValues;
-  errors: EstimateValidationResult["errors"];
+  errors: EstimateFieldErrors;
   disabled?: boolean;
   onChange: (values: EstimateFieldValues) => void;
 }
@@ -28,7 +28,9 @@ export function WorkPackageEstimateFields({
   return (
     <fieldset className="wp-estimate-fields">
       <legend>Estimate</legend>
-      <p className="field-hint">Optional. Use durations like 1w, 2d, or 8h.</p>
+      <p className="field-hint">
+        Leave blank for unknown, or use durations like 1w, 2d, or 8h.
+      </p>
       {summaryMessages.length > 0 ? (
         <div className="wp-estimate-summary" role="alert">
           {summaryMessages.map((message) => (

@@ -11,6 +11,10 @@ import {
   type RenameNodeResponseDto,
   type RoadmapGraphDto,
 } from "./graph";
+import {
+  toEstimateWire,
+  type WorkPackageEstimate,
+} from "./work-package-estimate";
 
 /**
  * Creates a roadmap node via the bellman sidecar and returns the updated graph.
@@ -18,7 +22,13 @@ import {
  * @returns Updated roadmap graph after creation.
  */
 export async function createNode(request: CreateNodeRequest) {
-  const dto = await invoke<RoadmapGraphDto>("create_node_command", { request });
+  const { estimate, ...rest } = request;
+  const dto = await invoke<RoadmapGraphDto>("create_node_command", {
+    request: {
+      ...rest,
+      ...(estimate !== undefined ? { estimate: toEstimateWire(estimate) } : {}),
+    },
+  });
   return fromRoadmapGraphDto(dto);
 }
 
@@ -96,8 +106,8 @@ export interface UpdateWorkPackageRequest {
   node_id: string;
   description: string;
   dependencies: string[];
-  /** Optimistic / likely / pessimistic duration tokens, or null to clear. */
-  estimate?: [string, string, string] | null;
+  /** Domain estimate for leaves; omitted for parents. */
+  estimate?: WorkPackageEstimate;
 }
 
 /**
@@ -107,6 +117,12 @@ export interface UpdateWorkPackageRequest {
  * @returns Updated roadmap graph after the edit and sync.
  */
 export async function updateWorkPackage(request: UpdateWorkPackageRequest) {
-  const dto = await invoke<RoadmapGraphDto>("update_work_package_command", { request });
+  const { estimate, ...rest } = request;
+  const dto = await invoke<RoadmapGraphDto>("update_work_package_command", {
+    request: {
+      ...rest,
+      ...(estimate !== undefined ? { estimate: toEstimateWire(estimate) } : {}),
+    },
+  });
   return fromRoadmapGraphDto(dto);
 }

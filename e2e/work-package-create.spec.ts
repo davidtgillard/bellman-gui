@@ -54,12 +54,28 @@ function createScenario(): Scenario {
         markdown: "# wp-invoicing\n\nParent package.",
         source_path: "/roadmap/projects/billing-redesign/work-packages.yaml",
         work_package: {
+          role: "parent",
           project: "billing-redesign",
           title: "wp-invoicing",
           description: "Parent package.",
           dependencies: [],
           available_titles: ["wp-invoicing", "wp-pdf-export"],
-          estimate: null,
+        },
+      },
+      [WP_LEAF.id]: {
+        node_id: WP_LEAF.id,
+        node_type: "work_package",
+        title: "wp-pdf-export",
+        markdown: "# wp-pdf-export\n\nLeaf package.",
+        source_path: "/roadmap/projects/billing-redesign/work-packages.yaml",
+        work_package: {
+          role: "leaf",
+          project: "billing-redesign",
+          title: "wp-pdf-export",
+          description: "Leaf package.",
+          dependencies: [],
+          available_titles: ["wp-invoicing", "wp-pdf-export"],
+          estimate: "unknown",
         },
       },
     },
@@ -100,8 +116,30 @@ test.describe("work package create", () => {
       node_kind: "work_package",
       name: "wp-root-new",
       project: "billing-redesign",
+      estimate: "unknown",
     });
     expect(call?.args?.request?.parent).toBeFalsy();
+  });
+
+  test("create sends unknown when estimate fields are left blank", async ({ page }) => {
+    await setupPage(page, createScenario());
+    await openWorkPackageGraph(page, PROJECT.id);
+    await openBackgroundContextMenu(page);
+    await page.getByRole("button", { name: "New work package…" }).click();
+
+    const dialog = page.locator(".edit-dialog");
+    await dialog.getByLabel("Name").fill("wp-blank-estimate");
+    await expect(dialog.getByLabel("Optimistic")).toHaveValue("");
+    await expect(dialog.getByLabel("Likely")).toHaveValue("");
+    await expect(dialog.getByLabel("Pessimistic")).toHaveValue("");
+    await expect(dialog.getByRole("button", { name: "Create work package" })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Create work package" }).click();
+
+    await expect
+      .poll(async () => countCalls(page, "create_node_command"))
+      .toBe(1);
+    const call = await lastCall(page, "create_node_command");
+    expect(call?.args?.request?.estimate).toBe("unknown");
   });
 
   test("parent menu creates a nested child work package", async ({ page }) => {
@@ -127,6 +165,7 @@ test.describe("work package create", () => {
       name: "wp-child-new",
       project: "billing-redesign",
       parent: WP_PARENT.id,
+      estimate: "unknown",
     });
   });
 
@@ -152,13 +191,14 @@ test.describe("work package create", () => {
     expect(call?.args?.request).toMatchObject({
       name: "wp-inner-child",
       parent: WP_PARENT.id,
+      estimate: "unknown",
     });
   });
 
   test("rejects invalid estimates and saves valid ones", async ({ page }) => {
     await setupPage(page, createScenario());
     await openWorkPackageGraph(page, PROJECT.id);
-    await selectNode(page, WP_PARENT.id);
+    await selectNode(page, WP_LEAF.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     await page.getByLabel("Optimistic").fill("4w");
@@ -178,6 +218,18 @@ test.describe("work package create", () => {
       .toBe(1);
     const call = await lastCall(page, "update_work_package_command");
     expect(call?.args?.request?.estimate).toEqual(["1w", "2w", "4w"]);
+  });
+
+  test("hides estimate fields when editing a parent work package", async ({ page }) => {
+    await setupPage(page, createScenario());
+    await openWorkPackageGraph(page, PROJECT.id);
+    await selectNode(page, WP_PARENT.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+
+    await expect(page.getByLabel("Description")).toBeVisible();
+    await expect(page.getByLabel("Optimistic")).toHaveCount(0);
+    await expect(page.getByLabel("Likely")).toHaveCount(0);
+    await expect(page.getByLabel("Pessimistic")).toHaveCount(0);
   });
 
   test("hides project and disables create for invalid name or estimates", async ({

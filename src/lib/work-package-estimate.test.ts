@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   durationFieldError,
   estimateToFieldValues,
+  fromEstimateWire,
+  None,
   parseDurationToken,
   sameEstimate,
+  toEstimateWire,
   validateWorkPackageEstimate,
 } from "./work-package-estimate";
 
@@ -39,14 +42,16 @@ describe("work-package-estimate", () => {
     expect(parseDurationToken("2.50d")).toBeNull();
   });
 
-  it("allows an empty estimate", () => {
+  it("maps an empty estimate to None", () => {
     const result = validateWorkPackageEstimate({
       optimistic: "",
       likely: "",
       pessimistic: "",
     });
     expect(result.ok).toBe(true);
-    expect(result.estimate).toBeNull();
+    if (result.ok) {
+      expect(result.estimate).toBe(None);
+    }
   });
 
   it("requires all three values when any is filled", () => {
@@ -123,11 +128,13 @@ describe("work-package-estimate", () => {
       pessimistic: "4w",
     });
     expect(result.ok).toBe(true);
-    expect(result.estimate).toEqual(["1w", "2w", "4w"]);
+    if (result.ok) {
+      expect(result.estimate).toEqual(["1w", "2w", "4w"]);
+    }
   });
 
   it("converts estimates to field values", () => {
-    expect(estimateToFieldValues(null)).toEqual({
+    expect(estimateToFieldValues(None)).toEqual({
       optimistic: "",
       likely: "",
       pessimistic: "",
@@ -140,8 +147,15 @@ describe("work-package-estimate", () => {
   });
 
   it("compares estimate triples", () => {
-    expect(sameEstimate(null, null)).toBe(true);
+    expect(sameEstimate(None, None)).toBe(true);
     expect(sameEstimate(["1w", "2w", "4w"], ["1w", "2w", "4w"])).toBe(true);
-    expect(sameEstimate(["1w", "2w", "4w"], null)).toBe(false);
+    expect(sameEstimate(["1w", "2w", "4w"], None)).toBe(false);
+  });
+
+  it("round-trips None through the IPC wire sentinel", () => {
+    expect(toEstimateWire(None)).toBe("unknown");
+    expect(fromEstimateWire("unknown")).toBe(None);
+    expect(toEstimateWire(["1w", "2w", "4w"])).toEqual(["1w", "2w", "4w"]);
+    expect(fromEstimateWire(["1w", "2w", "4w"])).toEqual(["1w", "2w", "4w"]);
   });
 });

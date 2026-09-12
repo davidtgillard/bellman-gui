@@ -81,12 +81,12 @@ const WP_DETAIL: NodeDetailFixture = {
   markdown: "# wp-invoicing\n\nRebuild invoicing.",
   source_path: "/roadmap/projects/billing-redesign/work-packages.yaml",
   work_package: {
+    role: "parent",
     project: "billing-redesign",
     title: "wp-invoicing",
     description: "Rebuild invoicing.",
     dependencies: [],
     available_titles: ["wp-invoicing", "wp-pdf-export"],
-    estimate: null,
   },
 };
 

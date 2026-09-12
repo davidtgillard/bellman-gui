@@ -5,16 +5,30 @@ import reduceChurn from "../fixtures/example-roadmap/goals/reduce-churn.md?raw";
 import { invoke } from "@tauri-apps/api/core";
 import { fromRoadmapGraphDto, type RoadmapGraph, type RoadmapGraphDto } from "./graph";
 import { nodeLabel } from "./graph";
+import {
+  fromEstimateWire,
+  type WorkPackageEstimate,
+  type WorkPackageEstimateWire,
+} from "./work-package-estimate";
 
-export interface WorkPackageDetail {
+interface WorkPackageBase {
   project: string;
   title: string;
   description: string;
   dependencies: string[];
   availableTitles: string[];
-  /** Optimistic / likely / pessimistic duration tokens when present. */
-  estimate: [string, string, string] | null;
 }
+
+export type LeafWorkPackageDetail = WorkPackageBase & {
+  role: "leaf";
+  estimate: WorkPackageEstimate;
+};
+
+export type ParentWorkPackageDetail = WorkPackageBase & {
+  role: "parent";
+};
+
+export type WorkPackageDetail = LeafWorkPackageDetail | ParentWorkPackageDetail;
 
 export interface NodeDetail {
   nodeId: string;
@@ -37,14 +51,22 @@ export interface SaveNodeMarkdownResult {
   syncSkipped: boolean;
 }
 
-interface WorkPackageDetailDto {
+interface WorkPackageBaseDto {
   project: string;
   title: string;
   description: string;
   dependencies: string[];
   available_titles: string[];
-  estimate: [string, string, string] | null;
 }
+
+export type WorkPackageDetailDto =
+  | (WorkPackageBaseDto & {
+      role: "leaf";
+      estimate: WorkPackageEstimateWire;
+    })
+  | (WorkPackageBaseDto & {
+      role: "parent";
+    });
 
 interface NodeDetailDto {
   node_id: string;
@@ -88,6 +110,28 @@ const EXAMPLE_NODE_MARKDOWN: Record<string, string> = {
   "goal/reduce-churn": reduceChurn,
 };
 
+/**
+ * Maps a work-package DTO onto the domain leaf/parent split.
+ * Parent DTOs never carry an estimate; leaf `"unknown"` becomes `None`.
+ * @param dto - Wire work-package payload from Tauri.
+ * @returns Domain work-package detail.
+ */
+export function workPackageDetailFromDto(
+  dto: WorkPackageDetailDto,
+): WorkPackageDetail {
+  const base: WorkPackageBase = {
+    project: dto.project,
+    title: dto.title,
+    description: dto.description,
+    dependencies: dto.dependencies,
+    availableTitles: dto.available_titles,
+  };
+  if (dto.role === "parent") {
+    return { ...base, role: "parent" };
+  }
+  return { ...base, role: "leaf", estimate: fromEstimateWire(dto.estimate) };
+}
+
 function fromDto(dto: NodeDetailDto): NodeDetail {
   return {
     nodeId: dto.node_id,
@@ -96,14 +140,7 @@ function fromDto(dto: NodeDetailDto): NodeDetail {
     markdown: dto.markdown,
     sourcePath: dto.source_path,
     workPackage: dto.work_package
-      ? {
-          project: dto.work_package.project,
-          title: dto.work_package.title,
-          description: dto.work_package.description,
-          dependencies: dto.work_package.dependencies,
-          availableTitles: dto.work_package.available_titles,
-          estimate: dto.work_package.estimate ?? null,
-        }
+      ? workPackageDetailFromDto(dto.work_package)
       : null,
   };
 }

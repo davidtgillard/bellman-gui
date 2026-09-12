@@ -1,3 +1,5 @@
+import type { WorkPackageEstimate } from "./work-package-estimate";
+
 export interface RegistryInstance {
   guid: string;
   name: string;
@@ -74,8 +76,8 @@ export interface CreateNodeRequest {
   description?: string;
   /** Parent work-package title or fully qualified id when nesting on create. */
   parent?: string;
-  /** Optimistic / likely / pessimistic duration tokens. */
-  estimate?: [string, string, string] | null;
+  /** Domain estimate; converted to `"unknown"` or a triple at the IPC boundary. */
+  estimate?: WorkPackageEstimate;
 }
 
 export interface CreateLinkRequest {

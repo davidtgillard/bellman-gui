@@ -2,21 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 import type { WorkPackageDetail } from "../lib/node-detail";
 import {
   estimateToFieldValues,
-  sameEstimate,
   validateWorkPackageEstimate,
   type WorkPackageEstimate,
 } from "../lib/work-package-estimate";
 import { WorkPackageEstimateFields } from "./WorkPackageEstimateFields";
 
+export type SaveWorkPackageInput =
+  | {
+      description: string;
+      dependencies: string[];
+      estimate: WorkPackageEstimate;
+    }
+  | {
+      description: string;
+      dependencies: string[];
+      estimate?: never;
+    };
+
 interface WorkPackageEditorProps {
   workPackage: WorkPackageDetail;
   saving: boolean;
   backendError: string | null;
-  onSave: (input: {
-    description: string;
-    dependencies: string[];
-    estimate: WorkPackageEstimate | null;
-  }) => void;
+  onSave: (input: SaveWorkPackageInput) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
 }
@@ -29,6 +36,8 @@ function sameMembers(left: string[], right: string[]): boolean {
   return right.every((item) => set.has(item));
 }
 
+const EMPTY_ESTIMATE = { optimistic: "", likely: "", pessimistic: "" };
+
 export function WorkPackageEditor({
   workPackage,
   saving,
@@ -37,12 +46,15 @@ export function WorkPackageEditor({
   onCancel,
   onDirtyChange,
 }: WorkPackageEditorProps) {
+  const isLeaf = workPackage.role === "leaf";
   const [description, setDescription] = useState(workPackage.description);
   const [dependencies, setDependencies] = useState<string[]>(
     workPackage.dependencies,
   );
   const [estimateValues, setEstimateValues] = useState(() =>
-    estimateToFieldValues(workPackage.estimate),
+    workPackage.role === "leaf"
+      ? estimateToFieldValues(workPackage.estimate)
+      : EMPTY_ESTIMATE,
   );
 
   const options = useMemo(
@@ -51,8 +63,11 @@ export function WorkPackageEditor({
   );
 
   const originalEstimateFields = useMemo(
-    () => estimateToFieldValues(workPackage.estimate),
-    [workPackage.estimate],
+    () =>
+      workPackage.role === "leaf"
+        ? estimateToFieldValues(workPackage.estimate)
+        : EMPTY_ESTIMATE,
+    [workPackage],
   );
 
   const estimateValidation = useMemo(
@@ -60,18 +75,11 @@ export function WorkPackageEditor({
     [estimateValues],
   );
 
-  const estimateDirty = !sameEstimate(
-    [
-      estimateValues.optimistic,
-      estimateValues.likely,
-      estimateValues.pessimistic,
-    ],
-    [
-      originalEstimateFields.optimistic,
-      originalEstimateFields.likely,
-      originalEstimateFields.pessimistic,
-    ],
-  );
+  const estimateDirty =
+    isLeaf &&
+    (estimateValues.optimistic !== originalEstimateFields.optimistic ||
+      estimateValues.likely !== originalEstimateFields.likely ||
+      estimateValues.pessimistic !== originalEstimateFields.pessimistic);
 
   const dirty =
     description !== workPackage.description ||
@@ -91,15 +99,28 @@ export function WorkPackageEditor({
   };
 
   const handleSave = () => {
-    if (saving || !dirty || !estimateValidation.ok) {
+    if (saving || !dirty) {
+      return;
+    }
+    if (isLeaf) {
+      if (!estimateValidation.ok) {
+        return;
+      }
+      onSave({
+        description: description.trim() || "TBD.",
+        dependencies,
+        estimate: estimateValidation.estimate,
+      });
       return;
     }
     onSave({
       description: description.trim() || "TBD.",
       dependencies,
-      estimate: estimateValidation.estimate,
     });
   };
+
+  const saveDisabled =
+    saving || !dirty || (isLeaf && !estimateValidation.ok);
 
   return (
     <div className="work-package-editor">
@@ -112,12 +133,14 @@ export function WorkPackageEditor({
         />
       </label>
 
-      <WorkPackageEstimateFields
-        values={estimateValues}
-        errors={estimateValidation.errors}
-        disabled={saving}
-        onChange={setEstimateValues}
-      />
+      {isLeaf ? (
+        <WorkPackageEstimateFields
+          values={estimateValues}
+          errors={estimateValidation.errors}
+          disabled={saving}
+          onChange={setEstimateValues}
+        />
+      ) : null}
 
       <fieldset className="wp-dependencies">
         <legend>Dependencies</legend>
@@ -153,7 +176,7 @@ export function WorkPackageEditor({
           type="button"
           className="node-editor-save"
           onClick={handleSave}
-          disabled={saving || !dirty || !estimateValidation.ok}
+          disabled={saveDisabled}
         >
           {saving ? "Saving…" : "Save"}
         </button>

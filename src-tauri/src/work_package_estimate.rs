@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 
 #[derive(Debug)]
@@ -5,6 +6,21 @@ struct ParsedDuration {
     amount: f64,
     unit: char,
     normalized: String,
+}
+
+/// YAML/IPC sentinel for a missing numeric estimate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnknownSentinel {
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+/// Estimate payload from the UI: a duration triple or the explicit `unknown` sentinel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EstimateInput {
+    Triple([String; 3]),
+    Unknown(UnknownSentinel),
 }
 
 /// Parses a duration token such as `1w`, `2.5d`, or `8h`.
@@ -105,10 +121,27 @@ pub fn validate_work_package_estimate(
     Ok([optimistic.normalized, likely.normalized, pessimistic.normalized])
 }
 
+/// Resolves a UI estimate payload into a validated triple, or `None` for unknown.
+/// Absent / null inputs are treated as unknown.
+pub fn resolve_estimate_input(
+    input: Option<&EstimateInput>,
+) -> Result<Option<WorkPackageEstimate>, String> {
+    match input {
+        None | Some(EstimateInput::Unknown(UnknownSentinel::Unknown)) => Ok(None),
+        Some(EstimateInput::Triple(tokens)) => {
+            Ok(Some(validate_work_package_estimate(tokens)?))
+        }
+    }
+}
+
 /// Reads an optional estimate sequence from YAML without validating durations.
-/// Missing, empty, wrong-length, or non-string entries become `None`.
+/// Missing, any string (including `unknown`), empty, wrong-length, or non-string
+/// entries become `None`.
 pub fn parse_estimate_yaml(value: Option<&YamlValue>) -> Option<WorkPackageEstimate> {
     let value = value?;
+    if value.as_str().is_some() {
+        return None;
+    }
     let items = value.as_sequence()?;
     if items.len() != 3 {
         return None;
@@ -121,7 +154,15 @@ pub fn parse_estimate_yaml(value: Option<&YamlValue>) -> Option<WorkPackageEstim
     Some(tokens)
 }
 
-/// Builds a YAML sequence for a validated estimate triple.
+/// Maps a YAML estimate onto the IPC wire value (triple or `"unknown"`).
+pub fn estimate_wire_from_yaml(value: Option<&YamlValue>) -> EstimateInput {
+    match parse_estimate_yaml(value) {
+        Some(tokens) => EstimateInput::Triple(tokens),
+        None => EstimateInput::Unknown(UnknownSentinel::Unknown),
+    }
+}
+
+/// Builds a YAML value for a validated estimate triple.
 pub fn estimate_yaml_value(estimate: &WorkPackageEstimate) -> YamlValue {
     YamlValue::Sequence(
         estimate
@@ -129,6 +170,14 @@ pub fn estimate_yaml_value(estimate: &WorkPackageEstimate) -> YamlValue {
             .map(|token| YamlValue::from(token.as_str()))
             .collect(),
     )
+}
+
+/// Builds a YAML estimate: a duration triple, or the explicit `unknown` sentinel.
+pub fn estimate_yaml_value_or_unknown(estimate: Option<&WorkPackageEstimate>) -> YamlValue {
+    match estimate {
+        Some(tokens) => estimate_yaml_value(tokens),
+        None => YamlValue::from("unknown"),
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +238,10 @@ mod tests {
     fn parse_estimate_yaml_is_lenient() {
         assert_eq!(parse_estimate_yaml(None), None);
         assert_eq!(
+            parse_estimate_yaml(Some(&YamlValue::from("unknown"))),
+            None
+        );
+        assert_eq!(
             parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
                 YamlValue::from("4w"),
                 YamlValue::from("2w"),
@@ -206,6 +259,52 @@ mod tests {
         assert_eq!(
             parse_estimate_yaml(Some(&YamlValue::from("1w"))),
             None
+        );
+    }
+
+    #[test]
+    fn resolve_estimate_input_accepts_unknown_and_triples() {
+        assert_eq!(resolve_estimate_input(None).unwrap(), None);
+        assert_eq!(
+            resolve_estimate_input(Some(&EstimateInput::Unknown(
+                UnknownSentinel::Unknown
+            )))
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_estimate_input(Some(&EstimateInput::Triple([
+                "1w".into(),
+                "2w".into(),
+                "4w".into(),
+            ])))
+            .unwrap(),
+            Some(["1w".into(), "2w".into(), "4w".into()])
+        );
+    }
+
+    #[test]
+    fn estimate_input_rejects_non_unknown_string_at_deserialize() {
+        assert!(serde_json::from_str::<EstimateInput>(r#""maybe""#).is_err());
+        assert_eq!(
+            serde_json::from_str::<EstimateInput>(r#""unknown""#).unwrap(),
+            EstimateInput::Unknown(UnknownSentinel::Unknown)
+        );
+    }
+
+    #[test]
+    fn estimate_yaml_value_or_unknown_writes_sentinel() {
+        assert_eq!(
+            estimate_yaml_value_or_unknown(None),
+            YamlValue::from("unknown")
+        );
+        assert_eq!(
+            estimate_yaml_value_or_unknown(Some(&["1w".into(), "2w".into(), "4w".into()])),
+            YamlValue::Sequence(vec![
+                YamlValue::from("1w"),
+                YamlValue::from("2w"),
+                YamlValue::from("4w"),
+            ])
         );
     }
 }

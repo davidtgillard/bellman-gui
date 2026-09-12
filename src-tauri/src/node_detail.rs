@@ -4,16 +4,66 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::graph::{load_roadmap_graph, node_label};
-use crate::work_package_estimate::parse_estimate_yaml;
+use crate::work_package_estimate::{estimate_wire_from_yaml, EstimateInput};
 
-#[derive(Debug, Serialize, Clone)]
-pub struct WorkPackageDetailDto {
-    pub project: String,
-    pub title: String,
-    pub description: String,
-    pub dependencies: Vec<String>,
-    pub available_titles: Vec<String>,
-    pub estimate: Option<[String; 3]>,
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(tag = "role", rename_all = "snake_case")]
+pub enum WorkPackageDetailDto {
+    Leaf {
+        project: String,
+        title: String,
+        description: String,
+        dependencies: Vec<String>,
+        available_titles: Vec<String>,
+        estimate: EstimateInput,
+    },
+    Parent {
+        project: String,
+        title: String,
+        description: String,
+        dependencies: Vec<String>,
+        available_titles: Vec<String>,
+    },
+}
+
+#[cfg(test)]
+impl WorkPackageDetailDto {
+    fn project(&self) -> &str {
+        match self {
+            Self::Leaf { project, .. } | Self::Parent { project, .. } => project,
+        }
+    }
+
+    fn title(&self) -> &str {
+        match self {
+            Self::Leaf { title, .. } | Self::Parent { title, .. } => title,
+        }
+    }
+
+    fn description(&self) -> &str {
+        match self {
+            Self::Leaf { description, .. } | Self::Parent { description, .. } => description,
+        }
+    }
+
+    fn dependencies(&self) -> &[String] {
+        match self {
+            Self::Leaf { dependencies, .. } | Self::Parent { dependencies, .. } => {
+                dependencies
+            }
+        }
+    }
+
+    fn available_titles(&self) -> &[String] {
+        match self {
+            Self::Leaf {
+                available_titles, ..
+            }
+            | Self::Parent {
+                available_titles, ..
+            } => available_titles,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -152,6 +202,14 @@ fn find_work_package<'a>(packages: &'a [YamlValue], title: &str) -> Option<&'a Y
     None
 }
 
+fn work_package_has_children(entry: &YamlValue) -> bool {
+    entry
+        .as_mapping()
+        .and_then(|map| map.get(YamlValue::from("sub_packages")))
+        .and_then(YamlValue::as_sequence)
+        .is_some_and(|subs| !subs.is_empty())
+}
+
 fn work_package_detail(
     root: &Path,
     project: &str,
@@ -208,7 +266,7 @@ fn work_package_detail(
         .map(|items| items.iter().filter_map(dependency_label).collect())
         .unwrap_or_default();
 
-    let estimate = parse_estimate_yaml(
+    let estimate = estimate_wire_from_yaml(
         entry
             .as_mapping()
             .and_then(|map| map.get(YamlValue::from("estimate"))),
@@ -225,17 +283,29 @@ fn work_package_detail(
         markdown.push_str(&rendered);
     }
 
-    Ok(WorkPackageParsed {
-        markdown,
-        path,
-        detail: WorkPackageDetailDto {
+    let detail = if work_package_has_children(entry) {
+        WorkPackageDetailDto::Parent {
+            project: project.to_string(),
+            title: package_title.to_string(),
+            description,
+            dependencies,
+            available_titles,
+        }
+    } else {
+        WorkPackageDetailDto::Leaf {
             project: project.to_string(),
             title: package_title.to_string(),
             description,
             dependencies,
             available_titles,
             estimate,
-        },
+        }
+    };
+
+    Ok(WorkPackageParsed {
+        markdown,
+        path,
+        detail,
     })
 }
 
@@ -319,6 +389,7 @@ pub fn load_node_detail_command(request: LoadNodeDetailRequest) -> Result<NodeDe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::work_package_estimate::UnknownSentinel;
     use tempfile::TempDir;
 
     fn write_registry(root: &Path) {
@@ -391,12 +462,18 @@ mod tests {
 
         let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
         let wp = detail.work_package.expect("work package detail");
-        assert_eq!(wp.project, "billing");
-        assert_eq!(wp.title, "wp-one");
-        assert_eq!(wp.description, "Do the thing.");
-        assert_eq!(wp.dependencies, vec!["wp-zero".to_string()]);
-        assert!(wp.available_titles.contains(&"wp-one".to_string()));
-        assert!(wp.estimate.is_none());
+        assert_eq!(wp.project(), "billing");
+        assert_eq!(wp.title(), "wp-one");
+        assert_eq!(wp.description(), "Do the thing.");
+        assert_eq!(wp.dependencies(), ["wp-zero".to_string()]);
+        assert!(wp.available_titles().contains(&"wp-one".to_string()));
+        assert!(matches!(
+            wp,
+            WorkPackageDetailDto::Leaf {
+                estimate: EstimateInput::Unknown(UnknownSentinel::Unknown),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -413,10 +490,13 @@ mod tests {
 
         let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
         let wp = detail.work_package.expect("work package detail");
-        assert_eq!(
-            wp.estimate,
-            Some(["1w".into(), "2w".into(), "4w".into()])
-        );
+        assert!(matches!(
+            wp,
+            WorkPackageDetailDto::Leaf {
+                estimate: EstimateInput::Triple(ref tokens),
+                ..
+            } if tokens == &["1w".to_string(), "2w".to_string(), "4w".to_string()]
+        ));
     }
 
     #[test]
@@ -433,8 +513,14 @@ mod tests {
 
         let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
         let wp = detail.work_package.expect("work package detail");
-        assert_eq!(wp.description, "Do the thing.");
-        assert!(wp.estimate.is_none());
+        assert_eq!(wp.description(), "Do the thing.");
+        assert!(matches!(
+            wp,
+            WorkPackageDetailDto::Leaf {
+                estimate: EstimateInput::Unknown(UnknownSentinel::Unknown),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -451,10 +537,33 @@ mod tests {
 
         let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
         let wp = detail.work_package.expect("work package detail");
-        assert_eq!(
-            wp.estimate,
-            Some(["4w".into(), "2w".into(), "1w".into()])
-        );
+        assert!(matches!(
+            wp,
+            WorkPackageDetailDto::Leaf {
+                estimate: EstimateInput::Triple(ref tokens),
+                ..
+            } if tokens == &["4w".to_string(), "2w".to_string(), "1w".to_string()]
+        ));
+    }
+
+    #[test]
+    fn work_package_detail_omits_estimate_for_parents() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Parent.\n    estimate: [1w, 2w, 4w]\n    dependencies: []\n    sub_packages:\n      - title: wp-child\n        description: Child.\n        estimate: unknown\n        dependencies: []\n",
+        )
+        .unwrap();
+
+        let detail = load_node_detail(root, "project/billing/wp-one").unwrap();
+        let wp = detail.work_package.expect("work package detail");
+        assert!(matches!(wp, WorkPackageDetailDto::Parent { .. }));
+        let json = serde_json::to_value(&wp).unwrap();
+        assert_eq!(json.get("role").and_then(|value| value.as_str()), Some("parent"));
+        assert!(json.get("estimate").is_none());
     }
 
     #[test]

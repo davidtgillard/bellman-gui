@@ -12,7 +12,7 @@ use crate::graph::{
     resolve_link_file_for_endpoints, IndexedInstance, RegistryIndex, RoadmapGraphDto,
 };
 use crate::work_package_estimate::{
-    estimate_yaml_value, validate_work_package_estimate, WorkPackageEstimate,
+    estimate_yaml_value_or_unknown, resolve_estimate_input, EstimateInput, WorkPackageEstimate,
 };
 
 const LINKS_TEMPLATE: &str = r#"{
@@ -341,6 +341,30 @@ fn validate_work_package_title(title: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn mapping_has_children(mapping: &Mapping) -> bool {
+    mapping
+        .get(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence)
+        .is_some_and(|subs| !subs.is_empty())
+}
+
+fn push_sub_package(
+    parent_map: &mut Mapping,
+    entry: YamlValue,
+    parent_title: &str,
+) -> Result<(), String> {
+    if parent_map.get(YamlValue::from("sub_packages")).is_none() {
+        parent_map.insert(YamlValue::from("sub_packages"), YamlValue::Sequence(vec![]));
+    }
+    let subs = parent_map
+        .get_mut(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence_mut)
+        .ok_or_else(|| format!("sub_packages for {parent_title:?} must be a list"))?;
+    subs.push(entry);
+    parent_map.remove(YamlValue::from("estimate"));
+    Ok(())
+}
+
 fn insert_work_package_entry(
     work_packages: &mut Vec<YamlValue>,
     entry: YamlValue,
@@ -362,14 +386,7 @@ fn insert_work_package_entry(
         .as_mapping_mut()
         .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
 
-    if parent_map.get(YamlValue::from("sub_packages")).is_none() {
-        parent_map.insert(YamlValue::from("sub_packages"), YamlValue::Sequence(vec![]));
-    }
-    let subs = parent_map
-        .get_mut(YamlValue::from("sub_packages"))
-        .and_then(YamlValue::as_sequence_mut)
-        .ok_or_else(|| format!("sub_packages for {parent_title:?} must be a list"))?;
-    subs.push(entry);
+    push_sub_package(parent_map, entry, parent_title)?;
     Ok(())
 }
 
@@ -438,9 +455,10 @@ pub fn append_work_package(
     let mut entry = Mapping::new();
     entry.insert(YamlValue::from("title"), YamlValue::from(title));
     entry.insert(YamlValue::from("description"), YamlValue::from(description));
-    if let Some(estimate) = estimate {
-        entry.insert(YamlValue::from("estimate"), estimate_yaml_value(estimate));
-    }
+    entry.insert(
+        YamlValue::from("estimate"),
+        estimate_yaml_value_or_unknown(estimate),
+    );
     entry.insert(YamlValue::from("dependencies"), YamlValue::Sequence(vec![]));
     insert_work_package_entry(
         work_packages,
@@ -554,13 +572,18 @@ pub fn set_work_package_fields(
         YamlValue::from("dependencies"),
         YamlValue::Sequence(dependency_yaml_values(dependencies)),
     );
-    match estimate {
-        Some(estimate) => {
-            mapping.insert(YamlValue::from("estimate"), estimate_yaml_value(estimate));
+    if mapping_has_children(mapping) {
+        if estimate.is_some() {
+            return Err(format!(
+                "work package {title:?} has sub-packages and must not have its own estimate"
+            ));
         }
-        None => {
-            mapping.remove(YamlValue::from("estimate"));
-        }
+        mapping.remove(YamlValue::from("estimate"));
+    } else {
+        mapping.insert(
+            YamlValue::from("estimate"),
+            estimate_yaml_value_or_unknown(estimate),
+        );
     }
 
     let formatted = serde_yaml::to_string(&document)
@@ -1013,19 +1036,16 @@ fn nest_work_package_under_parent(
         .as_mapping_mut()
         .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
 
-    if parent_map.get(YamlValue::from("sub_packages")).is_none() {
-        parent_map.insert(YamlValue::from("sub_packages"), YamlValue::Sequence(vec![]));
-    }
-    let subs = parent_map
-        .get_mut(YamlValue::from("sub_packages"))
-        .and_then(YamlValue::as_sequence_mut)
-        .ok_or_else(|| format!("sub_packages for {parent_title:?} must be a list"))?;
-    if work_package_exists(subs, child_title) {
+    if parent_map
+        .get(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence)
+        .is_some_and(|subs| work_package_exists(subs, child_title))
+    {
         return Err(format!(
             "work package {child_title:?} is already nested under {parent_title:?}"
         ));
     }
-    subs.push(child);
+    push_sub_package(parent_map, child, parent_title)?;
 
     let formatted = serde_yaml::to_string(&document)
         .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
@@ -1058,22 +1078,38 @@ fn unnest_work_package_from_parent(
 
     let parent_path = find_work_package_path(work_packages, parent_title)
         .ok_or_else(|| format!("work package {parent_title:?} not found in project {project:?}"))?;
+    let child = {
+        let parent_entry = work_package_at_path(work_packages, &parent_path).ok_or_else(|| {
+            format!("work package {parent_title:?} not found in project {project:?}")
+        })?;
+        let parent_map = parent_entry
+            .as_mapping_mut()
+            .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
+        let subs = parent_map
+            .get_mut(YamlValue::from("sub_packages"))
+            .and_then(YamlValue::as_sequence_mut)
+            .ok_or_else(|| {
+                format!("work package {parent_title:?} has no sub_packages for {child_title:?}")
+            })?;
+        extract_work_package(subs, child_title).ok_or_else(|| {
+            format!("work package {child_title:?} is not nested under {parent_title:?}")
+        })?
+    };
+    work_packages.push(child);
+
     let parent_entry = work_package_at_path(work_packages, &parent_path)
         .ok_or_else(|| format!("work package {parent_title:?} not found in project {project:?}"))?;
     let parent_map = parent_entry
         .as_mapping_mut()
         .ok_or_else(|| format!("work package {parent_title:?} is not a mapping"))?;
-    let subs = parent_map
-        .get_mut(YamlValue::from("sub_packages"))
-        .and_then(YamlValue::as_sequence_mut)
-        .ok_or_else(|| {
-            format!("work package {parent_title:?} has no sub_packages for {child_title:?}")
-        })?;
-
-    let child = extract_work_package(subs, child_title).ok_or_else(|| {
-        format!("work package {child_title:?} is not nested under {parent_title:?}")
-    })?;
-    work_packages.push(child);
+    let sub_packages_empty = parent_map
+        .get(YamlValue::from("sub_packages"))
+        .and_then(YamlValue::as_sequence)
+        .is_some_and(Vec::is_empty);
+    if sub_packages_empty {
+        parent_map.remove(YamlValue::from("sub_packages"));
+        parent_map.insert(YamlValue::from("estimate"), YamlValue::from("unknown"));
+    }
 
     let formatted = serde_yaml::to_string(&document)
         .map_err(|error| format!("failed to serialize work-packages YAML: {error}"))?;
@@ -1265,8 +1301,8 @@ pub struct CreateNodeRequest {
     pub description: Option<String>,
     /// Parent work-package title or fully qualified id when nesting on create.
     pub parent: Option<String>,
-    /// Optimistic / likely / pessimistic duration tokens.
-    pub estimate: Option<[String; 3]>,
+    /// Optimistic / likely / pessimistic duration tokens, or `"unknown"`.
+    pub estimate: Option<EstimateInput>,
 }
 
 pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<(), String> {
@@ -1339,11 +1375,7 @@ pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<
                 .description
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| "TBD.".to_string());
-            let estimate = request
-                .estimate
-                .as_ref()
-                .map(validate_work_package_estimate)
-                .transpose()?;
+            let estimate = resolve_estimate_input(request.estimate.as_ref())?;
             let parent_title = request
                 .parent
                 .as_ref()
@@ -1476,8 +1508,8 @@ pub struct UpdateWorkPackageRequest {
     pub node_id: String,
     pub description: String,
     pub dependencies: Vec<String>,
-    /// Optimistic / likely / pessimistic duration tokens, or null/omitted to clear.
-    pub estimate: Option<[String; 3]>,
+    /// Optimistic / likely / pessimistic duration tokens, or `"unknown"`.
+    pub estimate: Option<EstimateInput>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1637,11 +1669,7 @@ pub async fn update_work_package(
     let (name, project) = node_delete_target(&request.node_id, "work_package")?;
     let project = project.ok_or_else(|| "project is required for work packages".to_string())?;
 
-    let estimate = request
-        .estimate
-        .as_ref()
-        .map(validate_work_package_estimate)
-        .transpose()?;
+    let estimate = resolve_estimate_input(request.estimate.as_ref())?;
 
     set_work_package_fields(
         &root,
@@ -1773,10 +1801,11 @@ mod tests {
         assert!(raw.contains("wp-two"));
         assert!(raw.contains("predecessor:"));
         assert!(!raw.contains("after:"));
+        assert!(raw.contains("estimate: unknown"));
     }
 
     #[test]
-    fn set_work_package_fields_writes_and_clears_estimate() {
+    fn set_work_package_fields_writes_unknown_when_cleared() {
         let temp = TempDir::new().unwrap();
         let root = temp.path();
         write_project_registry(root);
@@ -1804,7 +1833,8 @@ mod tests {
         set_work_package_fields(root, "billing", "wp-one", "Old.", &[], None).unwrap();
         let cleared =
             fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
-        assert!(!cleared.contains("estimate:"));
+        assert!(cleared.contains("estimate: unknown"));
+        assert!(!cleared.contains("1w"));
     }
 
     #[test]
@@ -1815,7 +1845,7 @@ mod tests {
         fs::create_dir_all(root.join("projects/billing")).unwrap();
         fs::write(
             root.join("projects/billing/work-packages.yaml"),
-            "version: 1\n\nwork_packages:\n  - title: wp-parent\n    description: Parent.\n    dependencies: []\n",
+            "version: 1\n\nwork_packages:\n  - title: wp-parent\n    description: Parent.\n    estimate: [1w, 2w, 4w]\n    dependencies: []\n",
         )
         .unwrap();
 
@@ -1836,6 +1866,7 @@ mod tests {
                 .and_then(YamlValue::as_str),
             Some("wp-parent")
         );
+        assert!(parent.get(YamlValue::from("estimate")).is_none());
         let subs = parent
             .get(YamlValue::from("sub_packages"))
             .and_then(YamlValue::as_sequence)
@@ -1847,6 +1878,13 @@ mod tests {
                 .and_then(|map| map.get(YamlValue::from("title")))
                 .and_then(YamlValue::as_str),
             Some("wp-child")
+        );
+        assert_eq!(
+            subs[0]
+                .as_mapping()
+                .and_then(|map| map.get(YamlValue::from("estimate")))
+                .and_then(YamlValue::as_str),
+            Some("unknown")
         );
     }
 
@@ -1909,5 +1947,93 @@ mod tests {
         let result = set_work_package_fields(root, "billing", "ghost", "x", &[], None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn set_work_package_fields_rejects_estimate_on_parent() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-parent\n    description: Parent.\n    dependencies: []\n    sub_packages:\n      - title: wp-child\n        description: Child.\n        estimate: unknown\n        dependencies: []\n",
+        )
+        .unwrap();
+
+        let result = set_work_package_fields(
+            root,
+            "billing",
+            "wp-parent",
+            "Parent.",
+            &[],
+            Some(&["1w".into(), "2w".into(), "4w".into()]),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must not have its own estimate"));
+
+        set_work_package_fields(root, "billing", "wp-parent", "Updated.", &[], None).unwrap();
+        let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(raw.contains("Updated."));
+        let document: YamlValue = serde_yaml::from_str(&raw).unwrap();
+        let parent = document
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("work_packages")))
+            .and_then(YamlValue::as_sequence)
+            .and_then(|items| items.first())
+            .and_then(YamlValue::as_mapping)
+            .unwrap();
+        assert!(parent.get(YamlValue::from("estimate")).is_none());
+    }
+
+    #[test]
+    fn nest_strips_parent_estimate_and_unnest_restores_unknown() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-parent\n    description: Parent.\n    estimate: [1w, 2w, 4w]\n    dependencies: []\n  - title: wp-child\n    description: Child.\n    estimate: unknown\n    dependencies: []\n",
+        )
+        .unwrap();
+
+        nest_work_package_under_parent(root, "billing", "wp-parent", "wp-child").unwrap();
+        let nested = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        let nested_doc: YamlValue = serde_yaml::from_str(&nested).unwrap();
+        let parent = nested_doc
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("work_packages")))
+            .and_then(YamlValue::as_sequence)
+            .and_then(|items| items.first())
+            .and_then(YamlValue::as_mapping)
+            .unwrap();
+        assert!(parent.get(YamlValue::from("estimate")).is_none());
+        assert_eq!(
+            parent
+                .get(YamlValue::from("sub_packages"))
+                .and_then(YamlValue::as_sequence)
+                .map(Vec::len),
+            Some(1)
+        );
+
+        unnest_work_package_from_parent(root, "billing", "wp-parent", "wp-child").unwrap();
+        let unnested =
+            fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        let unnested_doc: YamlValue = serde_yaml::from_str(&unnested).unwrap();
+        let packages = unnested_doc
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("work_packages")))
+            .and_then(YamlValue::as_sequence)
+            .unwrap();
+        assert_eq!(packages.len(), 2);
+        let parent = packages[0].as_mapping().unwrap();
+        assert!(parent.get(YamlValue::from("sub_packages")).is_none());
+        assert_eq!(
+            parent
+                .get(YamlValue::from("estimate"))
+                .and_then(YamlValue::as_str),
+            Some("unknown")
+        );
     }
 }

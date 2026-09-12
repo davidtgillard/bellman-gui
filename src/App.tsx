@@ -8,6 +8,7 @@ import { CreateLinkTypePopover } from "./components/CreateLinkTypePopover";
 import { CreateNodeDialog } from "./components/CreateNodeDialog";
 import { LinkDetailPanel } from "./components/LinkDetailPanel";
 import { NodeDetailPanel } from "./components/NodeDetailPanel";
+import type { SaveWorkPackageInput } from "./components/WorkPackageEditor";
 import {
   RoadmapGraph as RoadmapGraphView,
   type GraphContextMenuEvent,
@@ -109,6 +110,7 @@ import {
   type DependencyWarning,
   type NodeDetail,
 } from "./lib/node-detail";
+import type { WorkPackageEstimate } from "./lib/work-package-estimate";
 import { parseMilestoneDate } from "./lib/milestone-date";
 import { slugify } from "./lib/node-content-validation";
 import {
@@ -733,7 +735,7 @@ function App() {
       name: string;
       project?: string;
       description?: string;
-      estimate?: [string, string, string] | null;
+      estimate?: WorkPackageEstimate;
     }) => {
       setSaving(true);
       setError(null);
@@ -757,7 +759,7 @@ function App() {
           project: inProjectGraph ? lockedProjectName : input.project,
           description: input.description,
           parent: parentId ?? undefined,
-          estimate: input.estimate ?? undefined,
+          estimate: input.estimate,
         });
         const revealNodeId = findAddedNodeId(previousNodes, graph.nodes);
         let savedLayout: WorkPackageLayout | undefined;
@@ -1882,11 +1884,7 @@ function App() {
   );
 
   const handleSaveWorkPackage = useCallback(
-    async (input: {
-      description: string;
-      dependencies: string[];
-      estimate: [string, string, string] | null;
-    }) => {
+    async (input: SaveWorkPackageInput) => {
       if (!nodeDetail || !nodeDetail.workPackage) {
         return;
       }

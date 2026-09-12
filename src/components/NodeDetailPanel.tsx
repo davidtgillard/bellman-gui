@@ -6,7 +6,7 @@ import {
   NodeMarkdownEditor,
   type SaveMarkdownOptions,
 } from "./NodeMarkdownEditor";
-import { WorkPackageEditor } from "./WorkPackageEditor";
+import { WorkPackageEditor, type SaveWorkPackageInput } from "./WorkPackageEditor";
 
 interface NodeDetailPanelProps {
   detail: NodeDetail | null;
@@ -22,11 +22,7 @@ interface NodeDetailPanelProps {
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveMarkdown: (markdown: string, options?: SaveMarkdownOptions) => void;
-  onSaveWorkPackage: (input: {
-    description: string;
-    dependencies: string[];
-    estimate: [string, string, string] | null;
-  }) => void;
+  onSaveWorkPackage: (input: SaveWorkPackageInput) => void;
   onDirtyChange: (dirty: boolean) => void;
 }
 

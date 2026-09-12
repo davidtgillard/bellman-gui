@@ -397,6 +397,20 @@
               source: parentId,
               target: id,
             });
+            const parentDetail = savedNodeDetails.get(parentId) || currentNodeDetail(parentId);
+            if (parentDetail?.work_package) {
+              savedNodeDetails.set(parentId, {
+                ...parentDetail,
+                work_package: {
+                  role: "parent",
+                  project: parentDetail.work_package.project,
+                  title: parentDetail.work_package.title,
+                  description: parentDetail.work_package.description,
+                  dependencies: parentDetail.work_package.dependencies,
+                  available_titles: parentDetail.work_package.available_titles,
+                },
+              });
+            }
           }
           savedNodeDetails.set(id, {
             node_id: id,
@@ -405,6 +419,7 @@
             markdown: `# ${name}\n\n${request.description || "TBD."}`,
             source_path: `/roadmap/projects/${project}/work-packages.yaml`,
             work_package: {
+              role: "leaf",
               project,
               title: name,
               description: request.description || "TBD.",
@@ -413,7 +428,7 @@
                 .filter((node) => node.type === "work_package")
                 .map((node) => node.id.split("/").pop())
                 .concat([name]),
-              estimate: request.estimate || null,
+              estimate: request.estimate ?? "unknown",
             },
           });
         } else {
@@ -624,17 +639,30 @@
         }
         const base = currentNodeDetail(request.node_id);
         if (base && base.work_package) {
+          const isParent = base.work_package.role === "parent";
           const updated = {
             ...base,
-            work_package: {
-              ...base.work_package,
-              description: request.description,
-              dependencies: request.dependencies,
-              estimate:
-                request.estimate === undefined
-                  ? base.work_package.estimate ?? null
-                  : request.estimate,
-            },
+            work_package: isParent
+              ? {
+                  role: "parent",
+                  project: base.work_package.project,
+                  title: base.work_package.title,
+                  description: request.description,
+                  dependencies: request.dependencies,
+                  available_titles: base.work_package.available_titles,
+                }
+              : {
+                  role: "leaf",
+                  project: base.work_package.project,
+                  title: base.work_package.title,
+                  description: request.description,
+                  dependencies: request.dependencies,
+                  available_titles: base.work_package.available_titles,
+                  estimate:
+                    request.estimate === undefined
+                      ? base.work_package.estimate ?? "unknown"
+                      : request.estimate,
+                },
           };
           savedNodeDetails.set(request.node_id, clone(updated));
         }
