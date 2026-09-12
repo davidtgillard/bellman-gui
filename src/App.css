@@ -1179,12 +1179,12 @@ body {
 
 .edit-field input::placeholder,
 .edit-field textarea::placeholder {
-  color: #475569;
+  color: #94a3b8;
   opacity: 1;
 }
 
 .field-hint {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.75rem;
 }
 

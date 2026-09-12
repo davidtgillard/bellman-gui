@@ -53,7 +53,7 @@ export function CreateNodeDialog({
   );
   const [name, setName] = useState("");
   const [project, setProject] = useState(lockedProject ?? "");
-  const [description, setDescription] = useState("TBD.");
+  const [description, setDescription] = useState("");
   const [estimateValues, setEstimateValues] = useState(EMPTY_ESTIMATE);
 
   const projects = useMemo(() => projectNames(nodes), [nodes]);
@@ -213,6 +213,7 @@ export function CreateNodeDialog({
                 <textarea
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
+                  placeholder="TBD."
                   rows={3}
                 />
               </label>
