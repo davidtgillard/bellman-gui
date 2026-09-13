@@ -9,79 +9,13 @@ import {
   setupPage,
   test,
   waitForStableGraphNodeRenderedCenter,
-  type Scenario,
 } from "./support/fixtures";
-
-const PROJECT = { id: "project/billing-redesign", type: "project" };
-const WP_PARENT = {
-  id: "project/billing-redesign/wp-invoicing",
-  type: "work_package",
-};
-const WP_LEAF = {
-  id: "project/billing-redesign/wp-pdf-export",
-  type: "work_package",
-};
-const PARENT_LINK = {
-  id: "parent_of--invoicing--pdf",
-  link_type: "parent_of",
-  source: WP_PARENT.id,
-  target: WP_LEAF.id,
-};
-
-function createScenario(): Scenario {
-  return {
-    states: [
-      {
-        root: "/roadmap",
-        editable: true,
-        nodes: [PROJECT, WP_PARENT, WP_LEAF],
-        links: [PARENT_LINK],
-        link_types: [
-          {
-            link_type: "parent_of",
-            in_type: "work_package",
-            out_type: "work_package",
-          },
-        ],
-        label: null,
-      },
-    ],
-    index: 0,
-    nodeDetails: {
-      [WP_PARENT.id]: {
-        node_id: WP_PARENT.id,
-        node_type: "work_package",
-        title: "wp-invoicing",
-        markdown: "# wp-invoicing\n\nParent package.",
-        source_path: "/roadmap/projects/billing-redesign/work-packages.yaml",
-        work_package: {
-          role: "parent",
-          project: "billing-redesign",
-          title: "wp-invoicing",
-          description: "Parent package.",
-          dependencies: [],
-          available_titles: ["wp-invoicing", "wp-pdf-export"],
-        },
-      },
-      [WP_LEAF.id]: {
-        node_id: WP_LEAF.id,
-        node_type: "work_package",
-        title: "wp-pdf-export",
-        markdown: "# wp-pdf-export\n\nLeaf package.",
-        source_path: "/roadmap/projects/billing-redesign/work-packages.yaml",
-        work_package: {
-          role: "leaf",
-          project: "billing-redesign",
-          title: "wp-pdf-export",
-          description: "Leaf package.",
-          dependencies: [],
-          available_titles: ["wp-invoicing", "wp-pdf-export"],
-          estimate: "unknown",
-        },
-      },
-    },
-  };
-}
+import {
+  PROJECT,
+  WP_LEAF,
+  WP_PARENT,
+  createScenario,
+} from "./support/work-package-create-scenario";
 
 async function lastCall(page: Parameters<typeof getCalls>[0], cmd: string) {
   const calls = await getCalls(page);

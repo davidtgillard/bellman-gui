@@ -748,6 +748,7 @@ export function RoadmapGraph({
           }
         },
       });
+      // Also persists native drags of parentless root leaves (same grab/drag/free path).
       sceneParentDragCleanupRef.current = scene.attachParentDragHandlers(cy, {
         onChange: persistSceneLayout,
       });
