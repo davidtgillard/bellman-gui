@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MONOREPO_DIR="$(cd "${ROOT}/.." && pwd)/cytoscope-compound-graph.git"
 PACKAGE_DIR="${MONOREPO_DIR}/packages/cytoscape-compound-graph"
 REF_FILE="${ROOT}/packaging/cytoscape-compound-graph.ref"
-DEFAULT_REF="f7df6c2f5ca42f1299f60b04926fd1a19d95df66"
+DEFAULT_REF="adbe815c640a28c6e2dc6339ec35388f574b9eb7"
 REF="$(tr -d '[:space:]' <"${REF_FILE}" 2>/dev/null || true)"
 REF="${REF:-${DEFAULT_REF}}"
 
