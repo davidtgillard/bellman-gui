@@ -252,6 +252,16 @@ export function shouldRestoreSidebarViewport(session: SidebarViewportSession): b
 }
 
 /**
+ * Whether resize/selection should keep the selected node visible beside the sidebar.
+ * Stops once the user has panned, zoomed, or otherwise dirtied the viewport.
+ * @param session - Current sidebar viewport session.
+ * @returns Whether automatic reveal pans should run.
+ */
+export function shouldFollowSidebarReveal(session: SidebarViewportSession): boolean {
+  return !session.dirty;
+}
+
+/**
  * Restores the pre-reveal viewport when the session is still clean.
  * @param cy
  * @param session

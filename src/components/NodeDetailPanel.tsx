@@ -1,3 +1,4 @@
+import type { MutableRefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { nodeTypeLabel } from "../lib/graph";
@@ -24,6 +25,8 @@ interface NodeDetailPanelProps {
   onSaveMarkdown: (markdown: string, options?: SaveMarkdownOptions) => void;
   onSaveWorkPackage: (input: SaveWorkPackageInput) => void;
   onDirtyChange: (dirty: boolean) => void;
+  onDraftDependenciesChange?: (titles: string[]) => void;
+  dependencyToggleRef?: MutableRefObject<(nodeId: string) => void>;
 }
 
 function NodeDetailErrorIcon() {
@@ -61,6 +64,8 @@ export function NodeDetailPanel({
   onSaveMarkdown,
   onSaveWorkPackage,
   onDirtyChange,
+  onDraftDependenciesChange,
+  dependencyToggleRef,
 }: NodeDetailPanelProps) {
   if (loading) {
     return (
@@ -120,6 +125,8 @@ export function NodeDetailPanel({
           onSave={onSaveWorkPackage}
           onCancel={onCancelEdit}
           onDirtyChange={onDirtyChange}
+          onDraftDependenciesChange={onDraftDependenciesChange}
+          dependencyToggleRef={dependencyToggleRef}
         />
       ) : editing ? (
         <NodeMarkdownEditor

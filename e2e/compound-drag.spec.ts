@@ -136,6 +136,7 @@ test.describe("composite graph interaction", () => {
 
     await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
+    await page.bringToFront();
     await page.locator(".graph-container").focus();
 
     const before = await getGraphPan(page);
@@ -156,6 +157,7 @@ test.describe("composite graph interaction", () => {
 
     await clickGraphBackground(page);
     await expect(page.locator(".node-detail-sidebar")).toHaveCount(0);
+    await page.bringToFront();
     await page.locator(".graph-container").focus();
 
     const before = await getGraphPan(page);
@@ -178,6 +180,7 @@ test.describe("composite graph interaction", () => {
 
     await clickGraphBackground(page);
     await expect(sidebar).toHaveCount(0);
+    await page.bringToFront();
     await page.locator(".graph-container").focus();
 
     const before = await getGraphPan(page);
@@ -194,6 +197,7 @@ test.describe("composite graph interaction", () => {
     await doubleClickGraphNode(page, CHILD_A.id);
     await expect(page.locator(".node-detail-sidebar")).toBeVisible();
 
+    await page.bringToFront();
     await page.evaluate(() => {
       const sidebar = document.querySelector(".node-detail-sidebar");
       const close = sidebar?.querySelector("button");
@@ -218,6 +222,7 @@ test.describe("composite graph interaction", () => {
     await expect(page.locator(".compound-parent-label")).toBeVisible();
     // Keep keyboard focus on the graph so arrow pan is allowed (single-click
     // selects the container without opening the detail sidebar).
+    await page.bringToFront();
     await page.locator(".graph-container").focus();
 
     const parentBefore = await getGraphNodeState(page, COMPOSITE_PARENT.id);

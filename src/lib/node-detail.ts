@@ -132,7 +132,16 @@ export function workPackageDetailFromDto(
   return { ...base, role: "leaf", estimate: fromEstimateWire(dto.estimate) };
 }
 
+/**
+ * Maps a node-detail DTO onto the domain model.
+ * @param dto - Wire payload from Tauri.
+ * @returns Domain node detail.
+ * @throws {Error} When the payload is missing.
+ */
 function fromDto(dto: NodeDetailDto): NodeDetail {
+  if (!dto) {
+    throw new Error("node detail payload was empty");
+  }
   return {
     nodeId: dto.node_id,
     nodeType: dto.node_type,

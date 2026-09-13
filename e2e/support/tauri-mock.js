@@ -352,7 +352,45 @@
     if (scenario.nodeDetails && nodeId && scenario.nodeDetails[nodeId]) {
       return clone(scenario.nodeDetails[nodeId]);
     }
-    return scenario.nodeDetail ? clone(scenario.nodeDetail) : null;
+    if (scenario.nodeDetail) {
+      return clone(scenario.nodeDetail);
+    }
+    return fallbackNodeDetail(nodeId);
+  }
+
+  function fallbackNodeDetail(nodeId) {
+    if (!nodeId) {
+      return null;
+    }
+    const graph = currentGraph();
+    const node = (graph.nodes || []).find((item) => item.id === nodeId);
+    const type = node?.type || "goal";
+    const title = String(nodeId).split("/").pop();
+    const wpTitles = (graph.nodes || [])
+      .filter((item) => item.type === "work_package")
+      .map((item) => String(item.id).split("/").pop());
+    const hasChildren = (graph.links || []).some(
+      (link) => link.link_type === "parent_of" && link.source === nodeId,
+    );
+    return {
+      node_id: nodeId,
+      node_type: type,
+      title,
+      markdown: `# ${title}\n\nTBD.`,
+      source_path: null,
+      work_package:
+        type === "work_package"
+          ? {
+              role: hasChildren ? "parent" : "leaf",
+              project: String(nodeId).split("/")[1] || "unknown",
+              title,
+              description: "TBD.",
+              dependencies: [],
+              available_titles: wpTitles,
+              ...(hasChildren ? {} : { estimate: "unknown" }),
+            }
+          : null,
+    };
   }
 
   function fakeInvoke(cmd, args) {

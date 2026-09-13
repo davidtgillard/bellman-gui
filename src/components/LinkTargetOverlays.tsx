@@ -9,20 +9,24 @@ interface LinkTargetOverlaysProps {
   cy: Core;
   targetIds: ReadonlySet<string>;
   revision: number;
+  /** Visual treatment: link-mode targets or selected dependencies. */
+  tone?: "eligible" | "selected";
 }
 
 /**
- * Non-interactive mint rings around nodes that can complete a new link.
+ * Non-interactive rings around canvas pick targets.
  * @param props - Overlay binding to the Cytoscape graph.
  * @param props.cy - Cytoscape instance.
- * @param props.targetIds - Node ids that can complete the link.
+ * @param props.targetIds - Node ids to ring.
  * @param props.revision - Counter bumped when selection or structure changes.
+ * @param props.tone - Link-mode eligible targets, or selected dependencies.
  * @returns Overlay layer, or null when no targets are visible.
  */
 export function LinkTargetOverlays({
   cy,
   targetIds,
   revision,
+  tone = "eligible",
 }: LinkTargetOverlaysProps) {
   const [visuals, setVisuals] = useState<LinkTargetRingVisual[]>(() =>
     buildLinkTargetRingVisuals(cy, targetIds),
@@ -49,13 +53,16 @@ export function LinkTargetOverlays({
     return null;
   }
 
+  const selected = tone === "selected";
+
   return (
     <div className="link-target-overlays-layer" aria-hidden>
       {visuals.map((visual) => (
         <div
           key={visual.id}
-          className="link-target-ring"
-          data-link-target-ring={visual.id}
+          className={selected ? "dep-selected-ring" : "link-target-ring"}
+          data-link-target-ring={selected ? undefined : visual.id}
+          data-dep-selected-ring={selected ? visual.id : undefined}
           style={
             {
               left: visual.left,
@@ -63,7 +70,7 @@ export function LinkTargetOverlays({
               width: visual.width,
               height: visual.height,
               borderRadius: visual.borderRadius,
-              "--link-glow-color": visual.glowColor,
+              "--link-glow-color": selected ? "#4ade80" : visual.glowColor,
             } as CSSProperties
           }
         />

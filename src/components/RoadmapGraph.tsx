@@ -36,6 +36,7 @@ import {
   noteRevealPanForSidebarSession,
   revealSelectedNodeInViewportIfObscured,
   restoreSidebarViewportIfEligible,
+  shouldFollowSidebarReveal,
   compoundGraphMaxZoom,
   graphNodeModelPosition,
   installMilestoneViewportSync,
@@ -66,7 +67,7 @@ import {
   shouldAllowKeyboardPan,
 } from "../lib/keyboard-pan";
 import { DEFAULT_MAX_PAN_SPEED, loadSettings } from "../lib/settings";
-import { applyLinkingModeClasses } from "../lib/linking-mode";
+import { applyCanvasPickClasses } from "../lib/linking-mode";
 
 cytoscape.use(fcose);
 
@@ -110,6 +111,14 @@ export interface GraphLinkingMode {
   typePicking?: boolean;
 }
 
+/** Work-package dependency pick session while the editor is open. */
+export interface GraphDependencyPickMode {
+  originId: string;
+  originLabel: string;
+  eligibleIds: ReadonlySet<string>;
+  selectedIds: ReadonlySet<string>;
+}
+
 interface RoadmapGraphProps {
   nodes: GraphViewNode[];
   links: GraphViewLink[];
@@ -134,6 +143,10 @@ interface RoadmapGraphProps {
   onLinkTargetPick?: (nodeId: string) => void;
   /** Called when the user cancels click-to-connect. */
   onLinkingCancel?: () => void;
+  /** Active work-package dependency pick session, or null. */
+  dependencyPick?: GraphDependencyPickMode | null;
+  /** Called when an eligible work package is tapped during dependency pick. */
+  onDependencyToggle?: (nodeId: string) => void;
   draggable?: boolean;
   nodePositions?: Record<string, NodePosition>;
   onNodePositionChange?: (positions: Record<string, NodePosition>) => void;
@@ -573,6 +586,8 @@ export function RoadmapGraph({
   linking = null,
   onLinkTargetPick,
   onLinkingCancel,
+  dependencyPick = null,
+  onDependencyToggle,
   draggable = false,
   nodePositions,
   onNodePositionChange,
@@ -609,6 +624,8 @@ export function RoadmapGraph({
   const onLinkTargetPickRef = useRef(onLinkTargetPick);
   const onLinkingCancelRef = useRef(onLinkingCancel);
   const linkingModeRef = useRef(linking);
+  const onDependencyToggleRef = useRef(onDependencyToggle);
+  const dependencyPickRef = useRef(dependencyPick);
   const onNodePositionChangeRef = useRef(onNodePositionChange);
   const onNodeResizeRef = useRef(onNodeResize);
   const onCompoundSizesMeasuredRef = useRef(onCompoundSizesMeasured);
@@ -956,6 +973,14 @@ export function RoadmapGraph({
   }, [linking]);
 
   useEffect(() => {
+    onDependencyToggleRef.current = onDependencyToggle;
+  }, [onDependencyToggle]);
+
+  useEffect(() => {
+    dependencyPickRef.current = dependencyPick;
+  }, [dependencyPick]);
+
+  useEffect(() => {
     editableRef.current = editable;
   }, [editable]);
 
@@ -1089,7 +1114,10 @@ export function RoadmapGraph({
         return;
       }
       const session = sidebarViewportSessionRef.current;
-      const isFirstReveal = session.restore === null && !session.dirty;
+      if (!shouldFollowSidebarReveal(session)) {
+        return;
+      }
+      const isFirstReveal = session.restore === null;
       if (!isFirstReveal) {
         revealSelectedNodeForSidebar(cy, container, nodeId);
         return;
@@ -1101,7 +1129,11 @@ export function RoadmapGraph({
       }
       firstRevealTimerRef.current = window.setTimeout(() => {
         firstRevealTimerRef.current = null;
-        if (!nodeDetailOpenRef.current || selectedNodeIdRef.current !== nodeId) {
+        if (
+          !nodeDetailOpenRef.current ||
+          selectedNodeIdRef.current !== nodeId ||
+          !shouldFollowSidebarReveal(sidebarViewportSessionRef.current)
+        ) {
           return;
         }
         revealSelectedNodeForSidebar(cy, container, nodeId);
@@ -1112,14 +1144,14 @@ export function RoadmapGraph({
   const scheduleRevealSelectedNodeForSidebarRef = useRef(scheduleRevealSelectedNodeForSidebar);
 
   const markSidebarViewportDirty = useCallback(() => {
-    if (!nodeDetailOpenRef.current) {
-      return;
-    }
     if (firstRevealTimerRef.current !== null) {
       window.clearTimeout(firstRevealTimerRef.current);
       firstRevealTimerRef.current = null;
     }
     cyRef.current?.stop(true, false);
+    if (!nodeDetailOpenRef.current) {
+      return;
+    }
     markSidebarViewportSessionDirty(sidebarViewportSessionRef.current);
   }, []);
 
@@ -1563,6 +1595,10 @@ export function RoadmapGraph({
           graphContainerRef.current?.focus({ preventScroll: true });
           return;
         }
+        if (dependencyPickRef.current) {
+          graphContainerRef.current?.focus({ preventScroll: true });
+          return;
+        }
         const cleared = onSelectionClearRef.current?.() ?? false;
         if (cleared) {
           cy.nodes().unselect();
@@ -1836,15 +1872,22 @@ export function RoadmapGraph({
       return cleared;
     };
 
-    const consumeLinkingTap = (nodeId: string): boolean => {
+    const consumeCanvasPickTap = (nodeId: string): boolean => {
       const linkingMode = linkingModeRef.current;
-      if (!linkingMode) {
-        return false;
+      if (linkingMode) {
+        if (linkingMode.targetIds.has(nodeId)) {
+          onLinkTargetPickRef.current?.(nodeId);
+        }
+        return true;
       }
-      if (linkingMode.targetIds.has(nodeId)) {
-        onLinkTargetPickRef.current?.(nodeId);
+      const depPick = dependencyPickRef.current;
+      if (depPick) {
+        if (depPick.eligibleIds.has(nodeId)) {
+          onDependencyToggleRef.current?.(nodeId);
+        }
+        return true;
       }
-      return true;
+      return false;
     };
 
     const selectCompoundLeaf = (childId: string) => {
@@ -1860,7 +1903,7 @@ export function RoadmapGraph({
     };
 
     compoundLeafTapRef.current = (childId, wasSelected) => {
-      if (consumeLinkingTap(childId)) {
+      if (consumeCanvasPickTap(childId)) {
         return;
       }
       const now = Date.now();
@@ -1902,7 +1945,7 @@ export function RoadmapGraph({
       }
       const node = event.target;
       const nodeId = node.id();
-      if (linkingModeRef.current) {
+      if (linkingModeRef.current || dependencyPickRef.current) {
         if (
           compoundGraphRef.current &&
           node.data("kind") === "leaf" &&
@@ -1911,7 +1954,7 @@ export function RoadmapGraph({
           compoundLeafClickHandledRef.current = false;
           return;
         }
-        consumeLinkingTap(nodeId);
+        consumeCanvasPickTap(nodeId);
         return;
       }
 
@@ -2022,7 +2065,7 @@ export function RoadmapGraph({
     cy.on("dbltap", "node", (event) => {
       const skipLeafDbltapDetail = openedDetailFromCompoundLeafTap;
       openedDetailFromCompoundLeafTap = false;
-      if (linkingModeRef.current) {
+      if (linkingModeRef.current || dependencyPickRef.current) {
         return;
       }
       const node = event.target;
@@ -2041,7 +2084,7 @@ export function RoadmapGraph({
 
     cy.on("tap", "edge", (event) => {
       closeContextMenu();
-      if (linkingModeRef.current) {
+      if (linkingModeRef.current || dependencyPickRef.current) {
         return;
       }
       onEdgeClickRef.current?.(event.target.id());
@@ -2055,6 +2098,9 @@ export function RoadmapGraph({
         closeContextMenu();
         if (linkingModeRef.current) {
           onLinkingCancelRef.current?.();
+          return;
+        }
+        if (dependencyPickRef.current) {
           return;
         }
         clearGraphSelectionIfAllowed();
@@ -2534,7 +2580,7 @@ export function RoadmapGraph({
     }
 
     const onLabelDblClick = (event: MouseEvent) => {
-      if (linkingModeRef.current) {
+      if (linkingModeRef.current || dependencyPickRef.current) {
         return;
       }
       if (!editableRef.current || !onNodeRenameRef.current || compoundGraphRef.current) {
@@ -2675,24 +2721,33 @@ export function RoadmapGraph({
       return;
     }
 
-    applyLinkingModeClasses(
+    applyCanvasPickClasses(
       cy,
       linking
         ? { originId: linking.originId, targetIds: linking.targetIds }
-        : null,
+        : dependencyPick
+          ? {
+              originId: dependencyPick.originId,
+              targetIds: dependencyPick.eligibleIds,
+              selectedIds: dependencyPick.selectedIds,
+            }
+          : null,
     );
 
-    if (linking) {
-      const origin = cy.getElementById(linking.originId);
-      if (origin.nonempty()) {
-        cy.nodes().unselect();
-        origin.select();
+    if (linking || dependencyPick) {
+      const originId = linking?.originId ?? dependencyPick?.originId;
+      if (originId) {
+        const origin = cy.getElementById(originId);
+        if (origin.nonempty()) {
+          cy.nodes().unselect();
+          origin.select();
+        }
       }
       graphContainerRef.current?.focus({ preventScroll: true });
     }
 
     setGraphSelectionRevision((revision) => revision + 1);
-  }, [cyReady, linking, nodes, links]);
+  }, [cyReady, linking, dependencyPick, nodes, links]);
 
   useLayoutEffect(() => {
     const cy = cyRef.current;
@@ -2772,14 +2827,35 @@ export function RoadmapGraph({
           revision={graphSelectionRevision}
         />
       ) : null}
-      {linking && cyInstance && cyReady ? (
+      {dependencyPick && cyInstance && cyReady ? (
+        <LinkTargetOverlays
+          cy={cyInstance}
+          targetIds={dependencyPick.selectedIds}
+          revision={graphSelectionRevision}
+          tone="selected"
+        />
+      ) : linking && cyInstance && cyReady ? (
         <LinkTargetOverlays
           cy={cyInstance}
           targetIds={linking.targetIds}
           revision={graphSelectionRevision}
         />
       ) : null}
-      {linking ? (
+      {dependencyPick ? (
+        <div className="graph-link-mode-chip" role="status" aria-live="polite">
+          <span className="graph-link-mode-chip-text">
+            Click a work package to add or remove
+            {dependencyPick.originLabel ? (
+              <>
+                {" "}
+                <span className="graph-link-mode-chip-origin">
+                  for {dependencyPick.originLabel}
+                </span>
+              </>
+            ) : null}
+          </span>
+        </div>
+      ) : linking ? (
         <div className="graph-link-mode-chip" role="status" aria-live="polite">
           <span className="graph-link-mode-chip-text">
             Choose a node to link

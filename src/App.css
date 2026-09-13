@@ -860,7 +860,8 @@ body {
   pointer-events: none;
 }
 
-.link-target-ring {
+.link-target-ring,
+.dep-selected-ring {
   position: absolute;
   box-sizing: border-box;
   border: 3px solid #4ade80;
@@ -1291,6 +1292,10 @@ body {
   flex: 1;
 }
 
+.work-package-editor {
+  overflow: auto;
+}
+
 .node-editor-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -1450,10 +1455,96 @@ body {
   font-size: 0.75rem;
 }
 
-.wp-dependency-option {
+.wp-dependencies-empty {
+  margin: 0;
+}
+
+.wp-dependency-selected {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.wp-dependency-chip {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
+  padding: 0.25rem 0.4rem 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  background: #1e293b;
   font-size: 0.875rem;
+  color: #e2e8f0;
+}
+
+.wp-dependency-remove {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+
+.wp-dependency-remove:hover {
+  color: #e2e8f0;
+}
+
+.wp-dependency-add {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.wp-dependency-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
   color: #cbd5e1;
+}
+
+.wp-dependency-add-field input {
+  border: 1px solid #475569;
+  border-radius: 0.375rem;
+  background: #0f172a;
+  color: inherit;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+}
+
+.wp-dependency-suggestions {
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  max-height: 8rem;
+  overflow-y: auto;
+  border: 1px solid #334155;
+  border-radius: 0.375rem;
+  background: #0f172a;
+}
+
+.wp-dependency-suggestions button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.wp-dependency-suggestions button:hover {
+  background: #1e293b;
 }

@@ -12,6 +12,7 @@ import {
   REVEAL_NODE_RIGHT_PADDING,
   SIDEBAR_VIEWPORT_ANIMATION_MS,
   shiftBoxInside,
+  shouldFollowSidebarReveal,
   shouldRestoreSidebarViewport,
   TOP_LEVEL_GRAPH_MAX_ZOOM,
   TOP_LEVEL_NODE_DIAMETER,
@@ -151,6 +152,7 @@ describe("cytoscape-layout", () => {
     noteRevealPanForSidebarSession(session, first, true);
     expect(session.restore).toEqual(first);
     expect(shouldRestoreSidebarViewport(session)).toBe(true);
+    expect(shouldFollowSidebarReveal(session)).toBe(true);
 
     noteRevealPanForSidebarSession(session, second, true);
     expect(session.restore).toEqual(first);
@@ -165,6 +167,7 @@ describe("cytoscape-layout", () => {
     );
     markSidebarViewportSessionDirty(session);
     expect(shouldRestoreSidebarViewport(session)).toBe(false);
+    expect(shouldFollowSidebarReveal(session)).toBe(false);
     expect(session.restore).toBeNull();
 
     noteRevealPanForSidebarSession(

@@ -62,6 +62,10 @@ import {
   redoActiveMarkdownEditor,
   undoActiveMarkdownEditor,
 } from "./lib/active-markdown-editor";
+import {
+  eligibleDependencyNodeIds,
+  selectedDependencyNodeIds,
+} from "./lib/work-package-dependencies";
 import { traceUndo } from "./lib/undo-trace";
 import {
   applyNodePlacement,
@@ -182,6 +186,8 @@ function App() {
   const [canRedo, setCanRedo] = useState(false);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
   const [linkingOriginId, setLinkingOriginId] = useState<string | null>(null);
+  const [wpDraftDependencies, setWpDraftDependencies] = useState<string[]>([]);
+  const wpDependencyToggleRef = useRef<(nodeId: string) => void>(() => {});
   const [pendingLink, setPendingLink] = useState<{
     source: string;
     target: string;
@@ -1334,6 +1340,44 @@ function App() {
     };
   }, [linkingOriginId, linkingTargets, pendingLink]);
 
+  const handleDraftDependenciesChange = useCallback((titles: string[]) => {
+    setWpDraftDependencies(titles);
+  }, []);
+
+  const handleDependencyToggle = useCallback((nodeId: string) => {
+    wpDependencyToggleRef.current(nodeId);
+  }, []);
+
+  const dependencyPickMode = useMemo(() => {
+    if (!nodeEditing || !nodeDetail?.workPackage || !selectedNodeId) {
+      return null;
+    }
+    const visibleNodes = displayGraph.nodes.filter((node) =>
+      visibleNodeIds.has(node.id),
+    );
+    return {
+      originId: selectedNodeId,
+      originLabel: nodeLabel(selectedNodeId),
+      eligibleIds: new Set(
+        eligibleDependencyNodeIds({
+          originId: selectedNodeId,
+          availableTitles: nodeDetail.workPackage.availableTitles,
+          nodes: visibleNodes,
+        }),
+      ),
+      selectedIds: new Set(
+        selectedDependencyNodeIds(wpDraftDependencies, visibleNodes),
+      ),
+    };
+  }, [
+    displayGraph.nodes,
+    nodeDetail,
+    nodeEditing,
+    selectedNodeId,
+    visibleNodeIds,
+    wpDraftDependencies,
+  ]);
+
   const displayNodeIds = useMemo(
     () => new Set(displayGraph.nodes.map((node) => node.id)),
     [displayGraph.nodes],
@@ -1552,6 +1596,13 @@ function App() {
 
   const handleNodeClick = useCallback(
     (nodeId: string) => {
+      if (dependencyPickMode) {
+        if (dependencyPickMode.eligibleIds.has(nodeId)) {
+          handleDependencyToggle(nodeId);
+        }
+        return;
+      }
+
       const overflowParent = overflowParentId(nodeId);
       if (overflowParent) {
         setGraphViewStack((current) => {
@@ -1614,11 +1665,14 @@ function App() {
           }
         });
     },
-    [clearGraphSelection, confirmDiscardIfDirty, nodes, roadmapRoot, selectedNodeId],
+    [clearGraphSelection, confirmDiscardIfDirty, dependencyPickMode, handleDependencyToggle, nodes, roadmapRoot, selectedNodeId],
   );
 
   const handleEdgeClick = useCallback(
     (linkId: string) => {
+      if (dependencyPickMode) {
+        return;
+      }
       if (linkId === selectedLinkId) {
         return;
       }
@@ -1636,7 +1690,7 @@ function App() {
       setNodeDetailLoading(false);
       nodeEditDirtyRef.current = false;
     },
-    [confirmDiscardIfDirty, selectedLinkId],
+    [confirmDiscardIfDirty, dependencyPickMode, selectedLinkId],
   );
 
   const handleShowInnerGraph = useCallback(
@@ -1843,8 +1897,9 @@ function App() {
     setDependencyWarnings([]);
     setSyncSkipped(false);
     nodeEditDirtyRef.current = false;
+    setWpDraftDependencies(nodeDetail?.workPackage?.dependencies ?? []);
     setNodeEditing(true);
-  }, []);
+  }, [nodeDetail]);
 
   const handleCancelNodeEdit = useCallback(() => {
     nodeEditDirtyRef.current = false;
@@ -2071,6 +2126,8 @@ function App() {
             linking={linkingMode}
             onLinkTargetPick={handleLinkTargetPick}
             onLinkingCancel={cancelLinking}
+            dependencyPick={dependencyPickMode}
+            onDependencyToggle={handleDependencyToggle}
             emptyMessage={graphEmptyMessage}
             emptyAction={
               showExampleEmptyAction
@@ -2163,6 +2220,8 @@ function App() {
                 }
                 onSaveWorkPackage={(input) => void handleSaveWorkPackage(input)}
                 onDirtyChange={handleNodeEditDirtyChange}
+                onDraftDependenciesChange={handleDraftDependenciesChange}
+                dependencyToggleRef={wpDependencyToggleRef}
               />
             )}
           </NodeDetailSidebar>

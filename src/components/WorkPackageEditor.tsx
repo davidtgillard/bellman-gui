@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MutableRefObject } from "react";
+import { nodeLabel } from "../lib/graph";
 import type { WorkPackageDetail } from "../lib/node-detail";
+import {
+  toggleDependency,
+  unselectedDependencyOptions,
+} from "../lib/work-package-dependencies";
 import {
   estimateToFieldValues,
   validateWorkPackageEstimate,
@@ -26,6 +31,8 @@ interface WorkPackageEditorProps {
   onSave: (input: SaveWorkPackageInput) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  onDraftDependenciesChange?: (titles: string[]) => void;
+  dependencyToggleRef?: MutableRefObject<(nodeId: string) => void>;
 }
 
 function sameMembers(left: string[], right: string[]): boolean {
@@ -45,6 +52,8 @@ export function WorkPackageEditor({
   onSave,
   onCancel,
   onDirtyChange,
+  onDraftDependenciesChange,
+  dependencyToggleRef,
 }: WorkPackageEditorProps) {
   const isLeaf = workPackage.role === "leaf";
   const [description, setDescription] = useState(workPackage.description);
@@ -56,10 +65,17 @@ export function WorkPackageEditor({
       ? estimateToFieldValues(workPackage.estimate)
       : EMPTY_ESTIMATE,
   );
+  const [addQuery, setAddQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
 
   const options = useMemo(
     () => workPackage.availableTitles.filter((title) => title !== workPackage.title),
     [workPackage.availableTitles, workPackage.title],
+  );
+
+  const addCandidates = useMemo(
+    () => unselectedDependencyOptions(options, dependencies, addQuery),
+    [addQuery, dependencies, options],
   );
 
   const originalEstimateFields = useMemo(
@@ -90,13 +106,33 @@ export function WorkPackageEditor({
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
 
-  const toggleDependency = (title: string) => {
+  useEffect(() => {
+    onDraftDependenciesChange?.(dependencies);
+  }, [dependencies, onDraftDependenciesChange]);
+
+  useEffect(() => {
+    return () => onDraftDependenciesChange?.([]);
+  }, [onDraftDependenciesChange]);
+
+  const applyToggle = (title: string) => {
     setDependencies((current) =>
-      current.includes(title)
-        ? current.filter((item) => item !== title)
-        : [...current, title],
+      toggleDependency(current, title, workPackage.title),
     );
   };
+
+  useEffect(() => {
+    if (!dependencyToggleRef) {
+      return;
+    }
+    dependencyToggleRef.current = (nodeId: string) => {
+      setDependencies((current) =>
+        toggleDependency(current, nodeLabel(nodeId), workPackage.title),
+      );
+    };
+    return () => {
+      dependencyToggleRef.current = () => {};
+    };
+  }, [dependencyToggleRef, workPackage.title]);
 
   const handleSave = () => {
     if (saving || !dirty) {
@@ -117,6 +153,12 @@ export function WorkPackageEditor({
       description: description.trim() || "TBD.",
       dependencies,
     });
+  };
+
+  const addTitle = (title: string) => {
+    applyToggle(title);
+    setAddQuery("");
+    setAddOpen(false);
   };
 
   const saveDisabled =
@@ -147,16 +189,82 @@ export function WorkPackageEditor({
         {options.length === 0 ? (
           <p className="field-hint">No other work packages in this project.</p>
         ) : (
-          options.map((title) => (
-            <label key={title} className="wp-dependency-option">
-              <input
-                type="checkbox"
-                checked={dependencies.includes(title)}
-                onChange={() => toggleDependency(title)}
-              />
-              <span>{title}</span>
-            </label>
-          ))
+          <>
+            <p className="field-hint">
+              Click a work package on the graph to add or remove.
+            </p>
+            {dependencies.length === 0 ? (
+              <p className="field-hint wp-dependencies-empty">None selected.</p>
+            ) : (
+              <ul className="wp-dependency-selected">
+                {dependencies.map((title) => (
+                  <li key={title} className="wp-dependency-chip">
+                    <span>{title}</span>
+                    <button
+                      type="button"
+                      className="wp-dependency-remove"
+                      onClick={() => applyToggle(title)}
+                      aria-label={`Remove ${title}`}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="wp-dependency-add">
+              <label className="wp-dependency-add-field">
+                <span>Add</span>
+                <input
+                  type="search"
+                  role="combobox"
+                  aria-expanded={addOpen && addCandidates.length > 0}
+                  aria-controls="wp-dependency-suggestions"
+                  aria-autocomplete="list"
+                  placeholder="Search work packages…"
+                  value={addQuery}
+                  disabled={saving}
+                  onChange={(event) => {
+                    setAddQuery(event.target.value);
+                    setAddOpen(true);
+                  }}
+                  onFocus={() => setAddOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setAddOpen(false), 120);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setAddOpen(false);
+                      return;
+                    }
+                    if (event.key === "Enter" && addCandidates[0]) {
+                      event.preventDefault();
+                      addTitle(addCandidates[0]);
+                    }
+                  }}
+                />
+              </label>
+              {addOpen && addCandidates.length > 0 ? (
+                <ul
+                  id="wp-dependency-suggestions"
+                  className="wp-dependency-suggestions"
+                  role="listbox"
+                >
+                  {addCandidates.map((title) => (
+                    <li key={title} role="option">
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => addTitle(title)}
+                      >
+                        {title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </>
         )}
       </fieldset>
 
