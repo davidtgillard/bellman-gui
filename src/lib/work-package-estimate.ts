@@ -34,8 +34,9 @@ export interface ParsedDuration {
   normalized: string;
 }
 
-const DURATION_PATTERN = /^(\d+(?:\.\d)?)\s*([hdw])$/i;
-const ZERO_DURATION_PATTERN = /^0+(?:\.0+)?\s*[hdw]?$/i;
+/** Compact form after trim: no internal whitespace. */
+const DURATION_PATTERN = /^(\d+(?:\.\d)?)([hdw])$/i;
+const ZERO_DURATION_PATTERN = /^0+(?:\.0+)?[hdw]?$/i;
 
 const FORMAT_HINT = "Use a duration like 1w, 2d, or 8h.";
 const ZERO_HINT = "Duration must be greater than zero.";
@@ -45,8 +46,9 @@ const ORDER_HINT =
   "Estimates must be ordered: optimistic ≤ likely ≤ pessimistic.";
 
 /**
- * Parses a duration token such as `1w`, `2.5d`, or `8h` into amount and unit.
- * @param token - Raw duration string.
+ * Parses a duration token such as `1w`, `2.5d`, or `8h`.
+ * Trims leading/trailing whitespace; rejects internal whitespace.
+ * @param token - Duration string.
  * @returns Parsed token, or null when invalid.
  */
 export function parseDurationToken(token: string): ParsedDuration | null {
@@ -74,8 +76,9 @@ export function parseDurationToken(token: string): ParsedDuration | null {
 }
 
 /**
- * Normalizes a duration token to lowercase with no spaces (e.g. `1W` → `1w`).
- * @param token - Raw duration string.
+ * Normalizes a duration token to lowercase compact form (e.g. `1W` → `1w`).
+ * Trims leading/trailing whitespace; rejects internal whitespace.
+ * @param token - Duration string.
  * @returns Normalized token, or null when invalid.
  */
 export function normalizeDurationToken(token: string): string | null {
@@ -83,26 +86,36 @@ export function normalizeDurationToken(token: string): string | null {
 }
 
 /**
- * Returns a field-level error for a single duration token, or null when valid/empty.
- * @param raw - Raw field value.
+ * Field error for an already-trimmed duration token, or null when valid/empty.
+ * @param trimmed - Field value with edges already trimmed.
  * @returns Error message for this field alone.
  */
-export function durationFieldError(raw: string): string | null {
-  const trimmed = raw.trim();
+function durationFieldErrorTrimmed(trimmed: string): string | null {
   if (!trimmed) {
     return null;
   }
   if (ZERO_DURATION_PATTERN.test(trimmed)) {
     return ZERO_HINT;
   }
-  if (!normalizeDurationToken(trimmed)) {
+  if (!parseDurationToken(trimmed)) {
     return FORMAT_HINT;
   }
   return null;
 }
 
 /**
- * Validates an optimistic / likely / pessimistic estimate triple.
+ * Returns a field-level error for a single duration token, or null when valid/empty.
+ * Trims leading/trailing whitespace; internal whitespace is invalid.
+ * @param raw - Raw field value.
+ * @returns Error message for this field alone.
+ */
+export function durationFieldError(raw: string): string | null {
+  return durationFieldErrorTrimmed(raw.trim());
+}
+
+/**
+ * Validates an optimistic / likely / pessimistic estimate triple from the GUI.
+ * Trims leading/trailing whitespace on each field; rejects internal whitespace.
  * All empty yields `None`; any filled requires all three and ordered amounts.
  * @param values - Field values from the form.
  * @returns Validation result with normalized estimate or field errors.
@@ -128,7 +141,7 @@ export function validateWorkPackageEstimate(
   if (!optimisticRaw) {
     errors.optimistic = "Required when any estimate is set.";
   } else {
-    const fieldError = durationFieldError(optimisticRaw);
+    const fieldError = durationFieldErrorTrimmed(optimisticRaw);
     if (fieldError) {
       errors.optimistic = fieldError;
     }
@@ -137,7 +150,7 @@ export function validateWorkPackageEstimate(
   if (!likelyRaw) {
     errors.likely = "Required when any estimate is set.";
   } else {
-    const fieldError = durationFieldError(likelyRaw);
+    const fieldError = durationFieldErrorTrimmed(likelyRaw);
     if (fieldError) {
       errors.likely = fieldError;
     }
@@ -146,7 +159,7 @@ export function validateWorkPackageEstimate(
   if (!pessimisticRaw) {
     errors.pessimistic = "Required when any estimate is set.";
   } else {
-    const fieldError = durationFieldError(pessimisticRaw);
+    const fieldError = durationFieldErrorTrimmed(pessimisticRaw);
     if (fieldError) {
       errors.pessimistic = fieldError;
     }

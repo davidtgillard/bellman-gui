@@ -24,21 +24,22 @@ pub enum EstimateInput {
 }
 
 /// Parses a duration token such as `1w`, `2.5d`, or `8h`.
-/// Grammar matches the UI: `^(\d+(?:\.\d)?)\s*([hdw])$` (case-insensitive, trimmed).
+/// Trims leading/trailing whitespace, then matches `^(\d+(?:\.\d)?)([hdw])$`
+/// (case-insensitive). Internal whitespace is rejected.
 fn parse_duration_token(token: &str) -> Result<ParsedDuration, String> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
+    let token = token.trim();
+    if token.is_empty() {
         return Err("duration token is empty".to_string());
     }
 
-    let bytes = trimmed.as_bytes();
+    let bytes = token.as_bytes();
     let mut index = 0;
     while index < bytes.len() && bytes[index].is_ascii_digit() {
         index += 1;
     }
     if index == 0 {
         return Err(format!(
-            "invalid duration amount in {trimmed:?}; expected a number like 1 or 2.5"
+            "invalid duration amount in {token:?}; expected a number like 1 or 2.5"
         ));
     }
 
@@ -46,46 +47,43 @@ fn parse_duration_token(token: &str) -> Result<ParsedDuration, String> {
         index += 1;
         if index >= bytes.len() || !bytes[index].is_ascii_digit() {
             return Err(format!(
-                "invalid duration amount in {trimmed:?}; expected a number like 1 or 2.5"
+                "invalid duration amount in {token:?}; expected a number like 1 or 2.5"
             ));
         }
         index += 1;
         if index < bytes.len() && bytes[index].is_ascii_digit() {
             return Err(format!(
-                "duration amount may have at most one decimal place in {trimmed:?}"
+                "duration amount may have at most one decimal place in {token:?}"
             ));
         }
     }
 
-    let amount_str = &trimmed[..index];
-    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
+    let amount_str = &token[..index];
     if index >= bytes.len() {
         return Err(format!(
-            "invalid duration unit in {trimmed:?}; expected h, d, or w"
+            "invalid duration unit in {token:?}; expected h, d, or w"
         ));
     }
 
     let unit = (bytes[index] as char).to_ascii_lowercase();
     if !matches!(unit, 'h' | 'd' | 'w') {
         return Err(format!(
-            "invalid duration unit in {trimmed:?}; expected h, d, or w"
+            "invalid duration unit in {token:?}; expected h, d, or w"
         ));
     }
     index += 1;
     if index != bytes.len() {
         return Err(format!(
-            "invalid duration unit in {trimmed:?}; expected h, d, or w"
+            "invalid duration unit in {token:?}; expected h, d, or w"
         ));
     }
 
     let amount: f64 = amount_str.parse().map_err(|_| {
-        format!("invalid duration amount in {trimmed:?}; expected a number like 1 or 2.5")
+        format!("invalid duration amount in {token:?}; expected a number like 1 or 2.5")
     })?;
     if !amount.is_finite() || amount <= 0.0 {
         return Err(format!(
-            "duration amount must be greater than zero in {trimmed:?}"
+            "duration amount must be greater than zero in {token:?}"
         ));
     }
 
@@ -134,31 +132,52 @@ pub fn resolve_estimate_input(
     }
 }
 
-/// Reads an optional estimate sequence from YAML without validating durations.
-/// Missing, any string (including `unknown`), empty, wrong-length, or non-string
-/// entries become `None`.
-pub fn parse_estimate_yaml(value: Option<&YamlValue>) -> Option<WorkPackageEstimate> {
-    let value = value?;
-    if value.as_str().is_some() {
-        return None;
+fn estimate_shape_error(detail: &str) -> String {
+    format!("estimate must be \"unknown\" or a 3-point duration triple; {detail}")
+}
+
+/// Reads an optional estimate from YAML.
+/// Missing, null, or the `"unknown"` sentinel become `Ok(None)`.
+/// A 3-string sequence is validated (leading/trailing whitespace trimmed).
+/// Any other shape, including wrong-length sequences, is `Err`.
+pub fn parse_estimate_yaml(
+    value: Option<&YamlValue>,
+) -> Result<Option<WorkPackageEstimate>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
     }
-    let items = value.as_sequence()?;
+    if let Some(text) = value.as_str() {
+        if text == "unknown" {
+            return Ok(None);
+        }
+        return Err(estimate_shape_error("got a string other than \"unknown\""));
+    }
+    let Some(items) = value.as_sequence() else {
+        return Err(estimate_shape_error("got a value that is not a string or sequence"));
+    };
     if items.len() != 3 {
-        return None;
+        return Err(estimate_shape_error(&format!("got {} values", items.len())));
     }
 
     let mut tokens = [String::new(), String::new(), String::new()];
     for (index, item) in items.iter().enumerate() {
-        tokens[index] = item.as_str()?.to_string();
+        let Some(token) = item.as_str() else {
+            return Err(estimate_shape_error("entries must all be strings"));
+        };
+        tokens[index] = token.to_string();
     }
-    Some(tokens)
+    Ok(Some(validate_work_package_estimate(&tokens)?))
 }
 
 /// Maps a YAML estimate onto the IPC wire value (triple or `"unknown"`).
-pub fn estimate_wire_from_yaml(value: Option<&YamlValue>) -> EstimateInput {
-    match parse_estimate_yaml(value) {
-        Some(tokens) => EstimateInput::Triple(tokens),
-        None => EstimateInput::Unknown(UnknownSentinel::Unknown),
+/// Invalid duration tokens or a malformed estimate fail the load.
+pub fn estimate_wire_from_yaml(value: Option<&YamlValue>) -> Result<EstimateInput, String> {
+    match parse_estimate_yaml(value)? {
+        Some(tokens) => Ok(EstimateInput::Triple(tokens)),
+        None => Ok(EstimateInput::Unknown(UnknownSentinel::Unknown)),
     }
 }
 
@@ -229,37 +248,94 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_space_before_unit() {
-        let parsed = parse_duration_token("1 w").unwrap();
+    fn rejects_internal_whitespace_in_duration_tokens() {
+        assert!(parse_duration_token("1 w").is_err());
+        assert!(parse_duration_token("1    d").is_err());
+        assert!(parse_duration_token("5  w").is_err());
+        assert!(parse_duration_token("1\td").is_err());
+    }
+
+    #[test]
+    fn trims_leading_and_trailing_whitespace() {
+        assert_eq!(parse_duration_token("1w ").unwrap().normalized, "1w");
+        assert_eq!(parse_duration_token("  1w  ").unwrap().normalized, "1w");
+        assert_eq!(parse_duration_token("\t1w").unwrap().normalized, "1w");
+    }
+
+    #[test]
+    fn normalizes_case_without_whitespace() {
+        let parsed = parse_duration_token("1W").unwrap();
         assert_eq!(parsed.normalized, "1w");
     }
 
     #[test]
-    fn parse_estimate_yaml_is_lenient() {
-        assert_eq!(parse_estimate_yaml(None), None);
+    fn parse_estimate_yaml_shape_and_validation() {
+        assert_eq!(parse_estimate_yaml(None).unwrap(), None);
         assert_eq!(
-            parse_estimate_yaml(Some(&YamlValue::from("unknown"))),
+            parse_estimate_yaml(Some(&YamlValue::Null)).unwrap(),
             None
+        );
+        assert_eq!(
+            parse_estimate_yaml(Some(&YamlValue::from("unknown"))).unwrap(),
+            None
+        );
+        let wrong_length = parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
+            YamlValue::from("1w"),
+            YamlValue::from("2w"),
+        ])))
+        .unwrap_err();
+        assert_eq!(
+            wrong_length,
+            "estimate must be \"unknown\" or a 3-point duration triple; got 2 values"
+        );
+        let not_unknown = parse_estimate_yaml(Some(&YamlValue::from("1w"))).unwrap_err();
+        assert_eq!(
+            not_unknown,
+            "estimate must be \"unknown\" or a 3-point duration triple; got a string other than \"unknown\""
+        );
+        assert_eq!(
+            parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
+                YamlValue::from("1w"),
+                YamlValue::from("2w"),
+                YamlValue::from("4w"),
+            ])))
+            .unwrap(),
+            Some(["1w".into(), "2w".into(), "4w".into()])
+        );
+        assert_eq!(
+            parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
+                YamlValue::from("1W"),
+                YamlValue::from("2w"),
+                YamlValue::from("4w"),
+            ])))
+            .unwrap(),
+            Some(["1w".into(), "2w".into(), "4w".into()])
+        );
+        assert_eq!(
+            parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
+                YamlValue::from(" 1w "),
+                YamlValue::from("2w"),
+                YamlValue::from("4w"),
+            ])))
+            .unwrap(),
+            Some(["1w".into(), "2w".into(), "4w".into()])
         );
         assert_eq!(
             parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
                 YamlValue::from("4w"),
                 YamlValue::from("2w"),
                 YamlValue::from("1w"),
-            ]))),
-            Some(["4w".into(), "2w".into(), "1w".into()])
+            ])))
+            .unwrap_err(),
+            "estimates must be ordered: optimistic ≤ likely ≤ pessimistic"
         );
-        assert_eq!(
-            parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
-                YamlValue::from("1w"),
-                YamlValue::from("2w"),
-            ]))),
-            None
-        );
-        assert_eq!(
-            parse_estimate_yaml(Some(&YamlValue::from("1w"))),
-            None
-        );
+        assert!(parse_estimate_yaml(Some(&YamlValue::Sequence(vec![
+            YamlValue::from("1 w"),
+            YamlValue::from("2w"),
+            YamlValue::from("4w"),
+        ])))
+        .unwrap_err()
+        .contains("invalid duration unit in \"1 w\""));
     }
 
     #[test]
@@ -281,6 +357,21 @@ mod tests {
             .unwrap(),
             Some(["1w".into(), "2w".into(), "4w".into()])
         );
+        assert_eq!(
+            resolve_estimate_input(Some(&EstimateInput::Triple([
+                " 1w ".into(),
+                "2w".into(),
+                "4w".into(),
+            ])))
+            .unwrap(),
+            Some(["1w".into(), "2w".into(), "4w".into()])
+        );
+        assert!(resolve_estimate_input(Some(&EstimateInput::Triple([
+            "1 w".into(),
+            "2w".into(),
+            "4w".into(),
+        ])))
+        .is_err());
     }
 
     #[test]
@@ -306,5 +397,35 @@ mod tests {
                 YamlValue::from("4w"),
             ])
         );
+    }
+
+    #[test]
+    fn estimate_wire_from_yaml_rejects_invalid_tokens() {
+        assert_eq!(
+            estimate_wire_from_yaml(None).unwrap(),
+            EstimateInput::Unknown(UnknownSentinel::Unknown)
+        );
+        assert_eq!(
+            estimate_wire_from_yaml(Some(&YamlValue::Sequence(vec![
+                YamlValue::from("1w"),
+                YamlValue::from("2w"),
+                YamlValue::from("4w"),
+            ])))
+            .unwrap(),
+            EstimateInput::Triple(["1w".into(), "2w".into(), "4w".into()])
+        );
+        assert!(estimate_wire_from_yaml(Some(&YamlValue::Sequence(vec![
+            YamlValue::from("1 w"),
+            YamlValue::from("2w"),
+            YamlValue::from("4w"),
+        ])))
+        .unwrap_err()
+        .contains("invalid duration unit in \"1 w\""));
+        assert!(estimate_wire_from_yaml(Some(&YamlValue::Sequence(vec![
+            YamlValue::from("1w"),
+            YamlValue::from("2w"),
+        ])))
+        .unwrap_err()
+        .contains("got 2 values"));
     }
 }
