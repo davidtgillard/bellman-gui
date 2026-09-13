@@ -8,6 +8,7 @@ import {
   selectNode,
   setupPage,
   test,
+  waitForStableGraphNodeRenderedCenter,
   type Scenario,
 } from "./support/fixtures";
 
@@ -119,6 +120,44 @@ test.describe("work package create", () => {
       estimate: "unknown",
     });
     expect(call?.args?.request?.parent).toBeFalsy();
+  });
+
+  test("double-click opens detail panel for a newly created root work package", async ({
+    page,
+  }) => {
+    await setupPage(page, createScenario());
+    await openWorkPackageGraph(page, PROJECT.id);
+    await openBackgroundContextMenu(page);
+    await page.getByRole("button", { name: "New work package…" }).click();
+
+    const dialog = page.locator(".edit-dialog");
+    await dialog.getByLabel("Name").fill("wp-root-panel");
+    await dialog.getByRole("button", { name: "Create work package" }).click();
+
+    await expect
+      .poll(async () => countCalls(page, "create_node_command"))
+      .toBe(1);
+    await expect(dialog).toHaveCount(0);
+
+    const newNodeId = "project/billing-redesign/wp-root-panel";
+    const center = await waitForStableGraphNodeRenderedCenter(page, newNodeId);
+
+    await page.mouse.dblclick(center.x, center.y);
+    await expect
+      .poll(async () => page.locator(".node-detail-sidebar").count())
+      .toBe(1);
+    await expect
+      .poll(async () =>
+        page.evaluate((id) => {
+          const bridge = (
+            window as unknown as {
+              __TEST__?: { getSelectedGraphNodeId?: () => string | null };
+            }
+          ).__TEST__;
+          return bridge?.getSelectedGraphNodeId?.() === id;
+        }, newNodeId),
+      )
+      .toBe(true);
   });
 
   test("create sends unknown when estimate fields are left blank", async ({ page }) => {

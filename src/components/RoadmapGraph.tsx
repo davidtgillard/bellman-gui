@@ -1802,6 +1802,9 @@ export function RoadmapGraph({
       id: null,
       time: 0,
     };
+    // Two leaf taps already call openNodeDetail; skip the following dbltap so
+    // App does not restart loadNodeDetail in the same gesture.
+    let openedDetailFromCompoundLeafTap = false;
 
     const openNodeDetail = (nodeId: string) => {
       closeContextMenu();
@@ -1867,9 +1870,11 @@ export function RoadmapGraph({
         lastCompoundLeafTap = { id: null, time: 0 };
         selectedNodeIdAtPointerDown = null;
         selectCompoundLeaf(childId);
+        openedDetailFromCompoundLeafTap = true;
         openNodeDetail(childId);
         return;
       }
+      openedDetailFromCompoundLeafTap = false;
       lastCompoundLeafTap = { id: childId, time: now };
 
       if (wasSelected) {
@@ -1912,6 +1917,19 @@ export function RoadmapGraph({
       if (compoundGraphRef.current && node.data("kind") === "leaf") {
         if (compoundLeafClickHandledRef.current) {
           compoundLeafClickHandledRef.current = false;
+          return;
+        }
+        // Root leaves never enter child-drag; route taps like parented leaves so
+        // selection and synthetic double-click still open the detail panel.
+        const hasParent = Boolean(
+          sceneRef.current?.getModel()?.parentOf.get(nodeId),
+        );
+        if (!hasParent) {
+          const wasSelected =
+            node.selected() ||
+            nodeId === selectedNodeIdRef.current ||
+            nodeId === lastSelectedCompoundLeafRef.current;
+          compoundLeafTapRef.current?.(nodeId, wasSelected);
           return;
         }
         const childId = nodeId;
@@ -2001,11 +2019,20 @@ export function RoadmapGraph({
     cy.on("unselect", "node", bumpGraphSelection);
 
     cy.on("dbltap", "node", (event) => {
+      const skipLeafDbltapDetail = openedDetailFromCompoundLeafTap;
+      openedDetailFromCompoundLeafTap = false;
       if (linkingModeRef.current) {
         return;
       }
       const node = event.target;
       if (compoundGraphRef.current && node.data("kind") === "leaf") {
+        // Parented leaves open detail via child-drag taps; root leaves do not.
+        const hasParent = Boolean(
+          sceneRef.current?.getModel()?.parentOf.get(node.id()),
+        );
+        if (!hasParent && !skipLeafDbltapDetail) {
+          openNodeDetail(node.id());
+        }
         return;
       }
       openNodeDetail(node.id());

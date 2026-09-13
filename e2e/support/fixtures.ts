@@ -832,6 +832,67 @@ export async function getCompositeRenderedBox(
 }
 
 /**
+ * Returns the node's rendered centre in page coordinates, or null if missing.
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function getGraphNodeRenderedCenter(
+  page: Page,
+  nodeId: string,
+): Promise<{ x: number; y: number } | null> {
+  return page.evaluate((id) => {
+    const bridge = (window as unknown as { __TEST__?: TestBridge }).__TEST__;
+    try {
+      return bridge?.getGraphNodeRenderedCenter?.(id) ?? null;
+    } catch {
+      return null;
+    }
+  }, nodeId);
+}
+
+const RENDERED_CENTER_STABLE_PX = 0.5;
+
+/**
+ * Waits until a node's rendered centre exists and stays put (past create-focus pan).
+ * @param page - Playwright page to inspect.
+ * @param nodeId - Roadmap node identifier.
+ */
+export async function waitForStableGraphNodeRenderedCenter(
+  page: Page,
+  nodeId: string,
+): Promise<{ x: number; y: number }> {
+  await waitForGraph(page);
+  let previous: { x: number; y: number } | null = null;
+  let stable: { x: number; y: number } | null = null;
+  await expect
+    .poll(
+      async () => {
+        const center = await getGraphNodeRenderedCenter(page, nodeId);
+        if (!center) {
+          previous = null;
+          return false;
+        }
+        if (
+          previous &&
+          Math.abs(center.x - previous.x) < RENDERED_CENTER_STABLE_PX &&
+          Math.abs(center.y - previous.y) < RENDERED_CENTER_STABLE_PX
+        ) {
+          stable = center;
+          return true;
+        }
+        previous = center;
+        return false;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  if (!stable) {
+    throw new Error(`graph node rendered center did not stabilize: ${nodeId}`);
+  }
+  return stable;
+}
+
+/**
  * Waits until a graph node reaches the expected model-space position/size.
  * @param page - Playwright page to inspect.
  * @param nodeId - Roadmap node identifier.
