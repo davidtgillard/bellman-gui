@@ -11,7 +11,7 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const GOAL = { id: "goal/partner-integrations", type: "goal" };
+const PARTNER = { id: "initiative/partner-integrations", type: "initiative" };
 const INITIATIVE = { id: "initiative/kri-image-tools", type: "initiative" };
 const ROADMAP_ROOT = "/roadmap";
 
@@ -19,7 +19,7 @@ const INITIAL_LAYOUT = {
   version: 1,
   kind: "bellman-gui-work-package-layout",
   top_level: {
-    [GOAL.id]: { x: 100, y: 50 },
+    [PARTNER.id]: { x: 100, y: 50 },
     [INITIATIVE.id]: { x: -120, y: -80 },
   },
   projects: {},
@@ -31,7 +31,7 @@ function topLevelScenario(layout = INITIAL_LAYOUT): Scenario {
       {
         root: ROADMAP_ROOT,
         editable: true,
-        nodes: [GOAL, INITIATIVE],
+        nodes: [PARTNER, INITIATIVE],
         links: [],
         link_types: [],
         label: null,
@@ -49,10 +49,10 @@ test.describe("top-level layout persistence", () => {
     const scenario = topLevelScenario();
     await setupPage(page, scenario);
     await waitForGraph(page);
-    await waitForGraphNodeState(page, GOAL.id, INITIAL_LAYOUT.top_level[GOAL.id]);
+    await waitForGraphNodeState(page, PARTNER.id, INITIAL_LAYOUT.top_level[PARTNER.id]);
 
-    const before = await getGraphNodeAbsolutePosition(page, GOAL.id);
-    await dragGraphNode(page, GOAL.id, 140, 90);
+    const before = await getGraphNodeAbsolutePosition(page, PARTNER.id);
+    await dragGraphNode(page, PARTNER.id, 140, 90);
 
     await expect
       .poll(async () => {
@@ -67,28 +67,28 @@ test.describe("top-level layout persistence", () => {
     const savedLayout = (
       saveCall?.args as { layout?: Scenario["layout"] } | undefined
     )?.layout;
-    expect(savedLayout?.top_level?.[GOAL.id]).toBeTruthy();
+    expect(savedLayout?.top_level?.[PARTNER.id]).toBeTruthy();
 
-    const savedGoal = savedLayout!.top_level![GOAL.id]!;
-    expect(Math.hypot(savedGoal.x - before.x, savedGoal.y - before.y)).toBeGreaterThan(
+    const savedPartner = savedLayout!.top_level![PARTNER.id]!;
+    expect(Math.hypot(savedPartner.x - before.x, savedPartner.y - before.y)).toBeGreaterThan(
       20,
     );
 
-    const afterDrag = await getGraphNodeAbsolutePosition(page, GOAL.id);
-    expect(Math.hypot(afterDrag.x - savedGoal.x, afterDrag.y - savedGoal.y)).toBeLessThan(
+    const afterDrag = await getGraphNodeAbsolutePosition(page, PARTNER.id);
+    expect(Math.hypot(afterDrag.x - savedPartner.x, afterDrag.y - savedPartner.y)).toBeLessThan(
       2,
     );
 
     await reloadApp(page, topLevelScenario(savedLayout));
     await waitForGraph(page);
-    await waitForGraphNodeState(page, GOAL.id, {
-      x: savedGoal.x,
-      y: savedGoal.y,
+    await waitForGraphNodeState(page, PARTNER.id, {
+      x: savedPartner.x,
+      y: savedPartner.y,
     });
 
-    const afterReload = await getGraphNodeAbsolutePosition(page, GOAL.id);
+    const afterReload = await getGraphNodeAbsolutePosition(page, PARTNER.id);
     expect(
-      Math.hypot(afterReload.x - savedGoal.x, afterReload.y - savedGoal.y),
+      Math.hypot(afterReload.x - savedPartner.x, afterReload.y - savedPartner.y),
     ).toBeLessThan(2);
   });
 });

@@ -9,7 +9,7 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const INITIATIVE = { id: "initiative/reduce-churn", type: "initiative" };
 const MILESTONE = { id: "milestone/ga", type: "milestone" };
 
 /** Matches `GRAPH_NODE_LABEL_TYPOGRAPHY.fontSizePx` and `.milestone-overlay-title`. */
@@ -21,7 +21,7 @@ function milestoneScenario(): Scenario {
       {
         root: "/roadmap",
         editable: true,
-        nodes: [GOAL, MILESTONE],
+        nodes: [INITIATIVE, MILESTONE],
         links: [],
         link_types: [],
         label: null,

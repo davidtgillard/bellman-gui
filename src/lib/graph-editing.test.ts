@@ -12,7 +12,11 @@ import {
 
 const linkTypes: LinkTypeMeta[] = [
   { link_type: "parent_of", in_type: "work_package", out_type: "work_package" },
-  { link_type: "supports", in_type: "work_scope", out_type: "goal" },
+  {
+    link_type: "precedes_FS_Mandatory",
+    in_type: "project",
+    out_type: "milestone",
+  },
   { link_type: "precedes_FS_Mandatory", in_type: "work_package", out_type: "work_package" },
   {
     link_type: "precedes_FS_Mandatory_scope",
@@ -25,7 +29,7 @@ const nodes: GraphNode[] = [
   { id: "initiative/alpha", type: "initiative" },
   { id: "project/beta", type: "project" },
   { id: "project/beta/wp-gamma", type: "work_package" },
-  { id: "goal/delta", type: "goal" },
+  { id: "milestone/delta", type: "milestone" },
 ];
 
 describe("link type compatibility", () => {
@@ -57,23 +61,25 @@ describe("link type compatibility", () => {
     ).toEqual(["parent_of", "precedes_FS_Mandatory"]);
 
     expect(
-      compatibleLinkTypes(linkTypes, "project", "goal").map((item) => item.link_type),
-    ).toEqual(["supports"]);
+      compatibleLinkTypes(linkTypes, "project", "milestone").map((item) => item.link_type),
+    ).toEqual(["precedes_FS_Mandatory"]);
   });
 
   it("filters source and target nodes for a selected link type", () => {
-    const supports = linkTypes.find((item) => item.link_type === "supports");
-    expect(supports).toBeDefined();
-    if (!supports) {
+    const precedes = linkTypes.find(
+      (item) => item.link_type === "precedes_FS_Mandatory" && item.out_type === "milestone",
+    );
+    expect(precedes).toBeDefined();
+    if (!precedes) {
       return;
     }
 
-    expect(compatibleSourceNodes(nodes, supports).map((node) => node.id)).toEqual([
+    expect(compatibleSourceNodes(nodes, precedes).map((node) => node.id)).toEqual([
       "initiative/alpha",
       "project/beta",
     ]);
-    expect(compatibleTargetNodes(nodes, supports).map((node) => node.id)).toEqual([
-      "goal/delta",
+    expect(compatibleTargetNodes(nodes, precedes).map((node) => node.id)).toEqual([
+      "milestone/delta",
     ]);
 
     const parentOf = linkTypes.find((item) => item.link_type === "parent_of");
@@ -98,12 +104,12 @@ describe("linkTargetsForOrigin", () => {
 
     expect(result.originRole).toBe("start");
     expect(result.targets.map((node) => node.id).sort()).toEqual([
-      "goal/delta",
+      "milestone/delta",
       "project/beta",
     ]);
-    expect(linkEndpointsForPick(origin.id, result.originRole, "goal/delta")).toEqual({
+    expect(linkEndpointsForPick(origin.id, result.originRole, "milestone/delta")).toEqual({
       source: "initiative/alpha",
-      target: "goal/delta",
+      target: "milestone/delta",
     });
   });
 
@@ -111,7 +117,7 @@ describe("linkTargetsForOrigin", () => {
     const origin = nodes[3];
     const result = linkTargetsForOrigin(origin, nodes, linkTypes);
 
-    expect(origin.type).toBe("goal");
+    expect(origin.type).toBe("milestone");
     expect(result.originRole).toBe("finish");
     expect(result.targets.map((node) => node.id).sort()).toEqual([
       "initiative/alpha",
@@ -119,7 +125,7 @@ describe("linkTargetsForOrigin", () => {
     ]);
     expect(linkEndpointsForPick(origin.id, result.originRole, "project/beta")).toEqual({
       source: "project/beta",
-      target: "goal/delta",
+      target: "milestone/delta",
     });
   });
 

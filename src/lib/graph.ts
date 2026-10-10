@@ -1,4 +1,5 @@
 import type { WorkPackageEstimate } from "./work-package-estimate";
+import type { AttributeAssignment } from "./attributes";
 
 export interface RegistryInstance {
   guid: string;
@@ -57,14 +58,12 @@ export type NodeKind =
   | "initiative"
   | "project"
   | "milestone"
-  | "goal"
   | "work_package";
 
 export const NODE_KINDS: NodeKind[] = [
   "initiative",
   "project",
   "milestone",
-  "goal",
   "work_package",
 ];
 
@@ -78,6 +77,8 @@ export interface CreateNodeRequest {
   parent?: string;
   /** Domain estimate; converted to `"unknown"` or a triple at the IPC boundary. */
   estimate?: WorkPackageEstimate;
+  /** Required attribute assignments written onto the new entity. */
+  classifications?: AttributeAssignment[];
 }
 
 export interface CreateLinkRequest {
@@ -119,7 +120,6 @@ export const RENAMEABLE_NODE_TYPES = new Set([
   "initiative",
   "project",
   "milestone",
-  "goal",
 ]);
 
 /**
@@ -200,7 +200,6 @@ export const NODE_TYPE_COLORS: Record<string, string> = {
   project: "#22c55e",
   work_package: "#94a3b8",
   milestone: "#eab308",
-  goal: "#a855f7",
 };
 
 const DEFAULT_NODE_COLOR = "#64748b";
@@ -243,7 +242,6 @@ const TYPE_QUALIFIED_KINDS = new Set([
   "initiative",
   "project",
   "milestone",
-  "goal",
 ]);
 
 /**

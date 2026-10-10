@@ -167,8 +167,8 @@ mod tests {
   "node_types": [],
   "link_types": [],
   "instances": [
-    {{"guid":"kind-goal","name":"goal","type":"kind","kind":"node","scope":"root"}},
-    {{"guid":"{guid}","name":"{logical_name}","type":"goal","kind":"node","scope":"nested","parent_guid":"kind-goal"}}
+    {{"guid":"kind-initiative","name":"initiative","type":"kind","kind":"node","scope":"root"}},
+    {{"guid":"{guid}","name":"{logical_name}","type":"initiative","kind":"node","scope":"nested","parent_guid":"kind-initiative"}}
   ]
 }}"#
         );
@@ -186,9 +186,9 @@ mod tests {
             doc: "# Reduce churn\n".to_string(),
             state: json!({"doc": "# Reduce churn\n", "history": {"done": [], "undone": []}}),
         };
-        save_node_editor_history(root, "goal/reduce-churn", entry.clone()).expect("save");
+        save_node_editor_history(root, "initiative/reduce-churn", entry.clone()).expect("save");
 
-        let loaded = load_node_editor_history(root, "goal/reduce-churn", "# Reduce churn\n")
+        let loaded = load_node_editor_history(root, "initiative/reduce-churn", "# Reduce churn\n")
             .expect("load")
             .expect("entry");
         assert_eq!(loaded.doc, entry.doc);
@@ -196,7 +196,7 @@ mod tests {
 
         let raw = fs::read_to_string(history_path(root)).expect("read file");
         assert!(raw.contains(guid));
-        assert!(!raw.contains("goal/reduce-churn"));
+        assert!(!raw.contains("initiative/reduce-churn"));
     }
 
     #[test]
@@ -208,7 +208,7 @@ mod tests {
 
         save_node_editor_history(
             root,
-            "goal/reduce-churn",
+            "initiative/reduce-churn",
             NodeEditorHistoryEntry {
                 doc: "# old\n".to_string(),
                 state: json!({"doc": "# old\n"}),
@@ -219,7 +219,7 @@ mod tests {
         // Simulate rename: same GUID, new logical name.
         seed_registry(root, guid, "cut-churn");
 
-        let loaded = load_node_editor_history(root, "goal/cut-churn", "# old\n")
+        let loaded = load_node_editor_history(root, "initiative/cut-churn", "# old\n")
             .expect("load")
             .expect("entry");
         assert_eq!(loaded.doc, "# old\n");
@@ -234,7 +234,7 @@ mod tests {
 
         save_node_editor_history(
             root,
-            "goal/reduce-churn",
+            "initiative/reduce-churn",
             NodeEditorHistoryEntry {
                 doc: "# old\n".to_string(),
                 state: json!({"doc": "# old\n"}),
@@ -242,7 +242,7 @@ mod tests {
         )
         .expect("save");
 
-        let loaded = load_node_editor_history(root, "goal/reduce-churn", "# new\n").expect("load");
+        let loaded = load_node_editor_history(root, "initiative/reduce-churn", "# new\n").expect("load");
         assert!(loaded.is_none());
 
         let persisted = read_persisted(root).expect("read");
@@ -258,7 +258,7 @@ mod tests {
 
         save_node_editor_history(
             root,
-            "goal/reduce-churn",
+            "initiative/reduce-churn",
             NodeEditorHistoryEntry {
                 doc: "# doc\n".to_string(),
                 state: json!({"doc": "# doc\n"}),

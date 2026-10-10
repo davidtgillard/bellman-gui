@@ -7,11 +7,11 @@ import {
 import { fromRoadmapGraphDto, type RoadmapGraphDto } from "./graph";
 
 describe("bundled example roadmap", () => {
-  it("loads 6 nodes and 2 links from registry + links.jsonc + subgraphs", () => {
+  it("loads 5 nodes and 2 links from registry + links.jsonc + subgraphs", () => {
     const graph = loadBundledExampleGraph();
     expect(graph.root).toBe("example");
     expect(graph.editable).toBe(false);
-    expect(graph.nodes).toHaveLength(6);
+    expect(graph.nodes).toHaveLength(5);
     expect(graph.links).toHaveLength(2);
     expect(loadBundledExampleLinks().links).toHaveLength(2);
   });

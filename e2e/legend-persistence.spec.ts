@@ -10,7 +10,7 @@ import {
 } from "./support/fixtures";
 
 const PROJECT = { id: "project/billing", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const INITIATIVE = { id: "initiative/reduce-churn", type: "initiative" };
 const MILESTONE = { id: "milestone/ga", type: "milestone" };
 const ROADMAP_ROOT = "/roadmap";
 
@@ -20,7 +20,7 @@ function multiTypeScenario(): Scenario {
       {
         root: ROADMAP_ROOT,
         editable: true,
-        nodes: [PROJECT, GOAL, MILESTONE],
+        nodes: [PROJECT, INITIATIVE, MILESTONE],
         links: [],
         link_types: [],
         label: null,
@@ -35,15 +35,15 @@ test.describe("legend visibility persistence", () => {
     await setupPage(page, multiTypeScenario());
 
     const legend = page.getByRole("complementary", { name: "Node types" });
-    const goalCheckbox = legend.getByRole("checkbox", { name: "Goal" });
+    const initiativeCheckbox = legend.getByRole("checkbox", { name: "Initiative" });
 
-    await expect(goalCheckbox).toBeChecked();
-    await goalCheckbox.uncheck();
-    await expect(goalCheckbox).not.toBeChecked();
+    await expect(initiativeCheckbox).toBeChecked();
+    await initiativeCheckbox.uncheck();
+    await expect(initiativeCheckbox).not.toBeChecked();
 
     await reloadApp(page, multiTypeScenario());
 
-    await expect(legend.getByRole("checkbox", { name: "Goal" })).not.toBeChecked();
+    await expect(legend.getByRole("checkbox", { name: "Initiative" })).not.toBeChecked();
     await expect(legend.getByRole("checkbox", { name: "Project" })).toBeChecked();
     await expect(legend.getByRole("checkbox", { name: "Milestone" })).toBeChecked();
   });
@@ -55,7 +55,7 @@ test.describe("legend visibility persistence", () => {
 
     const panBefore = await getGraphPan(page);
     const legend = page.getByRole("complementary", { name: "Node types" });
-    await legend.getByRole("checkbox", { name: "Goal" }).uncheck();
+    await legend.getByRole("checkbox", { name: "Initiative" }).uncheck();
 
     const panAfter = await getGraphPan(page);
     expect(panAfter.x).toBeCloseTo(panBefore.x, 0);

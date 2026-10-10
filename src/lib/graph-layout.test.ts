@@ -138,12 +138,12 @@ describe("graph-layout", () => {
       projects: {},
     });
 
-    const updated = withTopLevelNodePosition(initial, "goal/delta", { x: 3, y: 4 });
+    const updated = withTopLevelNodePosition(initial, "initiative/delta", { x: 3, y: 4 });
     expect(topLevelNodePositions(updated)).toEqual({
-      "goal/delta": { x: 3, y: 4 },
+      "initiative/delta": { x: 3, y: 4 },
     });
 
-    const removed = withoutTopLevelNodePosition(updated, "goal/delta");
+    const removed = withoutTopLevelNodePosition(updated, "initiative/delta");
     expect(topLevelNodePositions(removed)).toEqual({});
   });
 
@@ -152,7 +152,7 @@ describe("graph-layout", () => {
       version: 1,
       kind: "bellman-gui-work-package-layout",
       top_level: {
-        "goal/alpha": { x: 1, y: 2 },
+        "initiative/alpha": { x: 1, y: 2 },
       },
       projects: {
         "billing-redesign": {
@@ -165,13 +165,13 @@ describe("graph-layout", () => {
       initial,
       { kind: "top_level" },
       {
-        "goal/beta": { x: 5, y: 6 },
+        "initiative/beta": { x: 5, y: 6 },
         "project/gamma": { x: 7, y: 8 },
       },
     );
     expect(topLevelNodePositions(topLevel)).toEqual({
-      "goal/alpha": { x: 1, y: 2 },
-      "goal/beta": { x: 5, y: 6 },
+      "initiative/alpha": { x: 1, y: 2 },
+      "initiative/beta": { x: 5, y: 6 },
       "project/gamma": { x: 7, y: 8 },
     });
 
@@ -191,7 +191,7 @@ describe("graph-layout", () => {
   it("maps legacy layout keys onto canonical node ids", () => {
     const nodes = [
       { id: "project/usv-lars-p2", type: "project" },
-      { id: "goal/partner-integrations", type: "goal" },
+      { id: "initiative/partner-integrations", type: "initiative" },
     ];
 
     const normalized = normalizeTopLevelPositions(
@@ -205,7 +205,7 @@ describe("graph-layout", () => {
 
     expect(normalized).toEqual({
       "project/usv-lars-p2": { x: 3, y: 4 },
-      "goal/partner-integrations": { x: 5, y: 6 },
+      "initiative/partner-integrations": { x: 5, y: 6 },
     });
   });
 

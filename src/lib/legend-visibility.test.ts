@@ -47,9 +47,9 @@ describe("legend visibility persistence", () => {
   });
 
   it("round-trips visible node types through localStorage", () => {
-    saveLegendVisibility(ROOT, new Set(["goal", "project"]));
+    saveLegendVisibility(ROOT, new Set(["initiative", "project"]));
 
-    expect(loadLegendVisibility(ROOT)).toEqual(["goal", "project"]);
+    expect(loadLegendVisibility(ROOT)).toEqual(["initiative", "project"]);
   });
 
   it("returns null for missing or invalid stored values", () => {
@@ -58,27 +58,27 @@ describe("legend visibility persistence", () => {
     globalThis.localStorage.setItem(legendVisibilityStorageKey(ROOT), "not-json");
     expect(loadLegendVisibility(ROOT)).toBeNull();
 
-    globalThis.localStorage.setItem(legendVisibilityStorageKey(ROOT), JSON.stringify(["goal", 1]));
+    globalThis.localStorage.setItem(legendVisibilityStorageKey(ROOT), JSON.stringify(["initiative", 1]));
     expect(loadLegendVisibility(ROOT)).toBeNull();
   });
 
   it("defaults to all available types when nothing is stored", () => {
-    expect(resolveVisibleTypes(["goal", "project"], null)).toEqual(new Set(["goal", "project"]));
+    expect(resolveVisibleTypes(["initiative", "project"], null)).toEqual(new Set(["initiative", "project"]));
   });
 
   it("restores stored visibility for available types", () => {
-    expect(resolveVisibleTypes(["goal", "project", "milestone"], ["goal"])).toEqual(
-      new Set(["goal"]),
+    expect(resolveVisibleTypes(["initiative", "project", "milestone"], ["initiative"])).toEqual(
+      new Set(["initiative"]),
     );
   });
 
   it("preserves an intentionally empty visible set", () => {
-    expect(resolveVisibleTypes(["goal", "project"], [])).toEqual(new Set());
+    expect(resolveVisibleTypes(["initiative", "project"], [])).toEqual(new Set());
   });
 
   it("falls back to all available types when stored types no longer exist", () => {
-    expect(resolveVisibleTypes(["goal", "project"], ["milestone"])).toEqual(
-      new Set(["goal", "project"]),
+    expect(resolveVisibleTypes(["initiative", "project"], ["milestone"])).toEqual(
+      new Set(["initiative", "project"]),
     );
   });
 });

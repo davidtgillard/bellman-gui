@@ -7,8 +7,8 @@ import {
   type ContentValidationContext,
 } from "./node-content-validation";
 
-const goalContext: ContentValidationContext = {
-  nodeType: "goal",
+const initiativeContext: ContentValidationContext = {
+  nodeType: "initiative",
   expectedSlug: "reduce-churn",
 };
 
@@ -21,14 +21,14 @@ describe("slugify", () => {
 
 describe("validateNodeMarkdown", () => {
   it("flags empty content as an error", () => {
-    const diagnostics = validateNodeMarkdown("   \n  ", goalContext);
+    const diagnostics = validateNodeMarkdown("   \n  ", initiativeContext);
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].severity).toBe("error");
     expect(hasBlockingErrors(diagnostics)).toBe(true);
   });
 
   it("requires the first line to be an H1", () => {
-    const diagnostics = validateNodeMarkdown("Reduce churn\n\nBody", goalContext);
+    const diagnostics = validateNodeMarkdown("Reduce churn\n\nBody", initiativeContext);
     const error = diagnostics.find((d) => d.severity === "error");
     expect(error).toBeDefined();
     expect(error?.message).toContain("level-1 heading");
@@ -36,14 +36,14 @@ describe("validateNodeMarkdown", () => {
   });
 
   it("treats a leading ## as a missing H1 error", () => {
-    const diagnostics = validateNodeMarkdown("## Metric\n\nBody", goalContext);
+    const diagnostics = validateNodeMarkdown("## Metric\n\nBody", initiativeContext);
     expect(hasBlockingErrors(diagnostics)).toBe(true);
   });
 
   it("accepts a valid matching H1 with arbitrary sections", () => {
     const markdown =
       "# Reduce churn\n\nIntro\n\n## Introduction\n\nText\n\n## Motivation\n\nText";
-    const diagnostics = validateNodeMarkdown(markdown, goalContext);
+    const diagnostics = validateNodeMarkdown(markdown, initiativeContext);
     expect(diagnostics).toHaveLength(0);
     expect(hasBlockingErrors(diagnostics)).toBe(false);
   });
@@ -59,7 +59,7 @@ describe("validateNodeMarkdown", () => {
   });
 
   it("warns when the H1 does not match the node id", () => {
-    const diagnostics = validateNodeMarkdown("# Something else\n\nBody", goalContext);
+    const diagnostics = validateNodeMarkdown("# Something else\n\nBody", initiativeContext);
     const warning = diagnostics.find((d) => d.severity === "warning");
     expect(warning).toBeDefined();
     expect(warning?.message).toContain("doesn't match the node id");
@@ -67,18 +67,18 @@ describe("validateNodeMarkdown", () => {
   });
 
   it("flags malformed and empty links as warnings", () => {
-    const missingClose = validateNodeMarkdown("# Reduce churn\n\n[text](http", goalContext);
+    const missingClose = validateNodeMarkdown("# Reduce churn\n\n[text](http", initiativeContext);
     expect(
       missingClose.some((d) => d.message.includes("missing a closing parenthesis")),
     ).toBe(true);
 
-    const emptyUrl = validateNodeMarkdown("# Reduce churn\n\n[text]()", goalContext);
+    const emptyUrl = validateNodeMarkdown("# Reduce churn\n\n[text]()", initiativeContext);
     expect(emptyUrl.some((d) => d.message.includes("empty URL"))).toBe(true);
   });
 
   it("returns diagnostics ordered by position", () => {
     const markdown = "# Something else\n\n## Bogus\n\nBody";
-    const diagnostics = validateNodeMarkdown(markdown, goalContext);
+    const diagnostics = validateNodeMarkdown(markdown, initiativeContext);
     const offsets = diagnostics.map((d) => d.from);
     expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
   });

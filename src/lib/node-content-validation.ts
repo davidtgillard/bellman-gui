@@ -10,7 +10,7 @@ export interface ContentDiagnostic {
 }
 
 export interface ContentValidationContext {
-  /** Registry node type, e.g. `goal`, `project`, `milestone`, `initiative`. */
+  /** Registry node type, e.g. `initiative`, `project`, `milestone`, `work_package`. */
   nodeType: string;
   /** Expected node identifier segment (kebab-case) used to sanity-check the H1. */
   expectedSlug: string;

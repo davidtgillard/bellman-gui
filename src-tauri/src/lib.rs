@@ -1,3 +1,4 @@
+mod attributes;
 mod bellman_cmd;
 mod bellman_validate;
 mod cli;
@@ -13,7 +14,7 @@ mod work_package_estimate;
 
 use bellman_cmd::{run_bellman, run_bellman_capture};
 use bellman_validate::{
-    dependency_warnings_for_file, split_output_lines, DependencyWarningDto,
+    dependency_warnings_for_file, other_issues_for_file, split_output_lines, DependencyWarningDto,
 };
 use cli::CliOptions;
 use graph::load_roadmap_graph;
@@ -24,6 +25,7 @@ use graph_layout::{
     WorkPackageLayoutDto,
 };
 use node_detail::load_node_detail_command;
+use crate::attributes::load_attribute_catalog;
 use roadmap_edit::{
     create_link, create_node, demote_node, promote_node, remove_link, remove_node, rename_node,
     update_work_package, ConvertScopeRequest, CreateLinkRequest, CreateNodeRequest,
@@ -235,7 +237,15 @@ pub struct SaveNodeMarkdownResponse {
     pub detail: node_detail::NodeDetailDto,
     pub graph: Option<graph::RoadmapGraphDto>,
     pub dependency_warnings: Vec<DependencyWarningDto>,
+    pub other_issues: Vec<DependencyWarningDto>,
     pub sync_skipped: bool,
+}
+
+#[tauri::command]
+fn load_attribute_catalog_command(
+    roadmap_root: String,
+) -> Vec<crate::attributes::AttributeDefinitionDto> {
+    load_attribute_catalog(Path::new(&roadmap_root))
 }
 
 #[tauri::command]
@@ -267,6 +277,7 @@ async fn save_node_markdown_command(
     let validate_lines = split_output_lines(&validate_output.stdout, &validate_output.stderr);
     let dependency_warnings =
         dependency_warnings_for_file(&validate_lines, source_path, include_scope_cycle);
+    let other_issues = other_issues_for_file(&validate_lines, source_path);
 
     let graph = if validate_output.success {
         run_bellman(&app, &["sync", &roadmap_root]).await?;
@@ -281,6 +292,7 @@ async fn save_node_markdown_command(
         detail,
         graph,
         dependency_warnings,
+        other_issues,
         sync_skipped: !validate_output.success,
     })
 }
@@ -307,18 +319,54 @@ fn save_node_editor_history_command(
     node_editor_history::save_node_editor_history(Path::new(&roadmap_root), &node_id, entry)
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct UpdateWorkPackageResponse {
+    pub detail: node_detail::NodeDetailDto,
+    pub graph: Option<graph::RoadmapGraphDto>,
+    pub dependency_warnings: Vec<DependencyWarningDto>,
+    pub other_issues: Vec<DependencyWarningDto>,
+    pub sync_skipped: bool,
+}
+
 #[tauri::command]
 async fn update_work_package_command(
     app: tauri::AppHandle,
     request: UpdateWorkPackageRequest,
     state: tauri::State<'_, UndoState>,
-) -> Result<graph::RoadmapGraphDto, String> {
+) -> Result<UpdateWorkPackageResponse, String> {
     let roadmap_root = request.roadmap_root.clone();
-    let label = format!("edit {}", request.node_id);
-    let before = crate::undo::capture(Path::new(&roadmap_root)).ok();
-    update_work_package(&app, request).await?;
-    record_edit(&state, &roadmap_root, label, before);
-    load_roadmap_graph(PathBuf::from(roadmap_root).as_path())
+    let node_id = request.node_id.clone();
+    let label = format!("edit {node_id}");
+    let root = PathBuf::from(&roadmap_root);
+    let before = crate::undo::capture(root.as_path()).ok();
+    let source_path = update_work_package(&request)?;
+    let detail = node_detail::load_node_detail(root.as_path(), &node_id)?;
+
+    let validate_output = run_bellman_capture(
+        &app,
+        &["validate", "--no-registry", &roadmap_root],
+    )
+    .await?;
+    let validate_lines = split_output_lines(&validate_output.stdout, &validate_output.stderr);
+    let dependency_warnings = dependency_warnings_for_file(&validate_lines, &source_path, false);
+    let other_issues = other_issues_for_file(&validate_lines, &source_path);
+
+    let graph = if validate_output.success {
+        run_bellman(&app, &["sync", &roadmap_root]).await?;
+        record_edit(&state, &roadmap_root, label, before);
+        Some(load_roadmap_graph(root.as_path())?)
+    } else {
+        record_edit(&state, &roadmap_root, label, before);
+        None
+    };
+
+    Ok(UpdateWorkPackageResponse {
+        detail,
+        graph,
+        dependency_warnings,
+        other_issues,
+        sync_skipped: !validate_output.success,
+    })
 }
 
 #[tauri::command]
@@ -534,6 +582,7 @@ pub fn run() {
             redo_command,
             undo_state_command,
             load_node_detail_command,
+            load_attribute_catalog_command,
             load_work_package_layout_command,
             save_work_package_node_position_command,
             remove_work_package_node_position_command,

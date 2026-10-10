@@ -28,7 +28,7 @@ describe("parseRoadmapGraph", () => {
   const graph = loadBundledExampleGraph();
 
   it("parses example fixture nodes and links", () => {
-    expect(graph.nodes).toHaveLength(6);
+    expect(graph.nodes).toHaveLength(5);
     expect(graph.links).toHaveLength(2);
   });
 
@@ -36,23 +36,25 @@ describe("parseRoadmapGraph", () => {
     const workPackage = graph.nodes.find(
       (node) => node.id === "project/billing-redesign/wp-invoicing",
     );
-    const goal = graph.nodes.find((node) => node.type === "goal");
+    const initiative = graph.nodes.find((node) => node.type === "initiative");
     const milestone = graph.nodes.find((node) => node.type === "milestone");
 
     expect(workPackage).toBeDefined();
-    expect(goal).toBeDefined();
+    expect(initiative).toBeDefined();
     expect(milestone).toBeDefined();
 
     expect(canBeLinkStart(workPackage!, graph.nodes, graph.linkTypes)).toBe(true);
     expect(canBeLinkFinish(workPackage!, graph.nodes, graph.linkTypes)).toBe(true);
-    expect(canBeLinkStart(goal!, graph.nodes, graph.linkTypes)).toBe(false);
-    expect(canBeLinkFinish(goal!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canBeLinkStart(initiative!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canBeLinkFinish(initiative!, graph.nodes, graph.linkTypes)).toBe(true);
     expect(canBeLinkStart(milestone!, graph.nodes, graph.linkTypes)).toBe(false);
     expect(canBeLinkFinish(milestone!, graph.nodes, graph.linkTypes)).toBe(true);
     expect(canCreateLinkFromNode(workPackage!, graph.nodes, graph.linkTypes)).toBe(
       true,
     );
-    expect(canCreateLinkFromNode(goal!, graph.nodes, graph.linkTypes)).toBe(true);
+    expect(canCreateLinkFromNode(initiative!, graph.nodes, graph.linkTypes)).toBe(
+      true,
+    );
     expect(canCreateLinkFromNode(milestone!, graph.nodes, graph.linkTypes)).toBe(
       true,
     );
@@ -126,9 +128,9 @@ describe("parseRoadmapGraph", () => {
   it("finds a single added node id", () => {
     const added = findAddedNodeId(graph.nodes, [
       ...graph.nodes,
-      { id: "goal/new-item", type: "goal" },
+      { id: "initiative/new-item", type: "initiative" },
     ]);
-    expect(added).toBe("goal/new-item");
+    expect(added).toBe("initiative/new-item");
   });
 
   it("removes a node and incident links from graph data", () => {
@@ -137,7 +139,7 @@ describe("parseRoadmapGraph", () => {
       graph.links,
       "project/billing-redesign/wp-invoicing",
     );
-    expect(withoutNode.nodes).toHaveLength(5);
+    expect(withoutNode.nodes).toHaveLength(4);
     expect(withoutNode.links).toHaveLength(0);
 
     expect(graphWithoutLink(graph.links, graph.links[0].id)).toHaveLength(1);
@@ -145,7 +147,7 @@ describe("parseRoadmapGraph", () => {
 
   it("excludes work packages from the top-level graph", () => {
     const topLevel = topLevelGraphNodes(graph.nodes);
-    expect(topLevel).toHaveLength(4);
+    expect(topLevel).toHaveLength(3);
     expect(topLevel.some((node) => node.type === "work_package")).toBe(false);
   });
 
@@ -202,10 +204,10 @@ describe("parseRoadmapGraph", () => {
       ],
       [
         {
-          id: "supports--usv-lars-p2--goal/x",
+          id: "supports--usv-lars-p2--initiative/x",
           linkType: "supports",
           source: "usv-lars-p2",
-          target: "goal/x",
+          target: "initiative/x",
         },
       ],
     );

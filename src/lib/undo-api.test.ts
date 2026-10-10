@@ -11,16 +11,16 @@ const invokeMock = vi.mocked(invoke);
 const graphDto = {
   root: "/roadmap",
   editable: true,
-  nodes: [{ id: "goal/reduce-churn", type: "goal" }],
+  nodes: [{ id: "initiative/reduce-churn", type: "initiative" }],
   links: [
     {
-      id: "supports--project/x--goal/reduce-churn",
-      link_type: "supports",
+      id: "precedes_FS_Mandatory--project/x--initiative/reduce-churn",
+      link_type: "precedes_FS_Mandatory",
       source: "project/x",
-      target: "goal/reduce-churn",
+      target: "initiative/reduce-churn",
     },
   ],
-  link_types: [{ link_type: "supports", in_type: "work_scope", out_type: "goal" }],
+  link_types: [{ link_type: "precedes_FS_Mandatory", in_type: "project", out_type: "initiative" }],
 };
 
 describe("undo-api", () => {
@@ -38,7 +38,7 @@ describe("undo-api", () => {
     });
     expect(graph.root).toBe("/roadmap");
     expect(graph.editable).toBe(true);
-    expect(graph.links[0]?.linkType).toBe("supports");
+    expect(graph.links[0]?.linkType).toBe("precedes_FS_Mandatory");
   });
 
   it("redo invokes redo_command and maps the returned graph", async () => {
@@ -49,7 +49,7 @@ describe("undo-api", () => {
     expect(invokeMock).toHaveBeenCalledWith("redo_command", {
       roadmapRoot: "/roadmap",
     });
-    expect(graph.nodes[0]?.id).toBe("goal/reduce-churn");
+    expect(graph.nodes[0]?.id).toBe("initiative/reduce-churn");
   });
 
   it("undoState invokes undo_state_command and maps snake_case fields", async () => {

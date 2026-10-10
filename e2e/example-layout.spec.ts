@@ -8,7 +8,6 @@ import {
   type Scenario,
 } from "./support/fixtures";
 
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
 const INITIATIVE = { id: "initiative/explore-ml-ranking", type: "initiative" };
 const PROJECT = { id: "project/billing-redesign", type: "project" };
 const MILESTONE = { id: "milestone/ga-release", type: "milestone" };
@@ -20,8 +19,8 @@ function otherRoadmapScenario(): Scenario {
         root: "/other-roadmap",
         editable: true,
         nodes: [
-          { id: "goal/other", type: "goal" },
           { id: "initiative/other", type: "initiative" },
+          { id: "project/other", type: "project" },
         ],
         links: [],
         link_types: [],
@@ -33,8 +32,8 @@ function otherRoadmapScenario(): Scenario {
       version: 1,
       kind: "bellman-gui-work-package-layout",
       top_level: {
-        "goal/other": { x: 40, y: 20 },
-        "initiative/other": { x: -60, y: -30 },
+        "initiative/other": { x: 40, y: 20 },
+        "project/other": { x: -60, y: -30 },
       },
       projects: {},
     },
@@ -51,16 +50,20 @@ test.describe("example roadmap layout", () => {
     await emitEvent(page, "show-example-roadmap");
     await waitForGraph(page);
 
+    const legend = page.getByRole("complementary", { name: "Node types" });
+    await expect(legend.getByRole("checkbox", { name: "Goal" })).toHaveCount(0);
+    await expect(legend.getByRole("checkbox", { name: "Initiative" })).toBeVisible();
+
     await expect
       .poll(async () => {
         const positions = await Promise.all(
-          [GOAL.id, INITIATIVE.id, PROJECT.id, MILESTONE.id].map((id) =>
+          [INITIATIVE.id, PROJECT.id, MILESTONE.id].map((id) =>
             getGraphNodeAbsolutePosition(page, id),
           ),
         );
         const keys = new Set(positions.map((position) => `${position.x},${position.y}`));
         return keys.size;
       })
-      .toBe(4);
+      .toBe(3);
   });
 });

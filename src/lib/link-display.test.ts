@@ -113,7 +113,7 @@ describe("create-link grouping", () => {
     { link_type: "precedes_FS_Mandatory", in_type: "work_package", out_type: "work_package" },
     { link_type: "precedes_FF_Discretionary", in_type: "work_package", out_type: "work_package" },
     { link_type: "precedes_FF_Optional", in_type: "work_package", out_type: "work_package" },
-    { link_type: "supports", in_type: "work_scope", out_type: "goal" },
+    { link_type: "supports", in_type: "work_scope", out_type: "initiative" },
   ];
 
   it("lists kinds and reconstructs wire ids", () => {

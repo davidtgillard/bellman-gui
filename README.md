@@ -2,7 +2,7 @@
 
 Desktop graph viewer for [Bellman](https://github.com/davidtgillard/bellman) roadmaps.
 
-Bellman stores product roadmaps as markdown on disk and derives a pyfits graph for validation. This app visualizes that graph — initiatives, projects, work packages, milestones, goals, and their connections — in an interactive WebGL canvas powered by [Reagraph](https://reagraph.dev/).
+Bellman stores product roadmaps as markdown on disk and derives a pyfits graph for validation. This app visualizes that graph — initiatives, projects, work packages, milestones, and their connections — in an interactive WebGL canvas powered by [Reagraph](https://reagraph.dev/). Outcomes such as goals are roadmap attributes, shown on the node that carries them.
 
 On first launch the app shows a bundled example roadmap. After you open a roadmap folder, the next launch reopens that project when it is still available; otherwise it falls back to the example. Pass a roadmap root on the command line to open it directly (this also becomes the remembered project), or use **Open roadmap…** to pick any initialized bellman roadmap folder (one that contains `.fits/registry.json` from `bellman init`).
 
@@ -103,7 +103,7 @@ Node drag positions are saved separately and are **not** part of the undo stack.
 
 **How to undo or redo**
 
-- **Toolbar** — **Undo** and **Redo** buttons appear above the graph when the roadmap is editable. Hover a button to see what operation it will apply (for example, `Undo: create goal reduce-churn`).
+- **Toolbar** — **Undo** and **Redo** buttons appear above the graph when the roadmap is editable. Hover a button to see what operation it will apply (for example, `Undo: create milestone ga-release`).
 - **Menu** — **Edit → Undo** or **Edit → Redo**
 - **Keyboard** — **Ctrl+Z** / **Cmd+Z** to undo; **Ctrl+Shift+Z** / **Cmd+Shift+Z** to redo
 

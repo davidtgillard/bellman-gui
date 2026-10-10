@@ -17,7 +17,8 @@ import {
 const INITIATIVE_A = { id: "initiative/settings-manager", type: "initiative" };
 const INITIATIVE_B = { id: "initiative/billing-redesign", type: "initiative" };
 const PROJECT = { id: "project/billing", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const MILESTONE_A = { id: "milestone/alpha", type: "milestone" };
+const MILESTONE_B = { id: "milestone/beta", type: "milestone" };
 
 const LINK_TYPES = [
   {
@@ -31,9 +32,9 @@ const LINK_TYPES = [
     out_type: "initiative",
   },
   {
-    link_type: "supports",
-    in_type: "work_scope",
-    out_type: "goal",
+    link_type: "precedes_FS_Mandatory",
+    in_type: "milestone",
+    out_type: "milestone",
   },
 ];
 
@@ -43,7 +44,7 @@ function createLinkScenario(): Scenario {
       {
         root: "/roadmap",
         editable: true,
-        nodes: [INITIATIVE_A, INITIATIVE_B, PROJECT, GOAL],
+        nodes: [INITIATIVE_A, INITIATIVE_B, PROJECT, MILESTONE_A, MILESTONE_B],
         links: [],
         link_types: LINK_TYPES,
         label: null,
@@ -68,7 +69,7 @@ test.describe("click-to-connect links", () => {
       "Choose a node to link",
     );
     await expect(page.locator(`[data-link-target-ring="${INITIATIVE_B.id}"]`)).toBeVisible();
-    await expect(page.locator(`[data-link-target-ring="${GOAL.id}"]`)).toBeVisible();
+    await expect(page.locator(`[data-link-target-ring="${MILESTONE_A.id}"]`)).toHaveCount(0);
     await expect(page.locator(`[data-link-target-ring="${PROJECT.id}"]`)).toHaveCount(0);
 
     await expect
@@ -117,13 +118,13 @@ test.describe("click-to-connect links", () => {
     page,
   }) => {
     await setupPage(page, createLinkScenario());
-    await startLinkingFrom(page, INITIATIVE_A.id);
-    await tapGraphNode(page, GOAL.id);
+    await startLinkingFrom(page, MILESTONE_A.id);
+    await tapGraphNode(page, MILESTONE_B.id);
 
     await expect(page.getByRole("dialog", { name: "Link type" })).toHaveCount(0);
     await expect
       .poll(async () => getGraphEdgeIds(page))
-      .toContainEqual(expect.stringContaining("supports"));
+      .toContainEqual(expect.stringContaining("precedes_FS_Mandatory"));
     expect(await countCalls(page, "create_link_command")).toBe(1);
   });
 
@@ -163,11 +164,11 @@ test.describe("click-to-connect links", () => {
 
   test("undo and redo reverse a created link", async ({ page }) => {
     await setupPage(page, createLinkScenario());
-    await startLinkingFrom(page, INITIATIVE_A.id);
-    await tapGraphNode(page, GOAL.id);
+    await startLinkingFrom(page, MILESTONE_A.id);
+    await tapGraphNode(page, MILESTONE_B.id);
     await expect
       .poll(async () => getGraphEdgeIds(page))
-      .toContainEqual(expect.stringContaining("supports"));
+      .toContainEqual(expect.stringContaining("precedes_FS_Mandatory"));
 
     await waitForUndoReady(page);
     await page.keyboard.press("Control+z");
@@ -176,6 +177,6 @@ test.describe("click-to-connect links", () => {
     await page.keyboard.press("Control+Shift+z");
     await expect
       .poll(async () => getGraphEdgeIds(page))
-      .toContainEqual(expect.stringContaining("supports"));
+      .toContainEqual(expect.stringContaining("precedes_FS_Mandatory"));
   });
 });

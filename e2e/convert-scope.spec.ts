@@ -13,7 +13,6 @@ const PROJECT_WITH_WORK_PACKAGES = {
   type: "project",
 };
 const MILESTONE = { id: "milestone/ga-release", type: "milestone" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
 const WORK_PACKAGE_PARENT = {
   id: "project/billing-redesign/wp-invoicing",
   type: "work_package",
@@ -40,7 +39,6 @@ function convertScopeScenario(): Scenario {
           PROJECT_EMPTY,
           PROJECT_WITH_WORK_PACKAGES,
           MILESTONE,
-          GOAL,
           WORK_PACKAGE_PARENT,
           WORK_PACKAGE_LEAF,
         ],
@@ -74,10 +72,6 @@ test.describe("convert initiative and project context menu", () => {
     await setupPage(page, convertScopeScenario());
 
     await openNodeContextMenu(page, MILESTONE.id);
-    await expect(page.getByRole("button", { name: "Convert to project" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Convert to initiative" })).toHaveCount(0);
-
-    await openNodeContextMenu(page, GOAL.id);
     await expect(page.getByRole("button", { name: "Convert to project" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Convert to initiative" })).toHaveCount(0);
   });

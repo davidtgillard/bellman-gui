@@ -116,6 +116,27 @@ pub fn dependency_warnings_for_file(
     warnings
 }
 
+/// Collect non-dependency validation lines that mention one source file.
+pub fn other_issues_for_file(
+    output_lines: &[String],
+    source_path: &Path,
+) -> Vec<DependencyWarningDto> {
+    let mut warnings = Vec::new();
+    for line in output_lines {
+        let Some(issue) = parse_issue_line(line) else {
+            continue;
+        };
+        if is_dependency_message(&issue.message) || !paths_match(&issue.path, source_path) {
+            continue;
+        }
+        warnings.push(DependencyWarningDto {
+            line: issue.line,
+            message: issue.message,
+        });
+    }
+    warnings
+}
+
 /// Split bellman CLI stdout/stderr into individual non-empty lines.
 pub fn split_output_lines(stdout: &str, stderr: &str) -> Vec<String> {
     let mut lines = Vec::new();
@@ -203,5 +224,26 @@ mod tests {
         );
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("ambiguous dependency"));
+    }
+
+    #[test]
+    fn collects_non_dependency_attribute_errors() {
+        let lines = vec![
+            "initiatives/foo.md: initiative 'foo': missing required attribute 'priority'".to_string(),
+            "initiatives/foo.md: unknown dependency predecessor 'x'".to_string(),
+        ];
+        let issues = other_issues_for_file(&lines, Path::new("/roadmap/initiatives/foo.md"));
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].message.contains("priority"));
+    }
+
+    #[test]
+    fn ignores_other_issues_for_other_files() {
+        let lines = vec![
+            "initiatives/other.md: initiative 'other': missing required attribute 'priority'"
+                .to_string(),
+        ];
+        let issues = other_issues_for_file(&lines, Path::new("/roadmap/initiatives/foo.md"));
+        assert!(issues.is_empty());
     }
 }

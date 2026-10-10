@@ -10,7 +10,7 @@ import {
 } from "./support/fixtures";
 
 const PROJECT = { id: "project/billing", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const INITIATIVE = { id: "initiative/reduce-churn", type: "initiative" };
 const MILESTONE = { id: "milestone/ga", type: "milestone" };
 const ROADMAP_ROOT = "/roadmap";
 
@@ -19,14 +19,14 @@ function milestoneScenario(): Scenario {
   const base: RoadmapState = {
     root: ROADMAP_ROOT,
     editable: true,
-    nodes: [PROJECT, GOAL],
+    nodes: [PROJECT, INITIATIVE],
     links: [],
     link_types: [],
     label: null,
   };
   const withMilestone: RoadmapState = {
     ...base,
-    nodes: [PROJECT, GOAL, MILESTONE],
+    nodes: [PROJECT, INITIATIVE, MILESTONE],
     label: "create milestone ga",
   };
   return { states: [base, withMilestone], index: 1, persistUndo: true };
@@ -39,7 +39,7 @@ function baseScenario(): Scenario {
       {
         root: ROADMAP_ROOT,
         editable: true,
-        nodes: [PROJECT, GOAL],
+        nodes: [PROJECT, INITIATIVE],
         links: [],
         link_types: [],
         label: null,
@@ -65,7 +65,7 @@ test.describe("undo persistence", () => {
     await waitForUndoReady(page);
     await page.keyboard.press("Control+z");
     await expect(legend.getByText("Milestone")).toHaveCount(0);
-    await expect(legend.getByText("Goal")).toBeVisible();
+    await expect(legend.getByText("Initiative")).toBeVisible();
   });
 
   test("stale persisted history is cleared when the graph no longer matches", async ({
@@ -74,14 +74,14 @@ test.describe("undo persistence", () => {
     const base: RoadmapState = {
       root: ROADMAP_ROOT,
       editable: true,
-      nodes: [PROJECT, GOAL],
+      nodes: [PROJECT, INITIATIVE],
       links: [],
       link_types: [],
       label: null,
     };
     const withMilestone: RoadmapState = {
       ...base,
-      nodes: [PROJECT, GOAL, MILESTONE],
+      nodes: [PROJECT, INITIATIVE, MILESTONE],
       label: "create milestone ga",
     };
 

@@ -1,7 +1,9 @@
 import {
   countCalls,
   expect,
+  getCalls,
   getGraphEdgeIds,
+  openBackgroundContextMenu,
   openNodeContextMenu,
   reloadApp,
   selectNode,
@@ -12,7 +14,7 @@ import {
 } from "./support/fixtures";
 
 const PROJECT = { id: "project/billing-redesign", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const REDUCE_CHURN = { id: "initiative/reduce-churn", type: "initiative" };
 const WP_INVOICING = { id: "project/billing-redesign/wp-invoicing", type: "work_package" };
 const WP_PDF = { id: "project/billing-redesign/wp-pdf-export", type: "work_package" };
 const PARENT_LINK = {
@@ -22,12 +24,54 @@ const PARENT_LINK = {
   target: WP_PDF.id,
 };
 
-const GOAL_DETAIL: NodeDetailFixture = {
-  node_id: GOAL.id,
-  node_type: "goal",
+const ATTRIBUTE_CATALOG = [
+  {
+    name: "priority",
+    version: "1.0",
+    description: "Delivery priority.",
+    applies_to: ["initiative", "project"],
+    cardinality: "one",
+    required: true,
+    values: ["P0", "P1", "P2", "P3"],
+    value_schema: null,
+    assignment_schema: null,
+  },
+  {
+    name: "goal",
+    version: "1.0",
+    description: "Outcome this work contributes toward.",
+    applies_to: ["initiative", "project", "work_package"],
+    cardinality: "many",
+    required: false,
+    values: {
+      "reduce-churn": { title: "Reduce Churn", description: "Keep churn down." },
+    },
+    value_schema: { type: "object", properties: { title: { type: "string" } } },
+    assignment_schema: null,
+  },
+  {
+    name: "program",
+    version: "1.0",
+    description: "Large work scope.",
+    applies_to: ["initiative", "project", "work_package"],
+    cardinality: "many",
+    required: false,
+    values: { "platform-v2": { title: "Platform v2" } },
+    value_schema: { type: "object", properties: { title: { type: "string" } } },
+    assignment_schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { allocation: { type: "number", minimum: 0, maximum: 1 } },
+    },
+  },
+];
+
+const REDUCE_CHURN_DETAIL: NodeDetailFixture = {
+  node_id: REDUCE_CHURN.id,
+  node_type: "initiative",
   title: "reduce-churn",
   markdown: "# Reduce churn\n\nLower churn.\n\n## Metric\n\n3.5%",
-  source_path: "/roadmap/goals/reduce-churn.md",
+  source_path: "/roadmap/initiatives/reduce-churn.md",
   work_package: null,
 };
 
@@ -90,20 +134,20 @@ const WP_DETAIL: NodeDetailFixture = {
   },
 };
 
-function goalScenario(overrides: Partial<Scenario> = {}): Scenario {
+function reduceChurnScenario(overrides: Partial<Scenario> = {}): Scenario {
   return {
     states: [
       {
         root: "/roadmap",
         editable: true,
-        nodes: [PROJECT, GOAL],
+        nodes: [PROJECT, REDUCE_CHURN],
         links: [],
         link_types: [],
         label: null,
       },
     ],
     index: 0,
-    nodeDetail: GOAL_DETAIL,
+    nodeDetail: REDUCE_CHURN_DETAIL,
     ...overrides,
   };
 }
@@ -114,7 +158,7 @@ function workPackageScenario(): Scenario {
       {
         root: "/roadmap",
         editable: true,
-        nodes: [PROJECT, GOAL, WP_INVOICING, WP_PDF],
+        nodes: [PROJECT, REDUCE_CHURN, WP_INVOICING, WP_PDF],
         links: [PARENT_LINK],
         link_types: [],
         label: null,
@@ -148,8 +192,8 @@ async function replaceEditorContent(
 
 test.describe("node content editing", () => {
   test("opens the markdown editor for an editable node", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
 
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.locator(".cm-content")).toBeVisible();
@@ -162,14 +206,14 @@ test.describe("node content editing", () => {
     ).join("\n");
     await setupPage(
       page,
-      goalScenario({
+      reduceChurnScenario({
         nodeDetail: {
-          ...GOAL_DETAIL,
+          ...REDUCE_CHURN_DETAIL,
           markdown: `# Reduce churn\n\n${longBody}`,
         },
       }),
     );
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const scroller = page.locator(".node-markdown-codemirror .cm-scroller");
@@ -193,12 +237,12 @@ test.describe("node content editing", () => {
   test("hides Edit on a read-only roadmap", async ({ page }) => {
     await setupPage(
       page,
-      goalScenario({
+      reduceChurnScenario({
         states: [
           {
             root: "/roadmap",
             editable: false,
-            nodes: [PROJECT, GOAL],
+            nodes: [PROJECT, REDUCE_CHURN],
             links: [],
             link_types: [],
             label: null,
@@ -206,7 +250,7 @@ test.describe("node content editing", () => {
         ],
       }),
     );
-    await selectNode(page, GOAL.id);
+    await selectNode(page, REDUCE_CHURN.id);
 
     await expect(
       page.getByRole("complementary", { name: "Node details" }),
@@ -217,8 +261,8 @@ test.describe("node content editing", () => {
   test("blocks saving while validation fails and re-enables when fixed", async ({
     page,
   }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     await replaceEditorContent(page, "Just body text without a heading");
@@ -235,8 +279,8 @@ test.describe("node content editing", () => {
   });
 
   test("previews rendered markdown without leaving edit mode", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.locator(".cm-content")).toBeVisible();
 
@@ -255,8 +299,8 @@ test.describe("node content editing", () => {
   });
 
   test("saves valid edits and returns to the rendered view", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -272,8 +316,8 @@ test.describe("node content editing", () => {
   });
 
   test("ctrl+s saves markdown while keeping the editor open", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -290,8 +334,8 @@ test.describe("node content editing", () => {
   });
 
   test("allows saving despite non-blocking warnings", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     await replaceEditorContent(page, "# Different heading\n\nBody text.");
@@ -414,9 +458,9 @@ Intro.
   test("surfaces a backend save failure and keeps editing", async ({ page }) => {
     await setupPage(
       page,
-      goalScenario({ saveError: "bellman sync failed: boom" }),
+      reduceChurnScenario({ saveError: "bellman sync failed: boom" }),
     );
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -431,8 +475,8 @@ Intro.
   });
 
   test("prompts before discarding unsaved edits when closing", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -472,9 +516,158 @@ Intro.
     expect(await countCalls(page, "update_work_package_command")).toBe(1);
   });
 
+  test("views and edits initiative attributes", async ({ page }) => {
+    const detail: NodeDetailFixture = {
+      ...REDUCE_CHURN_DETAIL,
+      markdown: "# Reduce churn\n\nLower churn.\n\n## Classifications\n\n- priority: P2\n- goal: reduce-churn\n",
+      catalog: ATTRIBUTE_CATALOG,
+      classifications: [
+        { name: "priority", value: "P2", payload: {} },
+        { name: "goal", value: "reduce-churn", payload: {} },
+      ],
+    };
+    await setupPage(page, reduceChurnScenario({ nodeDetail: detail }));
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
+
+    const sidebar = page.getByRole("complementary", { name: "Node details" });
+    await expect(sidebar.getByText("P2")).toBeVisible();
+    await expect(sidebar.locator(".classification-chip", { hasText: "Reduce Churn" })).toBeVisible();
+    await expect(sidebar.getByRole("heading", { name: "Attributes" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByRole("group", { name: "Attributes" })).toBeVisible();
+    await expect(page.locator(".cm-content")).not.toContainText("Classifications");
+    await page.getByLabel("priority *").selectOption("P0");
+    await page.getByRole("button", { name: "Remove Reduce Churn" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".cm-content")).toHaveCount(0);
+
+    const saved = await getCalls(page);
+    const save = [...saved].reverse().find((call) => call.cmd === "save_node_markdown_command");
+    const markdown = String(
+      (save?.args as { markdown?: string } | undefined)?.markdown ?? "",
+    );
+    expect(markdown).toContain("- priority: P0");
+    expect(markdown).not.toContain("goal:");
+    await expect(sidebar.getByText("P0")).toBeVisible();
+    await expect(sidebar.locator(".classification-chip", { hasText: "Reduce Churn" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Add goal value").click();
+    await page.getByLabel("Add goal value").press("Enter");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(sidebar.locator(".classification-chip", { hasText: "Reduce Churn" })).toBeVisible();
+  });
+
+  test("adds an open string attribute value", async ({ page }) => {
+    const catalog = [
+      ...ATTRIBUTE_CATALOG,
+      {
+        name: "objective",
+        version: "1.0",
+        description: "A thematic objective.",
+        applies_to: ["initiative", "project"],
+        cardinality: "many",
+        required: false,
+        values: null,
+        value_schema: {},
+        assignment_schema: { type: "string" },
+      },
+    ];
+    const detail: NodeDetailFixture = {
+      ...REDUCE_CHURN_DETAIL,
+      catalog,
+      classifications: [{ name: "priority", value: "P1", payload: {} }],
+    };
+    await setupPage(page, reduceChurnScenario({ nodeDetail: detail }));
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByRole("group", { name: "Attributes" })).toBeVisible();
+    await page.getByLabel("Add objective value").fill("reliability");
+    await page.getByRole("button", { name: "Add" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
+
+    const saved = await getCalls(page);
+    const save = [...saved].reverse().find((call) => call.cmd === "save_node_markdown_command");
+    const markdown = String(
+      (save?.args as { markdown?: string } | undefined)?.markdown ?? "",
+    );
+    expect(markdown).toContain("- objective: reliability");
+  });
+
+  test("blocks save when a required attribute is missing", async ({ page }) => {
+    const detail: NodeDetailFixture = {
+      ...REDUCE_CHURN_DETAIL,
+      catalog: ATTRIBUTE_CATALOG,
+      classifications: [],
+    };
+    await setupPage(page, reduceChurnScenario({ nodeDetail: detail }));
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
+    await expect(page.getByText("Priority — required")).toBeVisible();
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    await page.getByLabel("priority *").selectOption("P1");
+    await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  test("blocks save when program allocation is outside 0 to 1", async ({ page }) => {
+    await setupPage(page, {
+      ...workPackageScenario(),
+      nodeDetails: {
+        [WP_INVOICING.id]: {
+          ...WP_DETAIL,
+          catalog: ATTRIBUTE_CATALOG,
+          classifications: [
+            {
+              name: "program",
+              value: "platform-v2",
+              payload: { allocation: 0.5 },
+              pinned_version: "1.0",
+            },
+          ],
+        },
+      },
+    });
+    await openNodeContextMenu(page, PROJECT.id);
+    await page.getByRole("button", { name: "Show work package graph" }).click();
+    await selectNode(page, WP_INVOICING.id, { waitForEdit: true });
+    await expect(page.getByText("Platform v2")).toBeVisible();
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("allocation").fill("2");
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText("invalid");
+    await page.getByLabel("allocation").fill("0.4");
+    await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+    await page.getByRole("button", { name: "Save" }).click();
+    const saved = await getCalls(page);
+    const update = [...saved].reverse().find((call) => call.cmd === "update_work_package_command");
+    const request = (update?.args as { request?: { classifications?: Array<{ payload?: { allocation?: number } }> } })
+      .request;
+    expect(request?.classifications?.[0]?.payload?.allocation).toBe(0.4);
+  });
+
+  test("requires priority before creating an initiative", async ({ page }) => {
+    await setupPage(page, reduceChurnScenario({ attributeCatalog: ATTRIBUTE_CATALOG }));
+    await openBackgroundContextMenu(page);
+    await page.getByRole("button", { name: "New node…" }).click();
+    await page.getByLabel("Name").fill("new-item");
+    await expect(page.getByLabel("priority *")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create node" })).toBeDisabled();
+    await page.getByLabel("priority *").selectOption("P1");
+    await expect(page.getByRole("button", { name: "Create node" })).toBeEnabled();
+    await page.getByRole("button", { name: "Create node" }).click();
+    const saved = await getCalls(page);
+    const create = [...saved].reverse().find((call) => call.cmd === "create_node_command");
+    const request = (create?.args as { request?: { classifications?: Array<{ name: string; value: string }> } })
+      .request;
+    expect(request?.classifications).toEqual([
+      expect.objectContaining({ name: "priority", value: "P1" }),
+    ]);
+  });
+
   test("undo after a content save issues an undo command", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -491,8 +684,8 @@ Intro.
   test("ctrl+z while editing undoes text without calling undo_command", async ({
     page,
   }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -508,8 +701,8 @@ Intro.
   });
 
   test("editor undo history survives save and reopen", async ({ page }) => {
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -531,10 +724,10 @@ Intro.
   });
 
   test("editor undo history survives reload via disk", async ({ page }) => {
-    const savedMarkdown = `${GOAL_DETAIL.markdown} RELOAD`;
+    const savedMarkdown = `${REDUCE_CHURN_DETAIL.markdown} RELOAD`;
 
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -546,10 +739,10 @@ Intro.
     expect(await countCalls(page, "save_node_editor_history_command")).toBe(1);
 
     await reloadApp(page, {
-      ...goalScenario(),
-      nodeDetail: { ...GOAL_DETAIL, markdown: savedMarkdown },
+      ...reduceChurnScenario(),
+      nodeDetail: { ...REDUCE_CHURN_DETAIL, markdown: savedMarkdown },
     });
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const reopened = page.locator(".cm-content");
@@ -562,11 +755,11 @@ Intro.
   });
 
   test("editor undo history survives rename via stable GUID", async ({ page }) => {
-    const savedMarkdown = `${GOAL_DETAIL.markdown} RENAMED`;
-    const renamedId = "goal/cut-churn";
+    const savedMarkdown = `${REDUCE_CHURN_DETAIL.markdown} RENAMED`;
+    const renamedId = "initiative/cut-churn";
 
-    await setupPage(page, goalScenario());
-    await selectNode(page, GOAL.id, { waitForEdit: true });
+    await setupPage(page, reduceChurnScenario());
+    await selectNode(page, REDUCE_CHURN.id, { waitForEdit: true });
     await page.getByRole("button", { name: "Edit" }).click();
 
     const content = page.locator(".cm-content");
@@ -588,28 +781,28 @@ Intro.
         request: {
           roadmap_root: "/roadmap",
           node_id: nodeId,
-          node_type: "goal",
+          node_type: "initiative",
           new_name: "cut-churn",
         },
       });
-    }, GOAL.id);
+    }, REDUCE_CHURN.id);
 
     await reloadApp(page, {
-      ...goalScenario(),
+      ...reduceChurnScenario(),
       states: [
         {
           root: "/roadmap",
           editable: true,
-          nodes: [{ id: renamedId, type: "goal" }],
+          nodes: [{ id: renamedId, type: "initiative" }],
           links: [],
         },
       ],
       nodeDetail: {
-        ...GOAL_DETAIL,
+        ...REDUCE_CHURN_DETAIL,
         node_id: renamedId,
         title: "cut-churn",
         markdown: savedMarkdown,
-        source_path: "/roadmap/goals/cut-churn.md",
+        source_path: "/roadmap/initiatives/cut-churn.md",
       },
     });
 

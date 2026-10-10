@@ -12,6 +12,12 @@ import {
 } from "../lib/work-package-estimate";
 import { validateWorkPackageName } from "../lib/work-package-name";
 import { WorkPackageEstimateFields } from "./WorkPackageEstimateFields";
+import {
+  classificationsAreValid,
+  type AttributeAssignment,
+  type AttributeDefinition,
+} from "../lib/attributes";
+import { ClassificationsEditor } from "./ClassificationsEditor";
 
 export type CreateNodeDialogMode = "top_level" | "work_package";
 
@@ -25,6 +31,7 @@ interface CreateNodeDialogProps {
   parentLabel?: string | null;
   /** Project name locked from the active WP graph view. */
   lockedProject?: string | null;
+  catalog?: AttributeDefinition[];
   onClose: () => void;
   onCreate: (input: {
     nodeKind: NodeKind;
@@ -32,6 +39,7 @@ interface CreateNodeDialogProps {
     project?: string;
     description?: string;
     estimate?: WorkPackageEstimate;
+    classifications?: AttributeAssignment[];
   }) => void;
 }
 
@@ -44,6 +52,7 @@ export function CreateNodeDialog({
   mode = "top_level",
   parentLabel = null,
   lockedProject = null,
+  catalog = [],
   onClose,
   onCreate,
 }: CreateNodeDialogProps) {
@@ -55,6 +64,7 @@ export function CreateNodeDialog({
   const [project, setProject] = useState(lockedProject ?? "");
   const [description, setDescription] = useState("");
   const [estimateValues, setEstimateValues] = useState(EMPTY_ESTIMATE);
+  const [classifications, setClassifications] = useState<AttributeAssignment[]>([]);
 
   const projects = useMemo(() => projectNames(nodes), [nodes]);
   const isWorkPackage = isWorkPackageMode || nodeKind === "work_package";
@@ -80,6 +90,11 @@ export function CreateNodeDialog({
     () => validateWorkPackageEstimate(estimateValues),
     [estimateValues],
   );
+  const resolvedKind = isWorkPackageMode ? "work_package" : nodeKind;
+  const classificationsValid = useMemo(
+    () => classificationsAreValid(resolvedKind, catalog, classifications),
+    [catalog, classifications, resolvedKind],
+  );
 
   if (!open) {
     return null;
@@ -93,7 +108,7 @@ export function CreateNodeDialog({
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (nameInvalidForSubmit || !estimateValidation.ok) {
+    if (nameInvalidForSubmit || !estimateValidation.ok || !classificationsValid) {
       return;
     }
 
@@ -114,6 +129,7 @@ export function CreateNodeDialog({
       project: resolvedProject ?? undefined,
       description: isWorkPackage ? description.trim() || "TBD." : undefined,
       estimate: isWorkPackage ? estimateValidation.estimate : undefined,
+      classifications: classifications.filter((item) => item.value !== ""),
     });
   };
 
@@ -121,6 +137,7 @@ export function CreateNodeDialog({
     saving ||
     nameInvalidForSubmit ||
     !estimateValidation.ok ||
+    !classificationsValid ||
     (isWorkPackage && !(isWorkPackageMode ? lockedProject : project));
 
   return (
@@ -145,7 +162,10 @@ export function CreateNodeDialog({
               <span>Type</span>
               <select
                 value={nodeKind}
-                onChange={(event) => setNodeKind(event.target.value as NodeKind)}
+                onChange={(event) => {
+                  setNodeKind(event.target.value as NodeKind);
+                  setClassifications([]);
+                }}
               >
                 {NODE_KINDS.map((kind) => (
                   <option key={kind} value={kind}>
@@ -222,6 +242,17 @@ export function CreateNodeDialog({
                 onChange={setEstimateValues}
               />
             </>
+          ) : null}
+
+          {catalog.some((definition) => definition.required && definition.appliesTo.includes(resolvedKind)) ? (
+            <ClassificationsEditor
+              nodeType={resolvedKind}
+              catalog={catalog}
+              assignments={classifications}
+              disabled={saving}
+              requiredOnly
+              onChange={setClassifications}
+            />
           ) : null}
 
           <footer className="edit-dialog-actions">

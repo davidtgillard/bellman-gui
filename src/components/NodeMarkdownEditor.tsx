@@ -40,7 +40,12 @@ interface NodeMarkdownEditorProps {
   saving: boolean;
   backendError: string | null;
   dependencyWarnings?: DependencyWarning[];
+  otherIssues?: DependencyWarning[];
   syncSkipped?: boolean;
+  /** When true, Save stays disabled even if the markdown changed. */
+  saveBlocked?: boolean;
+  /** When true, Save is enabled even if the markdown body is unchanged. */
+  extraDirty?: boolean;
   onSave: (markdown: string, options?: SaveMarkdownOptions) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
@@ -104,7 +109,10 @@ export function NodeMarkdownEditor({
   saving,
   backendError,
   dependencyWarnings = [],
+  otherIssues = [],
   syncSkipped = false,
+  saveBlocked = false,
+  extraDirty = false,
   onSave,
   onCancel,
   onDirtyChange,
@@ -139,7 +147,7 @@ export function NodeMarkdownEditor({
 
   const dirty = value !== initialMarkdown;
   const blocked = hasBlockingErrors(diagnostics);
-  const canSave = !saving && !blocked && dirty;
+  const canSave = !saving && !blocked && !saveBlocked && (dirty || extraDirty);
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -174,7 +182,7 @@ export function NodeMarkdownEditor({
 
   const handleSave = useCallback(
     (options?: SaveMarkdownOptions) => {
-      if (saving || blocked || !dirty) {
+      if (saving || blocked || saveBlocked || (!dirty && !extraDirty)) {
         return;
       }
       const view = viewRef.current ?? editorRef.current?.view ?? null;
@@ -189,7 +197,7 @@ export function NodeMarkdownEditor({
         onSave(value, options);
       })();
     },
-    [blocked, dirty, nodeId, onSave, roadmapRoot, saving, value],
+    [blocked, dirty, extraDirty, nodeId, onSave, roadmapRoot, saveBlocked, saving, value],
   );
 
   // handle saving markdown via shortcut
@@ -322,10 +330,12 @@ export function NodeMarkdownEditor({
         ) : null}
         {syncSkipped && !backendError ? (
           <p className="node-editor-problem warning">
-            Saved; sync skipped until dependency issues are fixed.
+            {dependencyWarnings.length > 0 && otherIssues.length === 0
+              ? "Saved; sync skipped until dependency issues are fixed."
+              : "Saved; sync skipped until validation issues are fixed."}
           </p>
         ) : null}
-        {allDiagnostics.length === 0 && !backendError && !syncSkipped ? (
+        {allDiagnostics.length === 0 && otherIssues.length === 0 && !backendError && !syncSkipped ? (
           <p className="node-editor-problem ok">No problems detected.</p>
         ) : null}
         {allDiagnostics.map((diagnostic, index) => (
@@ -334,6 +344,11 @@ export function NodeMarkdownEditor({
             className={`node-editor-problem ${diagnostic.severity}`}
           >
             {diagnostic.message}
+          </p>
+        ))}
+        {otherIssues.map((issue, index) => (
+          <p key={`other-${index}`} className="node-editor-problem warning" role="status">
+            {issue.message}
           </p>
         ))}
       </div>

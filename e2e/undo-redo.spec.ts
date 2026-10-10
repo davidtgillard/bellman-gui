@@ -9,7 +9,7 @@ import {
 } from "./support/fixtures";
 
 const PROJECT = { id: "project/billing", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const INITIATIVE = { id: "initiative/reduce-churn", type: "initiative" };
 const MILESTONE = { id: "milestone/ga", type: "milestone" };
 
 /** Scenario with one undoable edit: adding a milestone on top of a base graph. */
@@ -17,14 +17,14 @@ function milestoneScenario(): Scenario {
   const base = {
     root: "/roadmap",
     editable: true,
-    nodes: [PROJECT, GOAL],
+    nodes: [PROJECT, INITIATIVE],
     links: [],
     link_types: [],
     label: null as string | null,
   };
   const withMilestone = {
     ...base,
-    nodes: [PROJECT, GOAL, MILESTONE],
+    nodes: [PROJECT, INITIATIVE, MILESTONE],
     label: "create milestone ga",
   };
   return { states: [base, withMilestone], index: 1 };
@@ -37,7 +37,7 @@ function emptyHistoryScenario(): Scenario {
       {
         root: "/roadmap",
         editable: true,
-        nodes: [PROJECT, GOAL],
+        nodes: [PROJECT, INITIATIVE],
         links: [],
         link_types: [],
         label: null,
@@ -60,7 +60,7 @@ test.describe("undo/redo", () => {
 
     expect(await countCalls(page, "undo_command")).toBe(1);
     await expect(legend.getByText("Milestone")).toHaveCount(0);
-    await expect(legend.getByText("Goal")).toBeVisible();
+    await expect(legend.getByText("Initiative")).toBeVisible();
 
     await page.keyboard.press("Control+Shift+z");
 

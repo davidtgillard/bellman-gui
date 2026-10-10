@@ -23,11 +23,11 @@ describe("node-editor-history", () => {
       state: { doc: "# hello\n", history: {} },
     });
 
-    const entry = await loadNodeEditorHistory("/roadmap", "goal/reduce-churn", "# hello\n");
+    const entry = await loadNodeEditorHistory("/roadmap", "initiative/reduce-churn", "# hello\n");
 
     expect(invokeMock).toHaveBeenCalledWith("load_node_editor_history_command", {
       roadmapRoot: "/roadmap",
-      nodeId: "goal/reduce-churn",
+      nodeId: "initiative/reduce-churn",
       expectedDoc: "# hello\n",
     });
     expect(entry?.doc).toBe("# hello\n");
@@ -42,13 +42,13 @@ describe("node-editor-history", () => {
 
     await persistNodeEditorHistory(
       "/roadmap",
-      "goal/reduce-churn",
+      "initiative/reduce-churn",
       state as never,
     );
 
     expect(invokeMock).toHaveBeenCalledWith("save_node_editor_history_command", {
       roadmapRoot: "/roadmap",
-      nodeId: "goal/reduce-churn",
+      nodeId: "initiative/reduce-churn",
       entry: {
         doc: "# saved\n",
         state: { doc: "# saved\n", history: { done: [1] } },

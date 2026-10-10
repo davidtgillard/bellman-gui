@@ -1,15 +1,24 @@
 import exploreMlRanking from "../fixtures/example-roadmap/initiatives/explore-ml-ranking.md?raw";
 import billingRedesign from "../fixtures/example-roadmap/projects/billing-redesign/billing-redesign.md?raw";
 import gaRelease from "../fixtures/example-roadmap/milestones/ga-release.md?raw";
-import reduceChurn from "../fixtures/example-roadmap/goals/reduce-churn.md?raw";
 import { invoke } from "@tauri-apps/api/core";
 import { fromRoadmapGraphDto, type RoadmapGraph, type RoadmapGraphDto } from "./graph";
 import { nodeLabel } from "./graph";
 import {
   fromEstimateWire,
+  toEstimateWire,
   type WorkPackageEstimate,
   type WorkPackageEstimateWire,
 } from "./work-package-estimate";
+import {
+  parseAttributeDefinition,
+  splitClassifications,
+  type AttributeAssignment,
+  type AttributeDefinition,
+} from "./attributes";
+import goalJsonc from "../fixtures/example-roadmap/attributes/goal.jsonc?raw";
+import priorityJsonc from "../fixtures/example-roadmap/attributes/priority.jsonc?raw";
+import programJsonc from "../fixtures/example-roadmap/attributes/program.jsonc?raw";
 
 interface WorkPackageBase {
   project: string;
@@ -37,6 +46,8 @@ export interface NodeDetail {
   markdown: string;
   sourcePath: string | null;
   workPackage: WorkPackageDetail | null;
+  catalog: AttributeDefinition[];
+  classifications: AttributeAssignment[];
 }
 
 export interface DependencyWarning {
@@ -48,6 +59,15 @@ export interface SaveNodeMarkdownResult {
   detail: NodeDetail;
   graph: RoadmapGraph | null;
   dependencyWarnings: DependencyWarning[];
+  otherIssues: DependencyWarning[];
+  syncSkipped: boolean;
+}
+
+export interface SaveWorkPackageResult {
+  detail: NodeDetail;
+  graph: RoadmapGraph | null;
+  dependencyWarnings: DependencyWarning[];
+  otherIssues: DependencyWarning[];
   syncSkipped: boolean;
 }
 
@@ -68,13 +88,34 @@ export type WorkPackageDetailDto =
       role: "parent";
     });
 
-interface NodeDetailDto {
+interface AttributeAssignmentDto {
+  name: string;
+  value: AttributeAssignment["value"];
+  payload?: Record<string, string | number | boolean>;
+  pinned_version?: string | null;
+}
+
+interface AttributeDefinitionDto {
+  name: string;
+  version: string;
+  description?: string;
+  applies_to: string[];
+  cardinality: "one" | "many";
+  required?: boolean;
+  values?: AttributeDefinition["values"];
+  value_schema?: Record<string, unknown> | null;
+  assignment_schema?: Record<string, unknown> | null;
+}
+
+export interface NodeDetailDto {
   node_id: string;
   node_type: string;
   title: string;
   markdown: string;
   source_path: string | null;
   work_package: WorkPackageDetailDto | null;
+  catalog?: AttributeDefinitionDto[];
+  classifications?: AttributeAssignmentDto[];
 }
 
 interface DependencyWarningDto {
@@ -86,6 +127,15 @@ interface SaveNodeMarkdownResponseDto {
   detail: NodeDetailDto;
   graph: RoadmapGraphDto | null;
   dependency_warnings: DependencyWarningDto[];
+  other_issues?: DependencyWarningDto[];
+  sync_skipped: boolean;
+}
+
+interface SaveWorkPackageResponseDto {
+  detail: NodeDetailDto;
+  graph: RoadmapGraphDto | null;
+  dependency_warnings: DependencyWarningDto[];
+  other_issues?: DependencyWarningDto[];
   sync_skipped: boolean;
 }
 
@@ -101,13 +151,39 @@ PDF generation and delivery.
 
 - wp-invoicing`;
 
+const EXAMPLE_CATALOG = [priorityJsonc, goalJsonc, programJsonc]
+  .map((text) => parseAttributeDefinition(text))
+  .filter((item): item is AttributeDefinition => item !== null);
+
+function definitionFromDto(dto: AttributeDefinitionDto): AttributeDefinition {
+  return {
+    name: dto.name,
+    version: dto.version,
+    description: dto.description ?? "",
+    appliesTo: dto.applies_to ?? [],
+    cardinality: dto.cardinality === "many" ? "many" : "one",
+    required: dto.required === true,
+    values: dto.values ?? null,
+    valueSchema: dto.value_schema ?? null,
+    assignmentSchema: dto.assignment_schema ?? null,
+  };
+}
+
+function assignmentFromDto(dto: AttributeAssignmentDto): AttributeAssignment {
+  return {
+    name: dto.name,
+    value: dto.value,
+    payload: dto.payload ?? {},
+    pinnedVersion: dto.pinned_version ?? null,
+  };
+}
+
 const EXAMPLE_NODE_MARKDOWN: Record<string, string> = {
   "initiative/explore-ml-ranking": exploreMlRanking,
   "project/billing-redesign": billingRedesign,
   "project/billing-redesign/wp-invoicing": WP_INVOICING_MARKDOWN,
   "project/billing-redesign/wp-pdf-export": WP_PDF_EXPORT_MARKDOWN,
   "milestone/ga-release": gaRelease,
-  "goal/reduce-churn": reduceChurn,
 };
 
 /**
@@ -138,7 +214,7 @@ export function workPackageDetailFromDto(
  * @returns Domain node detail.
  * @throws {Error} When the payload is missing.
  */
-function fromDto(dto: NodeDetailDto): NodeDetail {
+export function nodeDetailFromDto(dto: NodeDetailDto): NodeDetail {
   if (!dto) {
     throw new Error("node detail payload was empty");
   }
@@ -151,6 +227,8 @@ function fromDto(dto: NodeDetailDto): NodeDetail {
     workPackage: dto.work_package
       ? workPackageDetailFromDto(dto.work_package)
       : null,
+    catalog: (dto.catalog ?? []).map(definitionFromDto),
+    classifications: (dto.classifications ?? []).map(assignmentFromDto),
   };
 }
 
@@ -159,6 +237,7 @@ function exampleNodeDetail(nodeId: string, nodeType: string): NodeDetail {
   if (!markdown) {
     throw new Error(`No example markdown for node ${nodeId}`);
   }
+  const split = splitClassifications(markdown);
 
   return {
     nodeId,
@@ -167,6 +246,8 @@ function exampleNodeDetail(nodeId: string, nodeType: string): NodeDetail {
     markdown,
     sourcePath: null,
     workPackage: null,
+    catalog: EXAMPLE_CATALOG,
+    classifications: split.assignments,
   };
 }
 
@@ -192,7 +273,24 @@ export async function loadNodeDetail(
       node_id: nodeId,
     },
   });
-  return fromDto(dto);
+  return nodeDetailFromDto(dto);
+}
+
+/**
+ * Loads attribute definitions for the open roadmap.
+ * @param roadmapRoot - Roadmap root, or `"example"` for the bundled catalog.
+ * @returns Parsed attribute catalog. Invalid files are omitted.
+ */
+export async function loadAttributeCatalog(
+  roadmapRoot: string,
+): Promise<AttributeDefinition[]> {
+  if (roadmapRoot === "example") {
+    return EXAMPLE_CATALOG;
+  }
+  const dto = await invoke<AttributeDefinitionDto[]>("load_attribute_catalog_command", {
+    roadmapRoot,
+  });
+  return dto.map(definitionFromDto);
 }
 
 /**
@@ -215,9 +313,61 @@ export async function saveNodeMarkdown(
   });
 
   return {
-    detail: fromDto(dto.detail),
+    detail: nodeDetailFromDto(dto.detail),
     graph: dto.graph ? fromRoadmapGraphDto(dto.graph) : null,
     dependencyWarnings: dto.dependency_warnings.map((warning) => ({
+      line: warning.line,
+      message: warning.message,
+    })),
+    otherIssues: (dto.other_issues ?? []).map((warning) => ({
+      line: warning.line,
+      message: warning.message,
+    })),
+    syncSkipped: dto.sync_skipped,
+  };
+}
+
+/**
+ * Updates a work package, runs bellman validate/sync, and returns refreshed
+ * detail plus an updated graph when sync succeeds.
+ * @param request - Work package fields to persist.
+ * @param request.roadmap_root - Editable roadmap root path.
+ * @param request.node_id - Fully qualified work-package id.
+ * @param request.description - Package description text.
+ * @param request.dependencies - Predecessor titles in document order.
+ * @param request.estimate - Leaf estimate; omitted for parent packages.
+ * @param request.classifications - Assignments to write onto the package.
+ * @returns Save result with optional graph and validation issues.
+ */
+export async function saveWorkPackage(request: {
+  roadmap_root: string;
+  node_id: string;
+  description: string;
+  dependencies: string[];
+  estimate?: WorkPackageEstimate;
+  classifications?: AttributeAssignment[];
+}): Promise<SaveWorkPackageResult> {
+  const { estimate, classifications, ...rest } = request;
+  const dto = await invoke<SaveWorkPackageResponseDto>("update_work_package_command", {
+    request: {
+      ...rest,
+      ...(estimate !== undefined ? { estimate: toEstimateWire(estimate) } : {}),
+      classifications: (classifications ?? []).map((assignment) => ({
+        name: assignment.name,
+        value: assignment.value,
+        payload: assignment.payload,
+        pinned_version: assignment.pinnedVersion,
+      })),
+    },
+  });
+  return {
+    detail: nodeDetailFromDto(dto.detail),
+    graph: dto.graph ? fromRoadmapGraphDto(dto.graph) : null,
+    dependencyWarnings: dto.dependency_warnings.map((warning) => ({
+      line: warning.line,
+      message: warning.message,
+    })),
+    otherIssues: (dto.other_issues ?? []).map((warning) => ({
       line: warning.line,
       message: warning.message,
     })),

@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { nodeLabel } from "../lib/graph";
 import type { WorkPackageDetail } from "../lib/node-detail";
 import {
+  classificationsAreValid,
+  issueMentionsAttribute,
+  withLegalPins,
+  type AttributeAssignment,
+  type AttributeDefinition,
+} from "../lib/attributes";
+import type { DependencyWarning } from "../lib/node-detail";
+import {
   toggleDependency,
   unselectedDependencyOptions,
 } from "../lib/work-package-dependencies";
@@ -11,23 +19,32 @@ import {
   type WorkPackageEstimate,
 } from "../lib/work-package-estimate";
 import { WorkPackageEstimateFields } from "./WorkPackageEstimateFields";
+import { ClassificationsEditor } from "./ClassificationsEditor";
 
 export type SaveWorkPackageInput =
   | {
       description: string;
       dependencies: string[];
+      classifications: AttributeAssignment[];
       estimate: WorkPackageEstimate;
     }
   | {
       description: string;
       dependencies: string[];
+      classifications: AttributeAssignment[];
       estimate?: never;
     };
 
 interface WorkPackageEditorProps {
   workPackage: WorkPackageDetail;
+  catalog: AttributeDefinition[];
+  classifications: AttributeAssignment[];
+  nodeType: string;
   saving: boolean;
   backendError: string | null;
+  dependencyWarnings?: DependencyWarning[];
+  otherIssues?: DependencyWarning[];
+  syncSkipped?: boolean;
   onSave: (input: SaveWorkPackageInput) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
@@ -47,8 +64,14 @@ const EMPTY_ESTIMATE = { optimistic: "", likely: "", pessimistic: "" };
 
 export function WorkPackageEditor({
   workPackage,
+  catalog,
+  classifications,
+  nodeType,
   saving,
   backendError,
+  dependencyWarnings = [],
+  otherIssues = [],
+  syncSkipped = false,
   onSave,
   onCancel,
   onDirtyChange,
@@ -60,6 +83,8 @@ export function WorkPackageEditor({
   const [dependencies, setDependencies] = useState<string[]>(
     workPackage.dependencies,
   );
+  const [draftClassifications, setDraftClassifications] =
+    useState<AttributeAssignment[]>(classifications);
   const [estimateValues, setEstimateValues] = useState(() =>
     workPackage.role === "leaf"
       ? estimateToFieldValues(workPackage.estimate)
@@ -97,10 +122,19 @@ export function WorkPackageEditor({
       estimateValues.likely !== originalEstimateFields.likely ||
       estimateValues.pessimistic !== originalEstimateFields.pessimistic);
 
+  const classDirty =
+    JSON.stringify(draftClassifications) !== JSON.stringify(classifications);
+  const classValid = classificationsAreValid(
+    nodeType,
+    catalog,
+    draftClassifications,
+  );
+
   const dirty =
     description !== workPackage.description ||
     !sameMembers(dependencies, workPackage.dependencies) ||
-    estimateDirty;
+    estimateDirty ||
+    classDirty;
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -135,9 +169,13 @@ export function WorkPackageEditor({
   }, [dependencyToggleRef, workPackage.title]);
 
   const handleSave = () => {
-    if (saving || !dirty) {
+    if (saving || !dirty || !classValid) {
       return;
     }
+    const classifications = withLegalPins(
+      draftClassifications.filter((item) => item.value !== ""),
+      catalog,
+    );
     if (isLeaf) {
       if (!estimateValidation.ok) {
         return;
@@ -145,6 +183,7 @@ export function WorkPackageEditor({
       onSave({
         description: description.trim() || "TBD.",
         dependencies,
+        classifications,
         estimate: estimateValidation.estimate,
       });
       return;
@@ -152,6 +191,7 @@ export function WorkPackageEditor({
     onSave({
       description: description.trim() || "TBD.",
       dependencies,
+      classifications,
     });
   };
 
@@ -161,8 +201,12 @@ export function WorkPackageEditor({
     setAddOpen(false);
   };
 
+  const unmappedIssues = otherIssues.filter(
+    (issue) => !catalog.some((definition) => issueMentionsAttribute(issue.message, definition.name)),
+  );
+
   const saveDisabled =
-    saving || !dirty || (isLeaf && !estimateValidation.ok);
+    saving || !dirty || !classValid || (isLeaf && !estimateValidation.ok);
 
   return (
     <div className="work-package-editor">
@@ -183,6 +227,15 @@ export function WorkPackageEditor({
           onChange={setEstimateValues}
         />
       ) : null}
+
+      <ClassificationsEditor
+        nodeType={nodeType}
+        catalog={catalog}
+        assignments={draftClassifications}
+        disabled={saving}
+        serverIssues={otherIssues}
+        onChange={setDraftClassifications}
+      />
 
       <fieldset className="wp-dependencies">
         <legend>Dependencies</legend>
@@ -268,11 +321,28 @@ export function WorkPackageEditor({
         )}
       </fieldset>
 
-      {backendError ? (
+      {backendError || syncSkipped || dependencyWarnings.length > 0 || unmappedIssues.length > 0 ? (
         <div className="node-editor-problems">
-          <p className="node-editor-problem error" role="alert">
-            {backendError}
-          </p>
+          {backendError ? (
+            <p className="node-editor-problem error" role="alert">
+              {backendError}
+            </p>
+          ) : null}
+          {syncSkipped && !backendError ? (
+            <p className="node-editor-problem warning">
+              Saved; sync skipped until validation issues are fixed.
+            </p>
+          ) : null}
+          {dependencyWarnings.map((issue, index) => (
+            <p key={`dep-${index}`} className="node-editor-problem warning">
+              {issue.message}
+            </p>
+          ))}
+          {unmappedIssues.map((issue, index) => (
+            <p key={`other-${index}`} className="node-editor-problem warning">
+              {issue.message}
+            </p>
+          ))}
         </div>
       ) : null}
 

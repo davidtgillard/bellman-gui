@@ -358,13 +358,50 @@
     return fallbackNodeDetail(nodeId);
   }
 
+  function classificationsFromMarkdown(markdown) {
+    const text = String(markdown || "");
+    const start = text.search(/^## Classifications\s*$/m);
+    if (start < 0) {
+      return [];
+    }
+    const section = text.slice(start).split(/^## (?!Classifications)/m)[0];
+    const assignments = [];
+    for (const line of section.split("\n")) {
+      const match = line.match(/^- ([^@:]+)(?:@([^:]+))?: ([^[]+?)(?:\s*\[(.*)\])?\s*$/);
+      if (!match) {
+        continue;
+      }
+      const payload = {};
+      if (match[4]) {
+        for (const pair of match[4].split(",")) {
+          const splitAt = pair.indexOf(":");
+          if (splitAt < 0) {
+            continue;
+          }
+          const key = pair.slice(0, splitAt).trim();
+          const raw = pair.slice(splitAt + 1).trim();
+          const numeric = Number(raw);
+          payload[key] =
+            raw === "true" ? true : raw === "false" ? false : raw !== "" && Number.isFinite(numeric) ? numeric : raw;
+        }
+      }
+      assignments.push({
+        name: match[1].trim(),
+        value: match[3].trim(),
+        payload,
+        pinned_version: match[2] ? match[2].trim() : null,
+      });
+    }
+    return assignments;
+  }
+
   function fallbackNodeDetail(nodeId) {
     if (!nodeId) {
       return null;
     }
     const graph = currentGraph();
     const node = (graph.nodes || []).find((item) => item.id === nodeId);
-    const type = node?.type || "goal";
+    const type = node?.type || "initiative";
     const title = String(nodeId).split("/").pop();
     const wpTitles = (graph.nodes || [])
       .filter((item) => item.type === "work_package")
@@ -417,7 +454,7 @@
         return undoStatus();
       case "create_node_command": {
         const next = clone(states[index]);
-        const kind = request.node_kind || "goal";
+        const kind = request.node_kind || "initiative";
         const name = request.name || "new-node";
         let id;
         if (kind === "work_package") {
@@ -512,7 +549,7 @@
       }
       case "rename_node_command": {
         const next = clone(states[index]);
-        const nodeType = request.node_type || "goal";
+        const nodeType = request.node_type || "initiative";
         const oldId = request.node_id;
         const newName = (request.new_name || "").trim();
         const slashPrefix = `${nodeType}/`;
@@ -618,6 +655,8 @@
           new_node_id: newId,
         };
       }
+      case "load_attribute_catalog_command":
+        return clone(scenario.attributeCatalog || []);
       case "load_node_detail_command":
         return currentNodeDetail(request.node_id);
       case "load_node_editor_history_command": {
@@ -647,17 +686,21 @@
           ? { ...base, markdown: cmdArgs.markdown }
           : {
               node_id: cmdArgs.nodeId,
-              node_type: "goal",
+              node_type: "initiative",
               title: cmdArgs.nodeId,
               markdown: cmdArgs.markdown,
               source_path: null,
               work_package: null,
             };
+        next.classifications = classificationsFromMarkdown(cmdArgs.markdown);
         savedNodeDetails.set(cmdArgs.nodeId, clone(next));
         const state = clone(states[index]);
         state.label = `edit ${cmdArgs.nodeId}`;
         const dependencyWarnings = scenario.saveDependencyWarnings ?? [];
-        const syncSkipped = scenario.saveSyncSkipped ?? dependencyWarnings.length > 0;
+        const otherIssues = scenario.saveOtherIssues ?? [];
+        const syncSkipped =
+          scenario.saveSyncSkipped ??
+          dependencyWarnings.length + otherIssues.length > 0;
         if (!syncSkipped && Array.isArray(scenario.saveGraphLinks)) {
           // Full graph snapshot after sync (adds and removals), matching load_roadmap_graph.
           state.links = clone(scenario.saveGraphLinks);
@@ -668,6 +711,7 @@
           detail: clone(next),
           graph: syncSkipped ? null : graph,
           dependency_warnings: clone(dependencyWarnings),
+          other_issues: clone(otherIssues),
           sync_skipped: syncSkipped,
         };
       }
@@ -676,6 +720,7 @@
           throw new Error(scenario.saveError);
         }
         const base = currentNodeDetail(request.node_id);
+        let detail = base;
         if (base && base.work_package) {
           const isParent = base.work_package.role === "parent";
           const updated = {
@@ -702,12 +747,27 @@
                       : request.estimate,
                 },
           };
+          if (request.classifications) {
+            updated.classifications = request.classifications;
+          }
           savedNodeDetails.set(request.node_id, clone(updated));
+          detail = updated;
         }
         const state = clone(states[index]);
         state.label = `edit ${request.node_id}`;
         pushState(state);
-        return currentGraph();
+        const dependencyWarnings = scenario.saveDependencyWarnings ?? [];
+        const otherIssues = scenario.saveOtherIssues ?? [];
+        const syncSkipped =
+          scenario.saveSyncSkipped ??
+          dependencyWarnings.length + otherIssues.length > 0;
+        return {
+          detail: clone(detail),
+          graph: syncSkipped ? null : currentGraph(),
+          dependency_warnings: clone(dependencyWarnings),
+          other_issues: clone(otherIssues),
+          sync_skipped: syncSkipped,
+        };
       }
       case "load_work_package_layout_command":
         return clone(

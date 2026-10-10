@@ -11,6 +11,8 @@ import {
   type RenameNodeResponseDto,
   type RoadmapGraphDto,
 } from "./graph";
+import { saveWorkPackage, type SaveWorkPackageResult } from "./node-detail";
+import type { AttributeAssignment } from "./attributes";
 import {
   toEstimateWire,
   type WorkPackageEstimate,
@@ -22,11 +24,17 @@ import {
  * @returns Updated roadmap graph after creation.
  */
 export async function createNode(request: CreateNodeRequest) {
-  const { estimate, ...rest } = request;
+  const { estimate, classifications, ...rest } = request;
   const dto = await invoke<RoadmapGraphDto>("create_node_command", {
     request: {
       ...rest,
       ...(estimate !== undefined ? { estimate: toEstimateWire(estimate) } : {}),
+      classifications: (classifications ?? []).map((assignment) => ({
+        name: assignment.name,
+        value: assignment.value,
+        payload: assignment.payload,
+        pinned_version: assignment.pinnedVersion,
+      })),
     },
   });
   return fromRoadmapGraphDto(dto);
@@ -108,21 +116,16 @@ export interface UpdateWorkPackageRequest {
   dependencies: string[];
   /** Domain estimate for leaves; omitted for parents. */
   estimate?: WorkPackageEstimate;
+  classifications?: AttributeAssignment[];
 }
 
 /**
- * Updates a work package's description and dependencies in work-packages.yaml,
- * runs a bellman sync, and returns the resulting graph.
+ * Updates a work package, runs bellman validate/sync, and returns the save result.
  * @param request - Work package update payload for the backend.
- * @returns Updated roadmap graph after the edit and sync.
+ * @returns Refreshed detail, optional graph, and validation issues.
  */
-export async function updateWorkPackage(request: UpdateWorkPackageRequest) {
-  const { estimate, ...rest } = request;
-  const dto = await invoke<RoadmapGraphDto>("update_work_package_command", {
-    request: {
-      ...rest,
-      ...(estimate !== undefined ? { estimate: toEstimateWire(estimate) } : {}),
-    },
-  });
-  return fromRoadmapGraphDto(dto);
+export async function updateWorkPackage(
+  request: UpdateWorkPackageRequest,
+): Promise<SaveWorkPackageResult> {
+  return saveWorkPackage(request);
 }

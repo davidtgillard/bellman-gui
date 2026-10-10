@@ -9,7 +9,7 @@ import {
 } from "./support/fixtures";
 
 const PROJECT = { id: "project/billing", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
+const INITIATIVE = { id: "initiative/reduce-churn", type: "initiative" };
 
 function graphScenario(settings?: Scenario["settings"]): Scenario {
   return {
@@ -17,7 +17,7 @@ function graphScenario(settings?: Scenario["settings"]): Scenario {
       {
         root: "/roadmap",
         editable: true,
-        nodes: [PROJECT, GOAL],
+        nodes: [PROJECT, INITIATIVE],
         links: [],
         link_types: [],
         label: null,

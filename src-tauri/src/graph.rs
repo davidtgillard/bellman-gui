@@ -162,7 +162,7 @@ fn deduplicate_graph_nodes(
     (canonical_nodes, id_aliases)
 }
 
-const TYPE_QUALIFIED_KINDS: &[&str] = &["initiative", "project", "milestone", "goal"];
+const TYPE_QUALIFIED_KINDS: &[&str] = &["initiative", "project", "milestone"];
 
 /// Builds the Bellman logical id for a live registry instance.
 ///
@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn loads_example_fixture() {
         let graph = load_roadmap_graph(&fixture_root()).expect("fixture should load");
-        assert_eq!(graph.nodes.len(), 6);
+        assert_eq!(graph.nodes.len(), 5);
         assert_eq!(graph.links.len(), 2);
         assert!(graph.editable);
         assert!(!graph.link_types.is_empty());

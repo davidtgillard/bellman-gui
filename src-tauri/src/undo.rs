@@ -19,11 +19,10 @@ const UNDO_STACK_LIMIT: usize = 50;
 
 /// Directories whose files (markdown nodes, `work-packages.yaml`) are managed
 /// by structural edits and therefore included in snapshots.
-const NODE_DIRS: [&str; 5] = [
+const NODE_DIRS: [&str; 4] = [
     "initiatives",
     "projects",
     "milestones",
-    "goals",
     "work-packages",
 ];
 
@@ -477,7 +476,7 @@ mod tests {
     fn seed_roadmap(root: &Path) {
         write(&root.join(".fits/registry.json"), "{\"registry\":0}");
         write(&root.join("links/links.json"), "{\"links\":[]}");
-        write(&root.join("goals/reduce-churn.md"), "# original\n");
+        write(&root.join("milestones/ga-release.md"), "# original\n");
     }
 
     fn push_edit(state: &UndoState, root: &Path, label: &str, mutate: impl FnOnce(&Path)) {
@@ -502,21 +501,21 @@ mod tests {
 
         let before = capture(root).expect("capture before");
 
-        write(&root.join("goals/new-goal.md"), "# new goal\n");
+        write(&root.join("milestones/new-milestone.md"), "# new goal\n");
         write(&root.join(".fits/registry.json"), "{\"registry\":1}");
         let after = capture(root).expect("capture after");
 
         state
-            .push(&root_str, "create goal new-goal".to_string(), before, after)
+            .push(&root_str, "create milestone new-milestone".to_string(), before, after)
             .expect("push edit");
 
         let status = state.state(&root_str).expect("state");
         assert!(status.can_undo);
         assert!(!status.can_redo);
-        assert_eq!(status.undo_label.as_deref(), Some("create goal new-goal"));
+        assert_eq!(status.undo_label.as_deref(), Some("create milestone new-milestone"));
 
         assert!(state.undo(&root_str).expect("undo"));
-        assert!(!root.join("goals/new-goal.md").exists());
+        assert!(!root.join("milestones/new-milestone.md").exists());
         assert_eq!(
             fs::read_to_string(root.join(".fits/registry.json")).expect("read registry"),
             "{\"registry\":0}"
@@ -526,7 +525,7 @@ mod tests {
         assert!(status.can_redo);
 
         assert!(state.redo(&root_str).expect("redo"));
-        assert!(root.join("goals/new-goal.md").exists());
+        assert!(root.join("milestones/new-milestone.md").exists());
         assert_eq!(
             fs::read_to_string(root.join(".fits/registry.json")).expect("read registry"),
             "{\"registry\":1}"
@@ -554,8 +553,8 @@ mod tests {
 
         let state = UndoState::default();
         state.load_or_reset(root).expect("load");
-        push_edit(&state, root, "create goal new-goal", |root| {
-            write(&root.join("goals/new-goal.md"), "# new goal\n");
+        push_edit(&state, root, "create milestone new-milestone", |root| {
+            write(&root.join("milestones/new-milestone.md"), "# new goal\n");
             write(&root.join(".fits/registry.json"), "{\"registry\":1}");
         });
         assert!(history_path(root).is_file());
@@ -564,10 +563,10 @@ mod tests {
         reloaded.load_or_reset(root).expect("reload");
         let status = reloaded.state(&root_str).expect("state");
         assert!(status.can_undo);
-        assert_eq!(status.undo_label.as_deref(), Some("create goal new-goal"));
+        assert_eq!(status.undo_label.as_deref(), Some("create milestone new-milestone"));
 
         assert!(reloaded.undo(&root_str).expect("undo"));
-        assert!(!root.join("goals/new-goal.md").exists());
+        assert!(!root.join("milestones/new-milestone.md").exists());
     }
 
     #[test]
@@ -579,8 +578,8 @@ mod tests {
 
         let state = UndoState::default();
         state.load_or_reset(root).expect("load");
-        push_edit(&state, root, "create goal new-goal", |root| {
-            write(&root.join("goals/new-goal.md"), "# new goal\n");
+        push_edit(&state, root, "create milestone new-milestone", |root| {
+            write(&root.join("milestones/new-milestone.md"), "# new goal\n");
         });
         assert!(state.undo(&root_str).expect("undo"));
 
@@ -589,7 +588,7 @@ mod tests {
         let status = reloaded.state(&root_str).expect("state");
         assert!(!status.can_undo);
         assert!(status.can_redo);
-        assert_eq!(status.redo_label.as_deref(), Some("create goal new-goal"));
+        assert_eq!(status.redo_label.as_deref(), Some("create milestone new-milestone"));
     }
 
     #[test]
@@ -601,12 +600,12 @@ mod tests {
 
         let state = UndoState::default();
         state.load_or_reset(root).expect("load");
-        push_edit(&state, root, "create goal new-goal", |root| {
-            write(&root.join("goals/new-goal.md"), "# new goal\n");
+        push_edit(&state, root, "create milestone new-milestone", |root| {
+            write(&root.join("milestones/new-milestone.md"), "# new goal\n");
         });
         assert!(history_path(root).is_file());
 
-        write(&root.join("goals/reduce-churn.md"), "# changed externally\n");
+        write(&root.join("milestones/ga-release.md"), "# changed externally\n");
 
         let reloaded = UndoState::default();
         reloaded.load_or_reset(root).expect("reload");
@@ -624,8 +623,8 @@ mod tests {
 
         let state = UndoState::default();
         state.load_or_reset(root).expect("load");
-        push_edit(&state, root, "create goal new-goal", |root| {
-            write(&root.join("goals/new-goal.md"), "# new goal\n");
+        push_edit(&state, root, "create milestone new-milestone", |root| {
+            write(&root.join("milestones/new-milestone.md"), "# new goal\n");
         });
 
         write(
@@ -655,9 +654,9 @@ mod tests {
         for index in 0..=UNDO_STACK_LIMIT {
             let label = format!("edit {index}");
             push_edit(&state, root, &label, |root| {
-                let content = format!("# goal {index}\n");
+                let content = format!("# milestone {index}\n");
                 write(
-                    &root.join(format!("goals/goal-{index}.md")),
+                    &root.join(format!("milestones/milestone-{index}.md")),
                     &content,
                 );
             });

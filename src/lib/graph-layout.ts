@@ -34,7 +34,6 @@ export const EXAMPLE_WORK_PACKAGE_LAYOUT: WorkPackageLayout = {
   version: 1,
   kind: "bellman-gui-work-package-layout",
   topLevel: {
-    "goal/reduce-churn": { x: -160, y: -40 },
     "initiative/explore-ml-ranking": { x: 140, y: -70 },
     "project/billing-redesign": { x: -20, y: 110 },
     "milestone/ga-release": { x: 170, y: 100 },

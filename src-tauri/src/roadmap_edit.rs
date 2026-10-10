@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use uuid::Uuid;
 
+use crate::attributes::{
+    append_classifications_markdown, classifications_yaml, load_attribute_catalog,
+    validate_assignments, with_legal_pins, AttributeAssignmentDto,
+};
 use crate::bellman_cmd::run_bellman;
 use crate::graph::{
     all_link_artifact_paths, build_registry_index, load_registry_document, registry_path,
@@ -526,6 +530,7 @@ pub fn set_work_package_fields(
     description: &str,
     dependencies: &[String],
     estimate: Option<&WorkPackageEstimate>,
+    classifications: Option<&[AttributeAssignmentDto]>,
 ) -> Result<(), String> {
     let index = read_registry_index(root)?;
     let project_id = format!("project/{project}");
@@ -584,6 +589,19 @@ pub fn set_work_package_fields(
             YamlValue::from("estimate"),
             estimate_yaml_value_or_unknown(estimate),
         );
+    }
+    if let Some(assignments) = classifications {
+        let catalog = load_attribute_catalog(root);
+        let stripped = with_legal_pins(assignments, &catalog);
+        validate_assignments("work_package", &catalog, &stripped)?;
+        match classifications_yaml(&stripped) {
+            Some(value) => {
+                mapping.insert(YamlValue::from("classifications"), value);
+            }
+            None => {
+                mapping.remove(YamlValue::from("classifications"));
+            }
+        }
     }
 
     let formatted = serde_yaml::to_string(&document)
@@ -686,7 +704,7 @@ pub(crate) fn bellman_entity_name(node_id: &str, node_type: &str) -> String {
 
 fn node_delete_target(node_id: &str, node_type: &str) -> Result<(String, Option<String>), String> {
     match node_type {
-        "initiative" | "project" | "milestone" | "goal" => {
+        "initiative" | "project" | "milestone" => {
             Ok((bellman_entity_name(node_id, node_type), None))
         }
         "work_package" => {
@@ -1282,14 +1300,24 @@ fn remove_markdown_owned_link(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
     Initiative,
     Project,
     Milestone,
-    Goal,
     WorkPackage,
+}
+
+impl NodeKind {
+    fn as_registry_type(&self) -> &'static str {
+        match self {
+            Self::Initiative => "initiative",
+            Self::Project => "project",
+            Self::Milestone => "milestone",
+            Self::WorkPackage => "work_package",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1303,6 +1331,8 @@ pub struct CreateNodeRequest {
     pub parent: Option<String>,
     /// Optimistic / likely / pessimistic duration tokens, or `"unknown"`.
     pub estimate: Option<EstimateInput>,
+    #[serde(default)]
+    pub classifications: Vec<AttributeAssignmentDto>,
 }
 
 pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<(), String> {
@@ -1313,6 +1343,12 @@ pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<
             request.roadmap_root
         ));
     }
+
+    let catalog = load_attribute_catalog(&root);
+    let stripped = with_legal_pins(&request.classifications, &catalog);
+    validate_assignments(request.node_kind.as_registry_type(), &catalog, &stripped)?;
+    // `bellman create` already registers the entity in pyfits. Extra GUI sync is
+    // only needed after we append classifications to markdown or YAML.
 
     match request.node_kind {
         NodeKind::Initiative => {
@@ -1354,19 +1390,6 @@ pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<
             )
             .await?;
         }
-        NodeKind::Goal => {
-            run_bellman_for_request(
-                app,
-                &[
-                    "create",
-                    "goal",
-                    "--path",
-                    &request.roadmap_root,
-                    &request.name,
-                ],
-            )
-            .await?;
-        }
         NodeKind::WorkPackage => {
             let project = request
                 .project
@@ -1390,8 +1413,37 @@ pub async fn create_node(app: &AppHandle, request: CreateNodeRequest) -> Result<
                 estimate.as_ref(),
                 parent_title.as_deref(),
             )?;
+            if !stripped.is_empty() {
+                set_work_package_fields(
+                    &root,
+                    &project,
+                    &request.name,
+                    &description,
+                    &[],
+                    estimate.as_ref(),
+                    Some(&stripped),
+                )?;
+            }
             run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
         }
+    }
+
+    if !matches!(request.node_kind, NodeKind::WorkPackage) && !stripped.is_empty() {
+        let path = match request.node_kind {
+            NodeKind::Initiative => root.join("initiatives").join(format!("{}.md", request.name)),
+            NodeKind::Milestone => root.join("milestones").join(format!("{}.md", request.name)),
+            NodeKind::Project => root
+                .join("projects")
+                .join(&request.name)
+                .join(format!("{}.md", request.name)),
+            NodeKind::WorkPackage => unreachable!(),
+        };
+        let raw = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        let updated = append_classifications_markdown(&raw, &stripped);
+        fs::write(&path, updated)
+            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
     }
 
     Ok(())
@@ -1481,7 +1533,7 @@ pub async fn remove_node(app: &AppHandle, request: RemoveNodeRequest) -> Result<
             remove_work_package(&root, &project, &name)?;
             run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
         }
-        "initiative" | "project" | "milestone" | "goal" => {
+        "initiative" | "project" | "milestone" => {
             let delete_result = run_bellman_for_request(
                 app,
                 &["delete", "--path", &request.roadmap_root, &name],
@@ -1510,6 +1562,8 @@ pub struct UpdateWorkPackageRequest {
     pub dependencies: Vec<String>,
     /// Optimistic / likely / pessimistic duration tokens, or `"unknown"`.
     pub estimate: Option<EstimateInput>,
+    #[serde(default)]
+    pub classifications: Vec<AttributeAssignmentDto>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1620,7 +1674,7 @@ pub async fn rename_node(app: &AppHandle, request: RenameNodeRequest) -> Result<
 
     let node_type = request.node_type.as_str();
     match node_type {
-        "initiative" | "project" | "milestone" | "goal" => {}
+        "initiative" | "project" | "milestone" => {}
         other => return Err(format!("cannot rename node type {other:?}")),
     }
 
@@ -1654,10 +1708,7 @@ pub async fn rename_node(app: &AppHandle, request: RenameNodeRequest) -> Result<
     find_node_id_by_type_and_name(&updated, node_type, &new_name)
 }
 
-pub async fn update_work_package(
-    app: &AppHandle,
-    request: UpdateWorkPackageRequest,
-) -> Result<(), String> {
+pub fn update_work_package(request: &UpdateWorkPackageRequest) -> Result<PathBuf, String> {
     let root = PathBuf::from(&request.roadmap_root);
     if !registry_path(&root).is_file() {
         return Err(format!(
@@ -1678,10 +1729,9 @@ pub async fn update_work_package(
         &request.description,
         &request.dependencies,
         estimate.as_ref(),
+        Some(&request.classifications),
     )?;
-    run_bellman_for_request(app, &["sync", &request.roadmap_root]).await?;
-
-    Ok(())
+    Ok(work_packages_path(&root, &project))
 }
 
 #[cfg(test)]
@@ -1720,9 +1770,9 @@ mod tests {
     fn removes_link_from_fixture_subgraph() {
         let _guard = fixture_lock();
         let root = fixture_root();
-        let link_id = "b7376ad8-67e8-4256-adc0-b71a7b64a745";
+        let link_id = "3a150a65-6676-444f-96ce-37d40be1c004";
         let subgraph = root.join(
-            "nodes/kind/work_scope work_scope/billing-redesign/.fits/subgraph.jsonc",
+            "nodes/kind/project project/billing-redesign/.fits/subgraph.jsonc",
         );
         let backup = fs::read_to_string(&subgraph).expect("read subgraph");
 
@@ -1792,6 +1842,7 @@ mod tests {
             "New description.",
             &["wp-two".to_string()],
             None,
+            None,
         )
         .unwrap();
 
@@ -1823,6 +1874,7 @@ mod tests {
             "Old.",
             &[],
             Some(&["1w".into(), "2w".into(), "4w".into()]),
+            None,
         )
         .unwrap();
         let with_estimate =
@@ -1830,7 +1882,7 @@ mod tests {
         assert!(with_estimate.contains("estimate:"));
         assert!(with_estimate.contains("1w"));
 
-        set_work_package_fields(root, "billing", "wp-one", "Old.", &[], None).unwrap();
+        set_work_package_fields(root, "billing", "wp-one", "Old.", &[], None, None).unwrap();
         let cleared =
             fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
         assert!(cleared.contains("estimate: unknown"));
@@ -1944,9 +1996,41 @@ mod tests {
         )
         .unwrap();
 
-        let result = set_work_package_fields(root, "billing", "ghost", "x", &[], None);
+        let result = set_work_package_fields(root, "billing", "ghost", "x", &[], None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn set_work_package_fields_rejects_unknown_attribute() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_project_registry(root);
+        fs::create_dir_all(root.join("projects/billing")).unwrap();
+        fs::write(
+            root.join("projects/billing/work-packages.yaml"),
+            "version: 1\n\nwork_packages:\n  - title: wp-one\n    description: Old.\n    dependencies: []\n",
+        )
+        .unwrap();
+        let assignments = vec![AttributeAssignmentDto {
+            name: "priority".to_string(),
+            value: json!("P1"),
+            payload: serde_json::Map::new(),
+            pinned_version: None,
+        }];
+        let result = set_work_package_fields(
+            root,
+            "billing",
+            "wp-one",
+            "Old.",
+            &[],
+            None,
+            Some(&assignments),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown attribute"));
+        let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
+        assert!(!raw.contains("classifications"));
     }
 
     #[test]
@@ -1968,11 +2052,12 @@ mod tests {
             "Parent.",
             &[],
             Some(&["1w".into(), "2w".into(), "4w".into()]),
+            None,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("must not have its own estimate"));
 
-        set_work_package_fields(root, "billing", "wp-parent", "Updated.", &[], None).unwrap();
+        set_work_package_fields(root, "billing", "wp-parent", "Updated.", &[], None, None).unwrap();
         let raw = fs::read_to_string(root.join("projects/billing/work-packages.yaml")).unwrap();
         assert!(raw.contains("Updated."));
         let document: YamlValue = serde_yaml::from_str(&raw).unwrap();

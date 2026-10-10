@@ -48,7 +48,7 @@ describe("eligibleDependencyNodeIds", () => {
         nodes: [
           { id: ORIGIN, type: "work_package" },
           { id: OVERFLOW, type: "work_package" },
-          { id: "goal/reduce-churn", type: "goal" },
+          { id: "initiative/reduce-churn", type: "initiative" },
           { id: PDF, type: "work_package" },
         ],
       }),

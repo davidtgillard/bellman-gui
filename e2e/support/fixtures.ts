@@ -42,6 +42,13 @@ export interface NodeDetailFixture {
         available_titles: string[];
       }
     | null;
+  catalog?: unknown[];
+  classifications?: Array<{
+    name: string;
+    value: unknown;
+    payload?: Record<string, unknown>;
+    pinned_version?: string | null;
+  }>;
 }
 
 export interface Scenario {
@@ -56,8 +63,11 @@ export interface Scenario {
   nodeDetails?: Record<string, NodeDetailFixture>;
   saveError?: string;
   saveDependencyWarnings?: Array<{ line: number | null; message: string }>;
+  saveOtherIssues?: Array<{ line: number | null; message: string }>;
   saveSyncSkipped?: boolean;
   saveGraphLinks?: RoadmapState["links"];
+  /** Attribute definitions returned by `load_attribute_catalog_command`. */
+  attributeCatalog?: unknown[];
   layout?: {
     version: number;
     kind: string;

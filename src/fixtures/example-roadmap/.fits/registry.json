@@ -4,13 +4,6 @@
   "kind": "fits-registry",
   "node_types": [
     {
-      "type": "goal",
-      "container_node": "kind",
-      "next": 1,
-      "autonumber": true,
-      "tombstones": []
-    },
-    {
       "type": "initiative",
       "extends": "work_scope",
       "container_node": "kind",
@@ -229,20 +222,6 @@
       "tombstones": []
     },
     {
-      "link_type": "supports",
-      "in_type": "project",
-      "out_type": "goal",
-      "next": 1,
-      "tombstones": []
-    },
-    {
-      "link_type": "supports_wp",
-      "in_type": "work_package",
-      "out_type": "goal",
-      "next": 1,
-      "tombstones": []
-    },
-    {
       "link_type": "targets",
       "in_type": "project",
       "out_type": "milestone",
@@ -258,7 +237,7 @@
     }
   ],
   "nested_scopes": {
-    "85efc093-31d1-4162-99f2-0d33c871066a": {
+    "fe60011f-b4a7-4bb9-9c62-4e079754a0ae": {
       "parent_of": {
         "next": 2,
         "tombstones": []
@@ -271,87 +250,65 @@
   },
   "instances": [
     {
-      "guid": "2ce402a6-844f-441e-8016-06866cc4af10",
-      "name": "goal",
-      "type": "kind",
-      "kind": "node",
-      "scope": "root"
-    },
-    {
-      "guid": "51986622-a48a-43ca-9cea-46566a56d67e",
+      "guid": "36a41e69-0a45-4db7-8741-c6bb0d76b4a3",
       "name": "initiative",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "f960f3d9-eef7-4e6e-a416-341da5cf3066",
+      "guid": "39785cef-647a-4905-bf17-8d9e9a8e1fd5",
       "name": "project",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "e06054f7-94d7-4bca-8023-d65c6384669c",
+      "guid": "4e512abb-8009-4492-85f8-badd5a29144a",
       "name": "milestone",
       "type": "kind",
       "kind": "node",
       "scope": "root"
     },
     {
-      "guid": "d3f004c8-9cf2-4bf3-862a-2f79b3f68c34",
-      "name": "work_scope",
-      "type": "kind",
-      "kind": "node",
-      "scope": "root"
-    },
-    {
-      "guid": "acbee277-32be-4ec8-8974-a8122c718e1b",
+      "guid": "57642866-56cd-4d04-826b-ce257054f4f6",
       "name": "explore-ml-ranking",
       "type": "initiative",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "d3f004c8-9cf2-4bf3-862a-2f79b3f68c34"
+      "parent_guid": "36a41e69-0a45-4db7-8741-c6bb0d76b4a3"
     },
     {
-      "guid": "85efc093-31d1-4162-99f2-0d33c871066a",
+      "guid": "fe60011f-b4a7-4bb9-9c62-4e079754a0ae",
       "name": "billing-redesign",
       "type": "project",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "d3f004c8-9cf2-4bf3-862a-2f79b3f68c34"
+      "parent_guid": "39785cef-647a-4905-bf17-8d9e9a8e1fd5"
     },
     {
-      "guid": "435403b0-0914-4cd2-b98c-62ad4dc872b0",
+      "guid": "198d55c4-1a8c-4b57-aabf-55ee7d49c360",
       "name": "wp-invoicing",
       "type": "work_package",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "85efc093-31d1-4162-99f2-0d33c871066a"
+      "parent_guid": "fe60011f-b4a7-4bb9-9c62-4e079754a0ae"
     },
     {
-      "guid": "07c31952-a7d9-48d7-a9c5-06007e404d98",
+      "guid": "060a51c5-a2cc-45f5-9cb5-9cde98bc8248",
       "name": "wp-pdf-export",
       "type": "work_package",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "85efc093-31d1-4162-99f2-0d33c871066a"
+      "parent_guid": "fe60011f-b4a7-4bb9-9c62-4e079754a0ae"
     },
     {
-      "guid": "d77fec45-fe23-4291-b401-c31c7dd794bb",
+      "guid": "f06b4f6b-b15f-499f-8368-bad4a78dccb0",
       "name": "ga-release",
       "type": "milestone",
       "kind": "node",
       "scope": "nested",
-      "parent_guid": "e06054f7-94d7-4bca-8023-d65c6384669c"
-    },
-    {
-      "guid": "4197e22a-621e-461c-8895-9ab4d4dcf276",
-      "name": "reduce-churn",
-      "type": "goal",
-      "kind": "node",
-      "scope": "nested",
-      "parent_guid": "2ce402a6-844f-441e-8016-06866cc4af10"
+      "parent_guid": "4e512abb-8009-4492-85f8-badd5a29144a"
     }
   ],
   "instance_renames": []

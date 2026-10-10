@@ -3,6 +3,11 @@ use serde_yaml::Value as YamlValue;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::attributes::{
+    append_classifications_markdown, load_attribute_catalog, parse_classifications_markdown,
+    validate_assignments, with_legal_pins, yaml_classifications, AttributeAssignmentDto,
+    AttributeDefinitionDto,
+};
 use crate::graph::{load_roadmap_graph, node_label};
 use crate::work_package_estimate::{estimate_wire_from_yaml, EstimateInput};
 
@@ -74,6 +79,8 @@ pub struct NodeDetailDto {
     pub markdown: String,
     pub source_path: Option<String>,
     pub work_package: Option<WorkPackageDetailDto>,
+    pub catalog: Vec<AttributeDefinitionDto>,
+    pub classifications: Vec<AttributeAssignmentDto>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,7 +110,6 @@ fn md_path_for(root: &Path, node_id: &str, node_type: &str) -> Result<PathBuf, S
     let (dir, prefix) = match node_type {
         "initiative" => ("initiatives", "initiative/"),
         "milestone" => ("milestones", "milestone/"),
-        "goal" => ("goals", "goal/"),
         "project" => ("projects", "project/"),
         other => {
             return Err(format!(
@@ -320,7 +326,7 @@ fn resolve_node_markdown(
     node_type: &str,
 ) -> Result<(String, PathBuf, Option<WorkPackageDetailDto>), String> {
     match node_type {
-        "initiative" | "project" | "milestone" | "goal" => {
+        "initiative" | "project" | "milestone" => {
             let path = md_path_for(root, node_id, node_type)?;
             let markdown = read_markdown_file(&path)?;
             Ok((markdown, path, None))
@@ -339,6 +345,39 @@ fn resolve_node_markdown(
     }
 }
 
+fn work_package_classifications(
+    root: &Path,
+    node_id: &str,
+) -> Result<Vec<AttributeAssignmentDto>, String> {
+    let parts: Vec<&str> = node_id.split('/').collect();
+    if parts.len() < 3 || parts[0] != "project" {
+        return Err(format!("invalid work package id: {node_id}"));
+    }
+    let project = parts[1];
+    let package_title = parts[parts.len() - 1];
+    let path = root
+        .join("projects")
+        .join(project)
+        .join("work-packages.yaml");
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let document: YamlValue = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("invalid YAML in {}: {error}", path.display()))?;
+    let work_packages = document
+        .as_mapping()
+        .and_then(|map| map.get(YamlValue::from("work_packages")))
+        .and_then(YamlValue::as_sequence)
+        .ok_or_else(|| "work_packages missing".to_string())?;
+    let Some(entry) = find_work_package(work_packages, package_title) else {
+        return Ok(Vec::new());
+    };
+    Ok(yaml_classifications(
+        entry
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("classifications"))),
+    ))
+}
+
 pub fn load_node_detail(root: &Path, node_id: &str) -> Result<NodeDetailDto, String> {
     let graph = load_roadmap_graph(root)?;
     let node = graph
@@ -349,6 +388,12 @@ pub fn load_node_detail(root: &Path, node_id: &str) -> Result<NodeDetailDto, Str
 
     let (markdown, source_path, work_package) =
         resolve_node_markdown(root, node_id, &node.node_type)?;
+    let catalog = load_attribute_catalog(root);
+    let classifications = if node.node_type == "work_package" {
+        work_package_classifications(root, node_id).unwrap_or_default()
+    } else {
+        parse_classifications_markdown(&markdown)
+    };
 
     Ok(NodeDetailDto {
         node_id: node_id.to_string(),
@@ -357,6 +402,8 @@ pub fn load_node_detail(root: &Path, node_id: &str) -> Result<NodeDetailDto, Str
         markdown,
         source_path: Some(source_path.to_string_lossy().into_owned()),
         work_package,
+        catalog,
+        classifications,
     })
 }
 
@@ -380,7 +427,16 @@ pub fn write_node_markdown(
     }
 
     let path = md_path_for(root, node_id, &node.node_type)?;
-    fs::write(&path, markdown)
+    let catalog = load_attribute_catalog(root);
+    let assignments = parse_classifications_markdown(markdown);
+    let stripped = with_legal_pins(&assignments, &catalog);
+    validate_assignments(&node.node_type, &catalog, &stripped)?;
+    let to_write = if stripped == assignments {
+        markdown.to_string()
+    } else {
+        append_classifications_markdown(markdown, &stripped)
+    };
+    fs::write(&path, to_write)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
 
     load_node_detail(root, node_id)
@@ -637,6 +693,26 @@ mod tests {
         let on_disk = fs::read_to_string(root.join("initiatives/alpha.md")).unwrap();
         assert!(on_disk.contains("New body."));
         assert!(!on_disk.contains("Old body."));
+    }
+
+    #[test]
+    fn rejects_unknown_classification_in_markdown() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        write_registry(root);
+        fs::create_dir_all(root.join("initiatives")).unwrap();
+        let original = "# Alpha\n\nOld body.\n";
+        fs::write(root.join("initiatives/alpha.md"), original).unwrap();
+
+        let result = write_node_markdown(
+            root,
+            "initiative/alpha",
+            "# Alpha\n\nNew body.\n\n## Classifications\n\n- mystery: nope\n",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown attribute"));
+        let on_disk = fs::read_to_string(root.join("initiatives/alpha.md")).unwrap();
+        assert_eq!(on_disk, original);
     }
 
     #[test]

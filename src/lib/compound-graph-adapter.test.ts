@@ -39,7 +39,7 @@ describe("compound-graph-adapter", () => {
       data: { isCompound: node.isCompound, isOverflow: node.isOverflow },
     }));
     expect(isCompoundGraphNodes(nodes)).toBe(true);
-    expect(isCompoundGraphNodes([{ id: "solo", data: { type: "goal" } }])).toBe(false);
+    expect(isCompoundGraphNodes([{ id: "solo", data: { type: "initiative" } }])).toBe(false);
   });
 
   it("builds a scene with two root containers and leaf children", () => {

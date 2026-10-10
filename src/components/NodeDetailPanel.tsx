@@ -1,13 +1,24 @@
 import type { MutableRefObject } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { nodeTypeLabel } from "../lib/graph";
 import type { NodeDetail, DependencyWarning } from "../lib/node-detail";
 import {
+  classificationsAreValid,
+  joinMarkdown,
+  issueMentionsAttribute,
+  splitClassifications,
+  withLegalPins,
+  type AttributeAssignment,
+} from "../lib/attributes";
+import {
   NodeMarkdownEditor,
   type SaveMarkdownOptions,
 } from "./NodeMarkdownEditor";
 import { WorkPackageEditor, type SaveWorkPackageInput } from "./WorkPackageEditor";
+import { ClassificationChips } from "./ClassificationChips";
+import { ClassificationsEditor } from "./ClassificationsEditor";
 
 interface NodeDetailPanelProps {
   detail: NodeDetail | null;
@@ -18,6 +29,7 @@ interface NodeDetailPanelProps {
   saving: boolean;
   saveError: string | null;
   dependencyWarnings?: DependencyWarning[];
+  otherIssues?: DependencyWarning[];
   syncSkipped?: boolean;
   roadmapRoot: string;
   onStartEdit: () => void;
@@ -57,6 +69,7 @@ export function NodeDetailPanel({
   saving,
   saveError,
   dependencyWarnings = [],
+  otherIssues = [],
   syncSkipped = false,
   roadmapRoot,
   onStartEdit,
@@ -99,6 +112,9 @@ export function NodeDetailPanel({
 
   const isWorkPackage = detail.nodeType === "work_package";
   const canEdit = editable && (!isWorkPackage || detail.workPackage !== null);
+  const catalog = detail.catalog ?? [];
+  const classifications = detail.classifications ?? [];
+  const body = splitClassifications(detail.markdown).body;
 
   return (
     <div className={editing ? "node-detail-panel node-detail-panel-editing" : "node-detail-panel"}>
@@ -108,6 +124,13 @@ export function NodeDetailPanel({
         <p className="node-detail-id">{detail.nodeId}</p>
         {detail.sourcePath ? (
           <p className="node-detail-source">{detail.sourcePath}</p>
+        ) : null}
+        {!editing ? (
+          <ClassificationChips
+            nodeType={detail.nodeType}
+            catalog={catalog}
+            assignments={classifications}
+          />
         ) : null}
         {canEdit && !editing ? (
           <button type="button" className="node-detail-edit" onClick={onStartEdit}>
@@ -120,8 +143,14 @@ export function NodeDetailPanel({
         <WorkPackageEditor
           key={detail.nodeId}
           workPackage={detail.workPackage}
+          catalog={catalog}
+          classifications={classifications}
+          nodeType={detail.nodeType}
           saving={saving}
           backendError={saveError}
+          dependencyWarnings={dependencyWarnings}
+          otherIssues={otherIssues}
+          syncSkipped={syncSkipped}
           onSave={onSaveWorkPackage}
           onCancel={onCancelEdit}
           onDirtyChange={onDirtyChange}
@@ -129,15 +158,18 @@ export function NodeDetailPanel({
           dependencyToggleRef={dependencyToggleRef}
         />
       ) : editing ? (
-        <NodeMarkdownEditor
+        <MarkdownClassificationEditor
           key={detail.nodeId}
           roadmapRoot={roadmapRoot}
           nodeId={detail.nodeId}
           nodeType={detail.nodeType}
-          initialMarkdown={detail.markdown}
+          body={body}
+          catalog={catalog}
+          classifications={classifications}
           saving={saving}
-          backendError={saveError}
+          saveError={saveError}
           dependencyWarnings={dependencyWarnings}
+          otherIssues={otherIssues}
           syncSkipped={syncSkipped}
           onSave={onSaveMarkdown}
           onCancel={onCancelEdit}
@@ -145,9 +177,100 @@ export function NodeDetailPanel({
         />
       ) : (
         <article className="node-detail-markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.markdown}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
         </article>
       )}
+    </div>
+  );
+}
+
+function MarkdownClassificationEditor({
+  roadmapRoot,
+  nodeId,
+  nodeType,
+  body,
+  catalog,
+  classifications,
+  saving,
+  saveError,
+  dependencyWarnings,
+  otherIssues,
+  syncSkipped,
+  onSave,
+  onCancel,
+  onDirtyChange,
+}: {
+  roadmapRoot: string;
+  nodeId: string;
+  nodeType: string;
+  body: string;
+  catalog: NodeDetail["catalog"];
+  classifications: AttributeAssignment[];
+  saving: boolean;
+  saveError: string | null;
+  dependencyWarnings: DependencyWarning[];
+  otherIssues: DependencyWarning[];
+  syncSkipped: boolean;
+  onSave: (markdown: string, options?: SaveMarkdownOptions) => void;
+  onCancel: () => void;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
+  const [draft, setDraft] = useState(classifications);
+  const [bodyDirty, setBodyDirty] = useState(false);
+  const classDirty = useMemo(
+    () => JSON.stringify(draft) !== JSON.stringify(classifications),
+    [classifications, draft],
+  );
+  const valid = classificationsAreValid(
+    nodeType,
+    catalog,
+    draft.filter((item) => item.value !== ""),
+  );
+
+  useEffect(() => {
+    onDirtyChange(bodyDirty || classDirty);
+  }, [bodyDirty, classDirty, onDirtyChange]);
+
+  return (
+    <div className="node-edit-body">
+      <ClassificationsEditor
+        nodeType={nodeType}
+        catalog={catalog}
+        assignments={draft}
+        disabled={saving}
+        serverIssues={otherIssues}
+        onChange={setDraft}
+      />
+      <NodeMarkdownEditor
+        roadmapRoot={roadmapRoot}
+        nodeId={nodeId}
+        nodeType={nodeType}
+        initialMarkdown={body}
+        saving={saving}
+        backendError={saveError}
+        dependencyWarnings={dependencyWarnings}
+        otherIssues={otherIssues.filter(
+          (issue) => !catalog.some((definition) => issueMentionsAttribute(issue.message, definition.name)),
+        )}
+        syncSkipped={syncSkipped}
+        saveBlocked={!valid}
+        extraDirty={classDirty}
+        onSave={(markdown, options) =>
+          onSave(
+            joinMarkdown(
+              markdown,
+              withLegalPins(
+                draft.filter((item) => item.value !== ""),
+                catalog,
+              ),
+              catalog,
+            ),
+            options,
+          )
+        }
+        onCancel={onCancel}
+        onDirtyChange={setBodyDirty}
+      />
     </div>
   );
 }

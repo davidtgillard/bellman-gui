@@ -12,7 +12,6 @@ import {
 const INITIATIVE_A = { id: "initiative/settings-manager", type: "initiative" };
 const INITIATIVE_B = { id: "initiative/billing-redesign", type: "initiative" };
 const PROJECT = { id: "project/billing", type: "project" };
-const GOAL = { id: "goal/reduce-churn", type: "goal" };
 
 const PRECEDES_LINK = {
   id: "precedes_FS_Mandatory_scope--settings-manager--billing-redesign",
@@ -31,11 +30,6 @@ const LINK_TYPES = [
     link_type: "precedes_FF_Discretionary_scope",
     in_type: "initiative",
     out_type: "initiative",
-  },
-  {
-    link_type: "supports",
-    in_type: "work_scope",
-    out_type: "goal",
   },
 ];
 
@@ -61,7 +55,7 @@ function createLinkScenario(): Scenario {
       {
         root: "/roadmap",
         editable: true,
-        nodes: [INITIATIVE_A, INITIATIVE_B, PROJECT, GOAL],
+        nodes: [INITIATIVE_A, INITIATIVE_B, PROJECT],
         links: [],
         link_types: LINK_TYPES,
         label: null,

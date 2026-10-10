@@ -91,9 +91,9 @@ describe("buildMilestoneOverlayVisuals", () => {
   });
 
   it("ignores non-milestone nodes", () => {
-    const goal = {
-      data: vi.fn(() => "goal"),
-      id: () => "goal/x",
+    const initiative = {
+      data: vi.fn(() => "project"),
+      id: () => "initiative/x",
       style: () => "element",
       position: () => ({ x: 0, y: 0 }),
       selected: () => false,
@@ -103,8 +103,8 @@ describe("buildMilestoneOverlayVisuals", () => {
       pan: () => ({ x: 0, y: 0 }),
       zoom: () => 1,
       nodes: () => ({
-        forEach: (fn: (node: typeof goal) => void) => {
-          fn(goal);
+        forEach: (fn: (node: typeof initiative) => void) => {
+          fn(initiative);
         },
       }),
     };

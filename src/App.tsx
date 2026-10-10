@@ -110,10 +110,12 @@ import {
 } from "./lib/work-package-view";
 import {
   loadNodeDetail,
+  loadAttributeCatalog,
   saveNodeMarkdown,
   type DependencyWarning,
   type NodeDetail,
 } from "./lib/node-detail";
+import type { AttributeAssignment, AttributeDefinition } from "./lib/attributes";
 import type { WorkPackageEstimate } from "./lib/work-package-estimate";
 import { parseMilestoneDate } from "./lib/milestone-date";
 import { slugify } from "./lib/node-content-validation";
@@ -185,6 +187,7 @@ function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
+  const [attributeCatalog, setAttributeCatalog] = useState<AttributeDefinition[]>([]);
   const [linkingOriginId, setLinkingOriginId] = useState<string | null>(null);
   const [wpDraftDependencies, setWpDraftDependencies] = useState<string[]>([]);
   const wpDependencyToggleRef = useRef<(nodeId: string) => void>(() => {});
@@ -219,6 +222,7 @@ function App() {
   const [nodeEditSaving, setNodeEditSaving] = useState(false);
   const [nodeEditError, setNodeEditError] = useState<string | null>(null);
   const [dependencyWarnings, setDependencyWarnings] = useState<DependencyWarning[]>([]);
+  const [otherIssues, setOtherIssues] = useState<DependencyWarning[]>([]);
   const [syncSkipped, setSyncSkipped] = useState(false);
   const nodeEditDirtyRef = useRef(false);
   const nodeDetailRequestRef = useRef(0);
@@ -330,6 +334,27 @@ function App() {
   useEffect(() => {
     legendPersistReadyRef.current = false;
   }, [roadmapRoot]);
+
+  useEffect(() => {
+    if (!nodeDialogOpen) {
+      return;
+    }
+    let cancelled = false;
+    void loadAttributeCatalog(roadmapRoot)
+      .then((catalog) => {
+        if (!cancelled) {
+          setAttributeCatalog(catalog);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAttributeCatalog([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeDialogOpen, roadmapRoot]);
 
   useEffect(() => {
     if (!legendPersistReadyRef.current) {
@@ -742,6 +767,7 @@ function App() {
       project?: string;
       description?: string;
       estimate?: WorkPackageEstimate;
+      classifications?: AttributeAssignment[];
     }) => {
       setSaving(true);
       setError(null);
@@ -766,6 +792,7 @@ function App() {
           description: input.description,
           parent: parentId ?? undefined,
           estimate: input.estimate,
+          classifications: input.classifications,
         });
         const revealNodeId = findAddedNodeId(previousNodes, graph.nodes);
         let savedLayout: WorkPackageLayout | undefined;
@@ -1895,6 +1922,7 @@ function App() {
   const handleStartNodeEdit = useCallback(() => {
     setNodeEditError(null);
     setDependencyWarnings([]);
+    setOtherIssues([]);
     setSyncSkipped(false);
     nodeEditDirtyRef.current = false;
     setWpDraftDependencies(nodeDetail?.workPackage?.dependencies ?? []);
@@ -1905,6 +1933,7 @@ function App() {
     nodeEditDirtyRef.current = false;
     setNodeEditError(null);
     setDependencyWarnings([]);
+    setOtherIssues([]);
     setSyncSkipped(false);
     setNodeEditing(false);
   }, []);
@@ -1921,12 +1950,13 @@ function App() {
         const result = await saveNodeMarkdown(roadmapRoot, nodeId, markdown);
         setNodeDetail(result.detail);
         setDependencyWarnings(result.dependencyWarnings);
+        setOtherIssues(result.otherIssues);
         setSyncSkipped(result.syncSkipped);
         if (result.graph) {
           applyGraph(result.graph);
         }
         nodeEditDirtyRef.current = false;
-        // Keep the editor open when sync was skipped so dependency warnings stay visible.
+        // Keep the editor open when sync was skipped so validation issues stay visible.
         setNodeEditing(options?.keepOpen ?? result.syncSkipped);
         void refreshUndoState(roadmapRoot, editable);
       } catch (caught) {
@@ -1944,30 +1974,34 @@ function App() {
         return;
       }
       const nodeId = nodeDetail.nodeId;
-      const nodeType = nodeDetail.nodeType;
       setNodeEditSaving(true);
       setNodeEditError(null);
       try {
-        const graph = await updateWorkPackage({
+        const result = await updateWorkPackage({
           roadmap_root: roadmapRoot,
           node_id: nodeId,
           description: input.description,
           dependencies: input.dependencies,
           estimate: input.estimate,
+          classifications: input.classifications,
         });
-        applyGraph(graph);
-        const detail = await loadNodeDetail(graph.root, nodeId, nodeType);
-        setNodeDetail(detail);
+        setNodeDetail(result.detail);
+        setDependencyWarnings(result.dependencyWarnings);
+        setOtherIssues(result.otherIssues);
+        setSyncSkipped(result.syncSkipped);
+        if (result.graph) {
+          applyGraph(result.graph);
+        }
         nodeEditDirtyRef.current = false;
-        setNodeEditing(false);
-        void refreshUndoState(graph.root, graph.editable);
+        setNodeEditing(result.syncSkipped);
+        void refreshUndoState(roadmapRoot, editable);
       } catch (caught) {
         setNodeEditError(String(caught));
       } finally {
         setNodeEditSaving(false);
       }
     },
-    [applyGraph, nodeDetail, refreshUndoState, roadmapRoot],
+    [applyGraph, editable, nodeDetail, refreshUndoState, roadmapRoot],
   );
 
   const selectedNode = selectedNodeId
@@ -2211,6 +2245,7 @@ function App() {
                 saving={nodeEditSaving}
                 saveError={nodeEditError}
                 dependencyWarnings={dependencyWarnings}
+                otherIssues={otherIssues}
                 syncSkipped={syncSkipped}
                 roadmapRoot={roadmapRoot}
                 onStartEdit={handleStartNodeEdit}
@@ -2252,6 +2287,7 @@ function App() {
           setError(null);
         }}
         onCreate={(input) => void handleCreateNode(input)}
+        catalog={attributeCatalog}
       />
     </main>
   );
